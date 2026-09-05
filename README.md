@@ -81,7 +81,7 @@ struct.
 ## Setup
 
 ```sh
-pip install -U huggingface_hub mlx-vlm uv chad-code
+pip install -r requirements.txt
 git clone https://github.com/kaarelkaarelson/mlx-bench.git ~/mlx-bench
 ./scripts/download_model.sh
 ./scripts/build_dflash_draft.sh
