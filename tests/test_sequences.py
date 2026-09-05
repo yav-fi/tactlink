@@ -23,6 +23,9 @@ DOUBLE_FIST = [{"pattern": ["Closed_Fist", "Closed_Fist"],
 WIPER = [{"pattern": ["Victory", "v_flat", "Victory", "v_flat"],
           "window": 5.0, "action": "fly_pointed"}]
 
+# Action map the mechanism tests run against, independent of the shipped config.
+ACTIONS = {"Open_Palm": "takeoff", "Closed_Fist": "land", "ILoveYou": "return_home"}
+
 
 class _Hand:
     def __init__(self, point_dir=(0.0, 0.0)):
@@ -52,7 +55,8 @@ class Clock:
 
 
 def _interp(sequences, single_delay):
-    return GestureInterpreter(SequenceMatcher(sequences), single_delay=single_delay)
+    return GestureInterpreter(SequenceMatcher(sequences), single_delay=single_delay,
+                              actions=ACTIONS)
 
 
 def test_no_config_fires_single_immediately():
@@ -98,10 +102,20 @@ def test_combo_outside_window_does_not_fire():
     assert "takeoff" in fired and "land" in fired
 
 
+def test_shipped_action_config():
+    from gestures import _ACTION
+
+    assert _ACTION.get("Thumb_Up") == "takeoff"
+    assert _ACTION.get("Thumb_Down") == "land"
+    # disabled via null in config/gesture_actions.json
+    assert "Open_Palm" not in _ACTION
+    assert "Closed_Fist" not in _ACTION
+
+
 def test_non_combo_gesture_is_not_delayed():
     c = Clock(_interp(RETURN_HOME, 0.6))
-    c.hold("Victory", 0.5)
-    assert c.drain() == ["mode: position"]  # HEADING -> POSITION, no wait
+    c.hold("ILoveYou", 0.5)  # not part of RETURN_HOME's pattern
+    assert c.drain() == ["return_home"]  # fires immediately, no combo delay
 
 
 def test_double_token_needs_a_gap():
@@ -127,8 +141,7 @@ def test_wiper_combo_resolves_fly_direction():
         c.hold("Victory", 0.6).hold("None", 0.3)
         c.hold("v_flat", 0.6).hold("None", 0.4)
         fired = c.drain()
-        assert fired == [expected], (point_dir, fired)
-        assert "mode: heading" not in fired and "mode: position" not in fired
+        assert fired == [expected], (point_dir, fired)  # only the combo, nothing else
 
 
 def test_sequence_hint_reports_partial_combo():

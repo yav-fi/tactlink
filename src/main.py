@@ -49,17 +49,16 @@ def _load_mission_integration():
 
 # (start, end) seconds -> gesture held during the demo timeline.
 _DEMO_GESTURES = [
-    (1.5, 3.0, "Open_Palm"),      # takeoff
-    (7.0, 8.5, "Victory"),        # cycle flight mode
-    (12.0, 13.3, "Pointing_Up"),  # orbit the origin (until the next command)
-    (16.5, 17.2, "Open_Palm"),    # combo: open ->
-    (17.6, 18.3, "Closed_Fist"),  #        fist ->
-    (18.7, 19.4, "Open_Palm"),    #        open  => return home (within 3 s)
-    (22.0, 22.8, "Victory"),      # wiper combo: V up ->
-    (23.2, 24.0, "v_flat"),       #        V flat ->
-    (24.4, 25.2, "Victory"),      #        V up ->
-    (25.6, 26.4, "v_flat"),       #        V flat  => fly pointed (east)
-    (31.0, 33.0, "Closed_Fist"),  # land
+    (1.5, 2.7, "Thumb_Up"),       # arm + takeoff
+    (6.0, 7.3, "Pointing_Up"),    # orbit the origin (until the next command)
+    (11.0, 11.7, "Open_Palm"),    # combo: open ->
+    (12.1, 12.8, "Closed_Fist"),  #        fist ->
+    (13.2, 13.9, "Open_Palm"),    #        open  => return home (within 3 s)
+    (17.0, 17.8, "Victory"),      # wiper combo: V up ->
+    (18.2, 19.0, "v_flat"),       #        V flat ->
+    (19.4, 20.2, "Victory"),      #        V up ->
+    (20.6, 21.4, "v_flat"),       #        V flat  => fly pointed (east)
+    (25.0, 26.5, "Thumb_Down"),   # disarm + land
 ]
 
 

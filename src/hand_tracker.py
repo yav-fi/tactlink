@@ -43,6 +43,10 @@ _MODEL_PATH = os.path.join(
 _FINGER_TIPS = (4, 8, 12, 16, 20)
 _FINGER_PIPS = (2, 6, 10, 14, 18)
 
+# Ignore a canned gesture the model is not reasonably sure about - cuts the
+# flickery misreads that make single gestures feel unreliable.
+_GESTURE_MIN_SCORE = 0.55
+
 
 def _ensure_model() -> str:
     if not os.path.exists(_MODEL_PATH):
@@ -111,7 +115,8 @@ class HandTracker:
         gesture, score, source = "None", 0.0, "none"
         if result.gestures and result.gestures[0]:
             top = result.gestures[0][0]
-            gesture, score, source = top.category_name, float(top.score), "canned"
+            if top.category_name != "None" and float(top.score) >= _GESTURE_MIN_SCORE:
+                gesture, score, source = top.category_name, float(top.score), "canned"
 
         # Custom model wins when it is confident; canned gesture is the fallback.
         if self._custom and self._custom.loaded:

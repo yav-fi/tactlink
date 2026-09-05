@@ -41,18 +41,16 @@ COMBO_GRACE_SEC = 0.9     # keep holding pending singles this long after a combo
 _POINT_HORIZONTAL = 0.55  # |image dx| above which a point counts as left/right
 
 _DEFAULT_ACTION = {
-    "Open_Palm": "takeoff",
-    "Closed_Fist": "land",
-    "Victory": "cycle_mode",
-    "Thumb_Up": "speed_up",
-    "Thumb_Down": "speed_down",
-    "Pointing_Up": "spin360",
+    "Thumb_Up": "takeoff",     # arm + climb
+    "Thumb_Down": "land",      # descend + disarm
+    "Pointing_Up": "orbit",
     "ILoveYou": "return_home",
 }
 _CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "config", "gesture_actions.json",
 )
+_UNMAP = ("", "none", "null", "off")
 
 
 def _load_actions() -> dict:
@@ -60,10 +58,16 @@ def _load_actions() -> dict:
     try:
         with open(_CONFIG_PATH, encoding="utf-8") as fh:
             override = json.load(fh)
-        merged = {str(k): str(v) for k, v in override.items()
-                  if not str(k).startswith("_")}
-        actions.update(merged)
-        print(f"gesture actions: loaded {len(merged)} mapping(s) from "
+        n = 0
+        for key, value in override.items():
+            if str(key).startswith("_"):
+                continue
+            n += 1
+            if value is None or str(value).strip().lower() in _UNMAP:
+                actions.pop(str(key), None)   # explicitly disable a gesture
+            else:
+                actions[str(key)] = str(value)
+        print(f"gesture actions: loaded {n} mapping(s) from "
               f"{os.path.relpath(_CONFIG_PATH)}")
     except FileNotFoundError:
         pass
@@ -80,13 +84,14 @@ _SPEEDS = [("slow", 0.5), ("normal", 1.0), ("sport", 1.6)]
 
 class GestureInterpreter:
     def __init__(self, matcher: SequenceMatcher | None = None,
-                 single_delay: float | None = None) -> None:
+                 single_delay: float | None = None, actions: dict | None = None) -> None:
         self._mode_idx = 0
         self._speed_idx = 1
         self._held = "None"
         self._held_since = 0.0
         self._fired_gesture = ""   # gesture whose command already fired this press
         self._rest_since = 0.0
+        self._actions = _ACTION if actions is None else actions
 
         if matcher is None:
             seqs, cfg_delay = load_config()
@@ -143,10 +148,10 @@ class GestureInterpreter:
                 self._fired_gesture = gesture   # don't also fire this pose as a single
 
         # --- single-gesture command (deferred if it could be part of a combo) --
-        ready = gesture in _ACTION and gesture != self._fired_gesture
+        ready = gesture in self._actions and gesture != self._fired_gesture
         progress = min(1.0, held_for / HOLD_SEC) if ready else 0.0
         if ready and held_for >= HOLD_SEC:
-            action = _ACTION[gesture]
+            action = self._actions[gesture]
             if self._single_delay > 0.0 and gesture in self._combo_gestures:
                 self._pending.append({"action": action, "at": now})
             else:

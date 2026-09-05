@@ -1,12 +1,13 @@
 {
-  "__doc__": "Map gesture names (MediaPipe canned OR your own trained labels) to actions. Merged over the built-in defaults. Local actions: takeoff, land, cycle_mode, speed_up, speed_down, spin360, return_home, estop, orbit (fly to 10 m radius then circle the origin; repeat the gesture to stop), fly_north/south/east/west. Runtime actions may use mission:HOLD, mission:RETURN, mission:GOTO, mission:WATCH, mission:SEARCH, mission:TRACE, mission:FOLLOW, or mission:REGROUP. Keys starting with _ are ignored.",
-  "__example__": "\"thumbs_side\": \"mission:HOLD\", \"flat_palm_down\": \"mission:RETURN\"",
+  "__doc__": "Map gesture names (MediaPipe canned OR your own trained labels) to actions. Merged over the built-in defaults. Local actions: takeoff, land, cycle_mode, speed_up, speed_down, spin360, return_home, estop, orbit (fly to 10 m radius then circle the origin; repeat the gesture to stop), fly_north/south/east/west. Set a value to null (or \"none\") to disable a gesture. Runtime actions may use mission:HOLD, mission:RETURN, mission:GOTO, mission:WATCH, mission:SEARCH, mission:TRACE, mission:FOLLOW, or mission:REGROUP. Keys starting with _ are ignored.",
+  "__example__": "\"Victory\": \"spin360\", \"flat_palm_down\": \"return_home\"",
 
-  "Open_Palm": "takeoff",
-  "Closed_Fist": "land",
-  "Victory": "cycle_mode",
-  "Thumb_Up": "speed_up",
-  "Thumb_Down": "speed_down",
+  "Thumb_Up": "takeoff",
+  "Thumb_Down": "land",
   "Pointing_Up": "orbit",
-  "ILoveYou": "return_home"
+  "ILoveYou": "return_home",
+
+  "Open_Palm": null,
+  "Closed_Fist": null,
+  "Victory": null
 }
