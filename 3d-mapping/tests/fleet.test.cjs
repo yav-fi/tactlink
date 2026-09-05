@@ -20,6 +20,73 @@ function loadSource(name) {
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
 
+test("batch control shares speed and movement, releases markers and resumes preserved paths", () => {
+  const entities = new Cesium.EntityCollection();
+  const fleet = new Fleet({ entities });
+  const members = fleet.deployBulk(home, 10, 30);
+  const outsider = fleet.deploy(home);
+  const parked = outsider.snapshot();
+  const ids = members.map(d => d.id);
+  const position = d => entities.getById(d.id).position.getValue();
+  const trail = d => entities.getById(`${d.id}_trail`).polyline.positions.getValue();
+  const spacing = Cesium.Cartesian3.distance(position(members[0]), position(members[1]));
+  fleet.takeBatch(ids, 75.5);
+  assert.equal(new Set(members.map(d => d.colorHex)).size, 1);
+  assert(members.every(d => d.speedMph === 75.5 && d.snapshot().state === "MANUAL"));
+  for (let i = 0; i < 180; i++) fleet.moveBatch(1, 0, 0, 1 / 60, Math.PI / 2);
+  const starts = members.map(position);
+  for (let i = 0; i < 60; i++) fleet.moveBatch(1, 0, 0, 1 / 60, Math.PI / 2);
+  members.forEach((d, i) => assert(Math.abs(Cesium.Cartesian3.distance(starts[i], position(d)) - 75.5 * 0.44704) < 0.01));
+  assert(Math.abs(Cesium.Cartesian3.distance(position(members[0]), position(members[1])) - spacing) < 0.01);
+  assert.deepEqual(outsider.snapshot(), parked);
+  fleet.releaseBatch();
+  assert.equal(fleet.manualBatch.length, 0);
+  const [markerId, markerIds] = [...fleet.batchMarkers][0];
+  assert.deepEqual(markerIds, ids);
+  assert(entities.getById(markerId).point);
+  assert(members.every(d => entities.getById(`${d.id}_release_1`).box));
+  const paths = members.map(d => trail(d).map(p => Cesium.Cartesian3.clone(p)));
+  const positions = members.map(position);
+  fleet.releaseBatch(); // Releasing twice must not duplicate markers.
+  assert.equal(fleet.batchMarkers.size, 1);
+  fleet.takeBatch(markerIds, members[0].speedMph);
+  members.forEach((d, i) => {
+    assert.deepEqual(position(d), positions[i]);
+    assert.deepEqual(trail(d), paths[i]);
+  });
+  for (let i = 0; i < 120; i++) fleet.moveBatch(0, 1, 1, 1 / 60, 0);
+  members.forEach((d, i) => {
+    assert(trail(d).length > paths[i].length);
+    assert.deepEqual(trail(d).slice(0, paths[i].length), paths[i]);
+    assert.deepEqual(trail(d).at(-1), position(d));
+  });
+  fleet.releaseBatch();
+  assert.equal(fleet.batchMarkers.size, 2);
+  assert(members.every(d => entities.getById(`${d.id}_release_2`).box));
+  fleet.takeBatch(ids, 60);
+  fleet.clear();
+  assert.equal(fleet.manualBatch.length, 0);
+  assert.equal(fleet.batchMarkers.size, 0);
+  assert.equal(entities.values.length, 0);
+});
+
+test("batch speed validation is atomic and only changes selected drones", () => {
+  const fleet = new Fleet({ entities: new Cesium.EntityCollection() });
+  const members = fleet.deployBulk(home, 3, 30);
+  const ids = members.slice(0, 2).map(d => d.id);
+  fleet.setBatchSpeed(ids, 90.25);
+  assert.deepEqual(members.map(d => d.speedMph), [90.25, 90.25, 60]);
+  for (const speed of [NaN, Infinity, 0, -2]) assert.throws(() => fleet.setBatchSpeed(ids, speed));
+  assert.throws(() => fleet.setBatchSpeed([ids[0], "missing"], 100));
+  assert.deepEqual(members.map(d => d.speedMph), [90.25, 90.25, 60]);
+  fleet.takeBatch(ids, 90.25);
+  assert.throws(() => fleet.takeBatch([], 60));
+  assert.throws(() => fleet.takeBatch(["missing"], 60));
+  assert.deepEqual(fleet.manualBatch.map(d => d.id), ids);
+  fleet.setBatchSpeed(ids, 45);
+  assert.deepEqual(members.map(d => d.speedMph), [45, 45, 60]);
+});
+
 test("bulk deployment preserves individual control and grid spacing", () => {
   const entities = new Cesium.EntityCollection();
   const fleet = new Fleet({ entities });

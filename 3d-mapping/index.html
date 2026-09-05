@@ -47,6 +47,11 @@
         </section>
         <section>
           <h2>Group commands</h2>
+          <label for="batch-speed">Batch speed (mph)</label>
+          <input id="batch-speed" type="number" min="0.01" step="any" value="60" />
+          <button id="apply-batch-speed" type="button" disabled>Apply speed to selection</button>
+          <button id="control-batch" type="button" aria-pressed="false" disabled>Control selected batch</button>
+          <p id="batch-status" class="hint" role="status">WASD moves the batch; R/F or Space/Shift changes height. Release leaves pickup markers and preserves every route.</p>
           <div class="actions">
             <button id="select-all" type="button" class="secondary">Select all</button>
             <button id="select-none" type="button" class="secondary">Clear selection</button>

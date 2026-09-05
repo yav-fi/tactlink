@@ -46,6 +46,7 @@ export class DroneController {
   private readonly originEntity: Cesium.Entity;
   private readonly trailEntity: Cesium.Entity;
   private trailPoints: Cesium.Cartesian3[] = [];
+  private preserveTrailEndpoint = false;
   private trailDistances: number[] = [];
   private readonly arrows: Cesium.Entity[] = [];
   private readonly releases: Cesium.Entity[] = [];
@@ -112,6 +113,7 @@ export class DroneController {
   setManualControl(enabled: boolean): void {
     if (enabled) this.hideReplay();
     if (!enabled && this.state === "MANUAL") {
+      this.preserveTrailEndpoint = true;
       const number = this.releases.length + 1;
       this.releases.push(this.viewer.entities.add({
         id: `${this.id}_release_${number}`,
@@ -319,6 +321,10 @@ export class DroneController {
     }
     this.lastRenderedPosition = Cesium.Cartesian3.clone(current);
     if (this.trailPoints.length >= 2) {
+      if (this.preserveTrailEndpoint) {
+        this.trailPoints.push(Cesium.Cartesian3.clone(this.trailPoints[this.trailPoints.length - 1]));
+        this.preserveTrailEndpoint = false;
+      }
       // Keep an exact live endpoint, sampling the route at two-meter intervals.
       this.trailPoints[this.trailPoints.length - 1] = current;
       if (Cesium.Cartesian3.distance(this.trailPoints[this.trailPoints.length - 2], current) >= 2) {

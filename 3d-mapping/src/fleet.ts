@@ -20,6 +20,9 @@ export class Fleet {
   private replayStart = 0;
   private groupFlight = false;
   readonly groups = new Map<string, { ids: string[]; color: string }>();
+  manualBatch: DroneController[] = [];
+  readonly batchMarkers = new Map<string, string[]>();
+  private batchMarkerNumber = 0;
   private replayFlights: { drone: DroneController; duration: number }[] = [];
   replay = { running: false, elapsed: 0, duration: 0, total: 0, arrived: 0 };
   constructor(private readonly viewer: Cesium.Viewer) {}
@@ -30,6 +33,10 @@ export class Fleet {
     return drone;
   }
   clear(): void {
+    this.releaseBatch();
+    for (const id of this.batchMarkers.keys()) this.viewer.entities.removeById(id);
+    this.batchMarkers.clear();
+    this.batchMarkerNumber = 0;
     this.stopReplay();
     for (const drone of this.drones.values()) drone.destroy();
     this.drones.clear();
@@ -39,6 +46,52 @@ export class Fleet {
 
   deployBulk(center: Coordinates, count: number, spacing: number): DroneController[] {
     return formationSlots(center, count, spacing).map(position => this.deploy(position));
+  }
+
+  setBatchSpeed(ids: string[], speed: number): void {
+    if (!Number.isFinite(speed) || speed <= 0) throw new Error("Enter a positive batch speed in mph.");
+    const members = ids.map(id => {
+      const member = this.drones.get(id);
+      if (!member) throw new Error(`Unknown drone: ${id}`);
+      return member;
+    });
+    for (const member of members) member.speedMph = speed;
+  }
+
+  takeBatch(ids: string[], speed: number): void {
+    const unique = [...new Set(ids)];
+    if (!unique.length) throw new Error("Select at least one drone for batch control.");
+    // Validate before releasing or changing anything.
+    if (unique.some(id => !this.drones.has(id)) || !Number.isFinite(speed) || speed <= 0) throw new Error("Choose deployed drones and a positive batch speed.");
+    this.releaseBatch();
+    this.stopReplay();
+    this.manualBatch = unique.map(id => this.drones.get(id)!);
+    const color = this.manualBatch[0].colorHex;
+    this.setBatchSpeed(unique, speed);
+    for (const member of this.manualBatch) { member.setColor(color); member.setManualControl(true); }
+  }
+
+  moveBatch(east: number, north: number, up: number, seconds: number, heading: number): void {
+    for (const member of this.manualBatch) member.moveManually(east, north, up, seconds, heading);
+  }
+
+  releaseBatch(): void {
+    if (!this.manualBatch.length) return;
+    const members = this.manualBatch;
+    for (const member of members) member.setManualControl(false);
+    const positions = members.map(member => {
+      const p = member.snapshot(); return Cesium.Cartesian3.fromDegrees(p.longitude, p.latitude, p.altitude);
+    });
+    const id = `batch_pickup_${++this.batchMarkerNumber}`;
+    const markerColor = new Cesium.CallbackProperty(() => Cesium.Color.fromCssColorString(members[0].colorHex), false);
+    this.viewer.entities.add({
+      id,
+      position: Cesium.BoundingSphere.fromPoints(positions).center,
+      point: { pixelSize: 18, color: markerColor, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      label: { text: `PICK UP BATCH (${members.length})`, font: "600 13px system-ui", showBackground: true, fillColor: markerColor, pixelOffset: new Cesium.Cartesian2(0, -26), disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    });
+    this.batchMarkers.set(id, members.map(member => member.id));
+    this.manualBatch = [];
   }
 
   saveGroup(name: string, ids: string[]): void {

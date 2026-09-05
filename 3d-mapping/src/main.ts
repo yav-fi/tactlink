@@ -61,6 +61,9 @@ let pickedSurface: Cesium.Cartographic | undefined;
 let previews: Cesium.Entity[] = [];
 let placementMode: "single" | "bulk" | "command" = "single";
 const selectedIds = new Set<string>();
+const batchControlButton = document.querySelector<HTMLButtonElement>("#control-batch")!;
+const batchSpeedInput = document.querySelector<HTMLInputElement>("#batch-speed")!;
+const batchStatus = document.querySelector<HTMLParagraphElement>("#batch-status")!;
 const memberList = document.querySelector<HTMLDivElement>("#group-members")!;
 const savedGroups = document.querySelector<HTMLSelectElement>("#saved-groups")!;
 const groupStatus = document.querySelector<HTMLParagraphElement>("#group-status")!;
@@ -86,15 +89,21 @@ function clearInput(): void {
   activeCameraKeys.clear();
   steering = false;
   drone?.stopManualMotion();
+  for (const member of fleet.manualBatch) member.stopManualMotion();
 }
 
 function releaseDrone(): void {
   clearInput();
-  if (controllingDrone) drone?.setManualControl(false);
+  if (fleet.manualBatch.length) {
+    fleet.releaseBatch();
+    batchStatus.textContent = "Batch released. Click its PICK UP BATCH marker or Control selected batch to continue the same paths.";
+  } else if (controllingDrone) drone?.setManualControl(false);
   controllingDrone = false;
   activeCameraKeys.clear();
   controlDroneButton.textContent = "Control drone";
   controlDroneButton.setAttribute("aria-pressed", "false");
+  batchControlButton.textContent = "Control selected batch";
+  batchControlButton.setAttribute("aria-pressed", "false");
 }
 const monumentTarget = Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, 20);
 const orbitCamera = { heading: Cesium.Math.toRadians(30), pitch: Cesium.Math.toRadians(-22), range: 450 };
@@ -115,6 +124,7 @@ function activateOrbitCamera(): void {
   viewer.trackedEntity = undefined;
   viewer.scene.screenSpaceCameraController.enableInputs = false;
   applyOrbitCamera();
+  refreshFleet();
   commandStatus.textContent = "Orbit camera active. Drag the map to see every side of the monument; scroll to zoom.";
 }
 
@@ -127,6 +137,7 @@ function flyToFreeCameraOverview(): void {
   viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
   viewer.scene.screenSpaceCameraController.enableInputs = true;
   commandStatus.textContent = "Free camera active. W/A/S/D moves; R/F moves up/down. Ctrl + drag rotates the view.";
+  refreshFleet();
 }
 
 cameraHandler.setInputAction(() => { isOrbitDragging = cameraMode === "orbit"; steering = controllingDrone; }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
@@ -171,7 +182,7 @@ function refreshFleet(): void {
   }
   droneSelect.value = drone?.id ?? "";
   droneSelect.disabled = deploying || !drone;
-  speedInput.disabled = deploying || !drone || fleet.replay.running;
+  speedInput.disabled = deploying || !drone || fleet.replay.running || fleet.manualBatch.length > 0;
   speedInput.value = String(drone?.speedMph ?? 60);
   speedInput.removeAttribute("aria-invalid");
   speedStatus.textContent = `${drone?.speedMph ?? 60} mph · ${((drone?.speedMph ?? 60) * 0.44704).toFixed(2)} m/s`;
@@ -181,12 +192,13 @@ function refreshFleet(): void {
   document.querySelector<HTMLButtonElement>("#deploy-drone")!.disabled = fleet.replay.running;
   replayButton.disabled = deploying || fleet.replay.running || !fleet.drones.size;
   stopReplayButton.disabled = !fleet.replay.running;
+  controlDroneButton.disabled ||= fleet.manualBatch.length > 0;
   document.querySelector<HTMLButtonElement>("#bulk-deploy")!.disabled = fleet.replay.running;
   refreshGroups();
 }
 
 function refreshGroups(): void {
-  const locked = deploying || fleet.replay.running;
+  const locked = deploying || fleet.replay.running || fleet.manualBatch.length > 0;
   memberList.replaceChildren();
   for (const item of fleet.drones.values()) {
     const row = document.createElement("label"); row.className = "member-row";
@@ -207,7 +219,36 @@ function refreshGroups(): void {
     document.querySelector<HTMLButtonElement>(`#${id}`)!.disabled = locked || (id === "choose-destination" || id === "save-group" ? !selectedIds.size : !fleet.drones.size);
   }
   groupStatus.textContent = `${selectedIds.size} drone${selectedIds.size === 1 ? "" : "s"} selected. Click Choose destination to assign arrival slots.`;
+  batchControlButton.disabled = deploying || fleet.replay.running || (!fleet.manualBatch.length && !selectedIds.size);
+  document.querySelector<HTMLButtonElement>("#apply-batch-speed")!.disabled = deploying || fleet.replay.running || !selectedIds.size;
+  batchSpeedInput.disabled = deploying || fleet.replay.running;
 }
+
+function beginBatchControl(ids: string[]): void {
+  const speed = batchSpeedInput.valueAsNumber;
+  if (!Number.isFinite(speed) || speed <= 0) { batchStatus.textContent = "Enter a positive batch speed in mph."; return; }
+  flyToFreeCameraOverview();
+  fleet.takeBatch(ids, speed);
+  drone = fleet.manualBatch[0];
+  selectedIds.clear(); for (const id of ids) selectedIds.add(id);
+  controllingDrone = true;
+  pilotView.heading = drone.heading;
+  viewer.scene.screenSpaceCameraController.enableInputs = false;
+  batchControlButton.textContent = "Release batch";
+  batchControlButton.setAttribute("aria-pressed", "true");
+  refreshFleet();
+  batchStatus.textContent = `Controlling ${ids.length} drones at ${speed} mph. WASD moves together; Q/E steers; Space/Shift or R/F changes altitude. Esc releases.`;
+  viewer.canvas.focus();
+}
+batchControlButton.addEventListener("click", () => {
+  if (fleet.manualBatch.length) flyToFreeCameraOverview(); else beginBatchControl([...selectedIds]);
+});
+document.querySelector<HTMLButtonElement>("#apply-batch-speed")!.addEventListener("click", () => {
+  try {
+    fleet.setBatchSpeed(fleet.manualBatch.length ? fleet.manualBatch.map(d => d.id) : [...selectedIds], batchSpeedInput.valueAsNumber);
+    refreshFleet(); batchStatus.textContent = `Batch speed set to ${batchSpeedInput.value} mph.`;
+  } catch (error) { batchStatus.textContent = error instanceof Error ? error.message : "Invalid speed."; }
+});
 document.querySelector<HTMLButtonElement>("#select-all")!.addEventListener("click", () => { for (const id of fleet.drones.keys()) selectedIds.add(id); savedGroups.value = ""; refreshGroups(); });
 document.querySelector<HTMLButtonElement>("#select-none")!.addEventListener("click", () => { selectedIds.clear(); savedGroups.value = ""; refreshGroups(); });
 savedGroups.addEventListener("change", () => { selectedIds.clear(); for (const id of fleet.groups.get(savedGroups.value)?.ids ?? []) selectedIds.add(id); refreshGroups(); });
@@ -302,6 +343,11 @@ cameraHandler.setInputAction((event: { position: Cesium.Cartesian2 }) => {
   if (!deploying) {
     if (controllingDrone || fleet.replay.running) return;
     const picked = viewer.scene.pick(event.position);
+    const batch = fleet.batchMarkers.get(picked?.id?.id);
+    if (batch) {
+      batchSpeedInput.value = String(fleet.drones.get(batch[0])!.speedMph);
+      beginBatchControl(batch); return;
+    }
     const id = typeof picked?.id?.id === "string" ? picked.id.id.match(/^drone_\d+/)?.[0] : undefined;
     if (id && fleet.drones.has(id)) { if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id); savedGroups.value = ""; refreshGroups(); }
     return;
@@ -439,9 +485,17 @@ function updateFreeCamera(deltaSeconds: number): void {
     const forward = axis("KeyW", "KeyS");
     const right = axis("KeyD", "KeyA");
     const up = Number(activeCameraKeys.has("Space") || activeCameraKeys.has("KeyR")) - Number(activeCameraKeys.has("ShiftLeft") || activeCameraKeys.has("ShiftRight") || activeCameraKeys.has("KeyF"));
-    drone.moveManually(forward * Math.sin(pilotView.heading) + right * Math.cos(pilotView.heading), forward * Math.cos(pilotView.heading) - right * Math.sin(pilotView.heading), up, deltaSeconds, pilotView.heading);
+    const east = forward * Math.sin(pilotView.heading) + right * Math.cos(pilotView.heading);
+    const north = forward * Math.cos(pilotView.heading) - right * Math.sin(pilotView.heading);
+    if (fleet.manualBatch.length) fleet.moveBatch(east, north, up, deltaSeconds, pilotView.heading);
+    else drone.moveManually(east, north, up, deltaSeconds, pilotView.heading);
     const position = drone.snapshot();
-    const center = Cesium.Cartesian3.fromDegrees(position.longitude, position.latitude, position.altitude);
+    let center = Cesium.Cartesian3.fromDegrees(position.longitude, position.latitude, position.altitude);
+    let batchRange = 65;
+    if (fleet.manualBatch.length > 1 && pilotCameraMode !== "first") {
+      const bounds = Cesium.BoundingSphere.fromPoints(fleet.manualBatch.map(member => { const p = member.snapshot(); return Cesium.Cartesian3.fromDegrees(p.longitude, p.latitude, p.altitude); }));
+      center = bounds.center; batchRange = Math.max(65, bounds.radius * 3 + 30);
+    }
     if (pilotCameraMode === "first") {
       // Fixed mount just above the prism, looking forward along its heading.
       const mount = Cesium.Matrix4.multiplyByPoint(Cesium.Transforms.eastNorthUpToFixedFrame(center), new Cesium.Cartesian3(0, 0, 3), new Cesium.Cartesian3());
@@ -449,7 +503,7 @@ function updateFreeCamera(deltaSeconds: number): void {
       viewer.camera.setView({ destination: mount, orientation: { heading: pilotView.heading, pitch: 0, roll: 0 } });
     } else {
       const free = pilotCameraMode === "free";
-      viewer.camera.lookAt(center, new Cesium.HeadingPitchRange(pilotView.heading + (free ? freeOrbitHeading : 0), free ? pilotView.pitch : Cesium.Math.toRadians(-18), free ? pilotView.range : 65));
+      viewer.camera.lookAt(center, new Cesium.HeadingPitchRange(pilotView.heading + (free ? freeOrbitHeading : 0), free ? pilotView.pitch : Cesium.Math.toRadians(-18), free ? Math.max(pilotView.range, batchRange) : batchRange));
     }
     return;
   }
