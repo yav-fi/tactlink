@@ -58,7 +58,6 @@ class QuadSimulator:
             world_xy = np.array([cy * body[0] - sy * body[1],
                                  sy * body[0] + cy * body[1]])
             target_v = np.array([world_xy[0], world_xy[1], cmd.throttle * MAX_CLIMB])
-            s.on_ground = False
         else:
             # No lift: settle horizontally and sink toward the ground.
             target_v = np.array([0.0, 0.0, -GRAVITY])
@@ -66,12 +65,16 @@ class QuadSimulator:
         s.vel += (target_v - s.vel) * min(1.0, ACCEL * dt)
         s.pos = s.pos + s.vel * dt
 
+        s.on_ground = False
         if s.pos[2] <= 0.0:
             s.pos[2] = 0.0
             s.vel[2] = max(0.0, s.vel[2])
+            # On the ground: touching down while descending counts as landed even
+            # if still armed, so the landing routine can finish and disarm.
+            if not cmd.armed or target_v[2] <= 0.05:
+                s.on_ground = True
             if not cmd.armed:
                 s.vel[:] = 0.0
-                s.on_ground = True
 
         # Visual attitude lags toward the commanded bank.
         target_roll = -cmd.roll * MAX_BANK

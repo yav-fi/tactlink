@@ -71,7 +71,7 @@ class Visualizer:
         self._arm_len = 0.55
 
     def render(self, state: QuadState, cmd: ControlInput, fps: float = 0.0,
-              trail=None) -> np.ndarray:
+              trail=None, gstate=None) -> np.ndarray:
         img = np.full((self.h, self.w, 3), _BG, dtype=np.uint8)
         # Ease the camera toward the drone so it stays framed while it flies.
         goal = np.array([state.pos[0], state.pos[1], max(1.0, state.pos[2]) * 0.5 + 1.0])
@@ -82,7 +82,7 @@ class Visualizer:
         self._draw_trail(img, trail or [])
         self._draw_shadow(img, state)
         self._draw_drone(img, state)
-        self._draw_hud(img, state, cmd, fps)
+        self._draw_hud(img, state, cmd, fps, gstate)
         return img
 
     # -- world -----------------------------------------------------------
@@ -163,7 +163,8 @@ class Visualizer:
             cv2.circle(img, pc, 4, _DRONE, -1, cv2.LINE_AA)
 
     # -- hud -----------------------------------------------------------
-    def _draw_hud(self, img, state: QuadState, cmd: ControlInput, fps: float):
+    def _draw_hud(self, img, state: QuadState, cmd: ControlInput, fps: float,
+                  gstate=None):
         font = cv2.FONT_HERSHEY_SIMPLEX
         pad = 14
 
@@ -179,8 +180,23 @@ class Visualizer:
             cv2.putText(img, f"{fps:4.1f} fps", (self.w - 90, 30), font, 0.5,
                         _HUD_DIM, 1, cv2.LINE_AA)
 
-        hint = "palm=yaw/throttle  tilt=roll  pinch=forward  open=arm  fist=land"
-        cv2.putText(img, hint, (pad, 78), font, 0.44, _HUD_DIM, 1, cv2.LINE_AA)
+        if gstate is not None:
+            mode = gstate.maneuver.upper() if gstate.maneuver else gstate.mode.value.upper()
+            mode_color = _WARN if gstate.maneuver else _ARM
+            cv2.putText(img, f"MODE {mode}", (pad, 80), font, 0.55, mode_color, 1, cv2.LINE_AA)
+            cv2.putText(img, f"SPEED {gstate.speed_name}", (pad, 100), font, 0.5,
+                        _HUD_DIM, 1, cv2.LINE_AA)
+            g = gstate.active_gesture
+            if g and g != "None":
+                cv2.putText(img, g, (pad, 124), font, 0.5, _HUD, 1, cv2.LINE_AA)
+                if gstate.hold_progress > 0:
+                    x0 = pad + 130
+                    cv2.rectangle(img, (x0, 114), (x0 + 90, 124), (60, 58, 55), -1)
+                    cv2.rectangle(img, (x0, 114),
+                                  (x0 + int(90 * gstate.hold_progress), 124), _OK, -1)
+
+        hint = "palm x/y + tilt = fly   Victory=mode  thumbs=speed  point=spin  ILY=home"
+        cv2.putText(img, hint, (pad, self.h - 150), font, 0.42, _HUD_DIM, 1, cv2.LINE_AA)
 
         bars = [("THR", cmd.throttle, True), ("YAW", cmd.yaw_rate, True),
                 ("ROLL", cmd.roll, True), ("PTCH", cmd.pitch, False)]

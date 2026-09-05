@@ -1,15 +1,18 @@
 """Webcam gesture control for a simulated quadcopter.
 
-Live mode (default) reads a webcam, tracks one hand with MediaPipe, maps the
-gesture to a flight command, steps the simulator, and shows the camera feed
-beside a 3D view of the drone.
+Live mode (default) reads a webcam, tracks one hand with MediaPipe's
+GestureRecognizer, turns the hand pose + gesture into a flight command, steps
+the simulator, and shows the camera feed beside a 3D view of the drone.
 
     python src/main.py                 # live, camera 0
     python src/main.py --camera 1      # pick another camera
     python src/main.py --demo          # no camera: scripted flight for testing
     python src/main.py --demo --headless --out flight.png   # render a sample
 
-Keys: q quit  ·  r reset  ·  space arm/disarm toggle
+Gestures: Open_Palm take off · Closed_Fist land · Victory cycle mode ·
+Thumb_Up/Thumb_Down speed · Pointing_Up 360 spin · ILoveYou return home.
+
+Keys: q quit · r reset · space take off / land
 """
 
 from __future__ import annotations
@@ -21,25 +24,39 @@ import time
 import cv2
 import numpy as np
 
-from control_types import ControlInput, HandState
+from control_types import HandState
 from controls import GestureController
+from gestures import GestureInterpreter
 from simulator import QuadSimulator
 from visualizer import Visualizer
 
+# (start, end) seconds -> gesture held during the demo timeline.
+_DEMO_GESTURES = [
+    (1.5, 3.0, "Open_Palm"),
+    (7.0, 8.5, "Victory"),
+    (13.0, 14.5, "Pointing_Up"),
+    (18.0, 19.5, "ILoveYou"),
+    (24.0, 26.0, "Closed_Fist"),
+]
+
 
 def _demo_hand(t: float) -> HandState:
-    """A scripted hand path so the pipeline can run without a camera."""
-    if t < 1.0:
+    """A scripted hand path + gesture stream so the pipeline runs without a camera."""
+    if t < 0.8:
         return HandState(present=False)
-    phase = t - 1.0
-    fingers = 5 if phase < 8.0 else 0
+    gesture = "None"
+    for a, b, g in _DEMO_GESTURES:
+        if a <= t < b:
+            gesture = g
     return HandState(
         present=True,
-        palm_x=0.5 + 0.28 * math.sin(phase * 0.7),
-        palm_y=0.5 - 0.30 * math.sin(phase * 0.5),
-        roll_angle=0.5 * math.sin(phase * 0.9),
-        pinch=max(0.0, math.sin(phase * 0.4)),
-        fingers_up=fingers,
+        palm_x=0.5 + 0.26 * math.sin(t * 0.7),
+        palm_y=0.5 - 0.28 * math.sin(t * 0.5),
+        roll_angle=0.5 * math.sin(t * 0.9),
+        pinch=max(0.0, 0.6 * math.sin(t * 0.4)),
+        fingers_up=5 if gesture in ("None", "Open_Palm") else 1,
+        gesture=gesture,
+        gesture_score=0.9,
     )
 
 
@@ -52,6 +69,7 @@ def _compose(cam_bgr: np.ndarray, sim_bgr: np.ndarray) -> np.ndarray:
 
 def run(args: argparse.Namespace) -> int:
     controller = GestureController()
+    interp = GestureInterpreter()
     sim = QuadSimulator()
     viz = Visualizer()
 
@@ -72,9 +90,9 @@ def run(args: argparse.Namespace) -> int:
 
     start = time.time()
     prev = start
-    manual_arm_override = False
     fps = 0.0
     frame_count = 0
+    kbd_event = None
 
     try:
         while True:
@@ -86,8 +104,11 @@ def run(args: argparse.Namespace) -> int:
             if args.demo:
                 hand = _demo_hand(elapsed)
                 cam_frame = np.full((480, 640, 3), (30, 30, 30), dtype=np.uint8)
-                cv2.putText(cam_frame, "DEMO MODE (no camera)", (60, 240),
+                cv2.putText(cam_frame, "DEMO MODE (no camera)", (60, 230),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.9, (200, 200, 200), 2)
+                if hand.present and hand.gesture != "None":
+                    cv2.putText(cam_frame, hand.gesture, (60, 275),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (140, 240, 140), 2)
             else:
                 ok, frame = cap.read()
                 if not ok:
@@ -96,17 +117,22 @@ def run(args: argparse.Namespace) -> int:
                 frame = cv2.flip(frame, 1)
                 hand = tracker.process(frame)
                 tracker.draw(frame)
+                if hand.present and hand.gesture != "None":
+                    cv2.putText(frame, f"{hand.gesture} {hand.gesture_score:.2f}",
+                                (12, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                (140, 240, 140), 2)
                 cam_frame = frame
 
-            cmd = controller.update(hand)
-            if manual_arm_override:
-                cmd = ControlInput(cmd.throttle, cmd.yaw_rate, cmd.roll, cmd.pitch,
-                                   armed=True, event="manual arm (space)")
+            gstate = interp.update(hand.gesture if hand.present else "None")
+            if kbd_event:
+                gstate.events.append(kbd_event)
+                kbd_event = None
+            cmd = controller.update(hand, gstate, sim.state)
             state = sim.step(cmd, dt if dt > 0 else 1 / 60)
 
             if dt > 0:
                 fps = 0.9 * fps + 0.1 * (1.0 / dt) if fps else 1.0 / dt
-            sim_frame = viz.render(state, cmd, fps, sim.trail)
+            sim_frame = viz.render(state, cmd, fps, sim.trail, gstate)
             composite = _compose(cam_frame, sim_frame)
 
             frame_count += 1
@@ -125,8 +151,9 @@ def run(args: argparse.Namespace) -> int:
             if key == ord("r"):
                 sim.reset()
                 controller = GestureController()
+                interp = GestureInterpreter()
             if key == ord(" "):
-                manual_arm_override = not manual_arm_override
+                kbd_event = "land" if sim.state.armed else "takeoff"
     finally:
         if cap is not None:
             cap.release()
@@ -145,7 +172,7 @@ def main() -> int:
                    help="run without a camera using a scripted hand path")
     p.add_argument("--headless", action="store_true",
                    help="do not open a window; with --out, save a frame and exit")
-    p.add_argument("--duration", type=float, default=6.0,
+    p.add_argument("--duration", type=float, default=10.0,
                    help="seconds to simulate before exiting in --headless")
     p.add_argument("--out", type=str, default="", help="path to save a composite frame")
     return run(p.parse_args())

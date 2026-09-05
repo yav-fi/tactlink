@@ -1,10 +1,11 @@
-"""Webcam hand tracking built on the MediaPipe Tasks HandLandmarker.
+"""Webcam hand tracking + gesture recognition on MediaPipe Tasks.
 
-The tracker turns a BGR frame into a :class:`HandState`. Landmark indices follow
-the MediaPipe hand model (0 = wrist, 4 = thumb tip, 8 = index tip, ...).
+Uses Google's ``GestureRecognizer`` task, which returns both the 21 hand
+landmarks and a canned gesture label (Closed_Fist, Open_Palm, Pointing_Up,
+Thumb_Up, Thumb_Down, Victory, ILoveYou, or None) in one pass.
 
-The model bundle (``hand_landmarker.task``) is downloaded to ``models/`` on first
-use if it is not already present.
+Landmark indices follow the MediaPipe hand model (0 = wrist, 4 = thumb tip,
+8 = index tip, ...). The model bundle is downloaded to ``models/`` on first use.
 """
 
 import math
@@ -20,8 +21,8 @@ try:  # MediaPipe is optional so the simulator can run without a camera.
     import mediapipe as mp
     from mediapipe.tasks.python import BaseOptions
     from mediapipe.tasks.python.vision import (
-        HandLandmarker,
-        HandLandmarkerOptions,
+        GestureRecognizer,
+        GestureRecognizerOptions,
         HandLandmarksConnections,
         RunningMode,
     )
@@ -30,13 +31,13 @@ except Exception:  # pragma: no cover - exercised only when the wheel is missing
     _MP_AVAILABLE = False
 
 _MODEL_URL = (
-    "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
-    "hand_landmarker/float16/1/hand_landmarker.task"
+    "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/"
+    "gesture_recognizer/float16/1/gesture_recognizer.task"
 )
 _MODEL_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "models",
-    "hand_landmarker.task",
+    "gesture_recognizer.task",
 )
 
 _FINGER_TIPS = (4, 8, 12, 16, 20)
@@ -46,7 +47,7 @@ _FINGER_PIPS = (2, 6, 10, 14, 18)
 def _ensure_model() -> str:
     if not os.path.exists(_MODEL_PATH):
         os.makedirs(os.path.dirname(_MODEL_PATH), exist_ok=True)
-        print("downloading hand_landmarker.task (~7.5 MB) ...")
+        print("downloading gesture_recognizer.task (~8 MB) ...")
         urllib.request.urlretrieve(_MODEL_URL, _MODEL_PATH)
     return _MODEL_PATH
 
@@ -58,28 +59,28 @@ class HandTracker:
                 "mediapipe is not installed; run `pip install -r requirements.txt` "
                 "or start the app with --demo"
             )
-        options = HandLandmarkerOptions(
+        options = GestureRecognizerOptions(
             base_options=BaseOptions(model_asset_path=_ensure_model()),
             running_mode=RunningMode.VIDEO,
             num_hands=max_hands,
             min_hand_detection_confidence=detection_confidence,
             min_tracking_confidence=0.5,
         )
-        self._landmarker = HandLandmarker.create_from_options(options)
+        self._recognizer = GestureRecognizer.create_from_options(options)
         self._connections = [
             (c.start, c.end) for c in HandLandmarksConnections.HAND_CONNECTIONS
         ]
         self._t0 = time.monotonic()
-        self._last_ts = -1  # detect_for_video requires strictly increasing stamps
+        self._last_ts = -1  # recognize_for_video requires strictly increasing stamps
         self._last_pts = None  # pixel-space landmarks for drawing
 
     def process(self, frame_bgr: np.ndarray) -> HandState:
-        """Detect a hand in ``frame_bgr`` and return its normalized state."""
+        """Detect a hand + gesture in ``frame_bgr`` and return its state."""
         rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         ts_ms = max(self._last_ts + 1, int((time.monotonic() - self._t0) * 1000))
         self._last_ts = ts_ms
-        result = self._landmarker.detect_for_video(mp_image, ts_ms)
+        result = self._recognizer.recognize_for_video(mp_image, ts_ms)
 
         if not result.hand_landmarks:
             self._last_pts = None
@@ -89,6 +90,11 @@ class HandTracker:
         pts = np.array([(p.x, p.y) for p in lm], dtype=np.float32)
         h, w = frame_bgr.shape[:2]
         self._last_pts = (pts * (w, h)).astype(np.int32)
+
+        gesture, score = "None", 0.0
+        if result.gestures and result.gestures[0]:
+            top = result.gestures[0][0]
+            gesture, score = top.category_name, float(top.score)
 
         palm = pts[[0, 5, 9, 13, 17]].mean(axis=0)
 
@@ -102,15 +108,15 @@ class HandTracker:
         pinch_dist = float(np.linalg.norm(pts[4] - pts[8])) / hand_size
         pinch = float(np.clip(1.0 - (pinch_dist - 0.15) / 0.85, 0.0, 1.0))
 
-        fingers_up = self._count_fingers(pts)
-
         return HandState(
             present=True,
             palm_x=float(np.clip(palm[0], 0.0, 1.0)),
             palm_y=float(np.clip(palm[1], 0.0, 1.0)),
             roll_angle=roll_angle,
             pinch=pinch,
-            fingers_up=fingers_up,
+            fingers_up=self._count_fingers(pts),
+            gesture=gesture,
+            gesture_score=score,
         )
 
     def draw(self, frame_bgr: np.ndarray) -> None:
@@ -126,19 +132,14 @@ class HandTracker:
             cv2.circle(frame_bgr, (int(x), int(y)), 4, (90, 240, 140), -1, cv2.LINE_AA)
 
     def close(self) -> None:
-        self._landmarker.close()
+        self._recognizer.close()
 
     @staticmethod
     def _count_fingers(pts: np.ndarray) -> int:
-        """Count extended fingers from landmark geometry (orientation agnostic).
-
-        A finger is "up" when its tip is clearly farther from the wrist than both
-        its PIP and MCP joints - true regardless of which way the hand points.
-        """
+        """Count extended fingers from landmark geometry (orientation agnostic)."""
         wrist = pts[0]
         d = lambda i: float(np.linalg.norm(pts[i] - wrist))
         count = 0
-        # Thumb: tip beyond the MCP joint and splayed away from the index MCP.
         if d(4) > d(2) * 1.05 and np.linalg.norm(pts[4] - pts[5]) > \
                 np.linalg.norm(pts[3] - pts[5]) * 1.1:
             count += 1

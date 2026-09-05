@@ -40,34 +40,51 @@ python src/main.py --demo         # no camera: scripted flight, good for a first
 python src/main.py --demo --headless --out flight.png   # render one sample frame
 ```
 
-On first live run the MediaPipe hand model (`hand_landmarker.task`, ~7.5 MB) is
+On first live run the MediaPipe model (`gesture_recognizer.task`, ~8 MB) is
 downloaded into `models/` automatically. `--demo` needs no camera and no model.
 
-Keys while running: `q` quit · `r` reset · `space` force-arm toggle.
+Keys while running: `q` quit · `r` reset · `space` take off / land.
 
-## Gestures (right hand, palm to the camera)
+## Flying (continuous, from hand pose)
 
-| Gesture | Effect |
+The mapping depends on the current **flight mode**:
+
+| Mode | palm ← → | palm ↑ ↓ | hand tilt | pinch |
+| --- | --- | --- | --- | --- |
+| `HEADING` (default) | yaw | throttle | roll | pitch forward |
+| `POSITION` | roll | throttle | yaw | pitch forward |
+| `HOVER` | — | throttle | — | — |
+
+A centered dead zone keeps the drone steady when your hand is neutral.
+
+## Gestures (discrete, MediaPipe GestureRecognizer)
+
+Hold a sign steady for ~0.4 s to fire it; relax before repeating.
+
+| Sign | Action |
 | --- | --- |
-| Move palm left / right | Yaw left / right |
-| Move palm up / down | Climb / descend |
-| Tilt hand left / right | Roll (bank and slide sideways) |
-| Pinch thumb + index | Pitch forward (fly forward) |
-| Open palm (4+ fingers) | Arm / take off |
-| Closed fist | Disarm / land |
+| ✋ Open palm | Take off / arm |
+| ✊ Closed fist | Land / disarm |
+| ✌️ Victory | Cycle flight mode (heading → position → hover) |
+| 👍 Thumb up | Speed up (slow → normal → sport) |
+| 👎 Thumb down | Speed down |
+| ☝️ Pointing up | Do a 360° spin |
+| 🤟 ILoveYou | Return to the start point and hover |
 
-A centered dead zone keeps the drone steady when your hand is roughly neutral.
+Take off, land, spin, and return-home run as short autopilot routines that
+override the hand until they finish (`MODE` turns red in the HUD).
 
 ## Layout
 
 | File | Role |
 | --- | --- |
 | `src/main.py` | Capture loop, window, keys, `--demo` / `--headless` |
-| `src/hand_tracker.py` | MediaPipe Tasks HandLandmarker → `HandState` |
-| `src/controls.py` | `HandState` → normalized `ControlInput` with smoothing |
+| `src/hand_tracker.py` | MediaPipe GestureRecognizer → `HandState` (landmarks + gesture) |
+| `src/gestures.py` | Debounces the gesture stream → mode, speed, discrete events |
+| `src/controls.py` | Hand pose + gesture state → `ControlInput`; runs autopilot routines |
 | `src/simulator.py` | Arcade quadcopter physics (world frame: x right, y forward, z up) |
 | `src/visualizer.py` | Look-at pinhole camera, 3D drone render, control HUD |
-| `src/control_types.py` | Shared dataclasses |
+| `src/control_types.py` | Shared dataclasses and the `FlightMode` enum |
 
 The simulator takes a normalized `ControlInput` (throttle, yaw_rate, roll,
 pitch, armed), so swapping the simulator for a real link (Tello, MAVLink RC

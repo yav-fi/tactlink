@@ -1,6 +1,15 @@
 """Shared data types passed between the tracker, controller, and simulator."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
+
+
+class FlightMode(Enum):
+    """What the moving hand controls. Cycled with the Victory sign."""
+
+    HEADING = "heading"    # palm x -> yaw, palm y -> throttle, tilt -> roll
+    POSITION = "position"  # palm x -> roll, palm y -> throttle, tilt -> yaw
+    HOVER = "hover"        # translation locked; only palm y -> throttle
 
 
 @dataclass
@@ -18,6 +27,21 @@ class HandState:
     roll_angle: float = 0.0  # radians, hand tilt about the view axis (+ = right side down)
     pinch: float = 0.0       # 0 = fingers apart, 1 = thumb and index touching
     fingers_up: int = 0      # count of extended fingers, 0..5
+    gesture: str = "None"    # MediaPipe canned gesture name, or "None"
+    gesture_score: float = 0.0
+
+
+@dataclass
+class GestureState:
+    """Discrete decisions distilled from the gesture stream for one frame."""
+
+    mode: FlightMode = FlightMode.HEADING
+    speed_name: str = "normal"
+    speed_scale: float = 1.0
+    active_gesture: str = "None"   # gesture currently being held (may not have fired yet)
+    hold_progress: float = 0.0     # 0..1 toward firing the held gesture
+    events: list = field(default_factory=list)  # command strings fired this frame
+    maneuver: str = ""             # autopilot routine currently running, if any
 
 
 @dataclass
