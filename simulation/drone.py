@@ -1,0 +1,289 @@
+"""Deterministic node autonomy operating only on local belief and messages."""
+
+from __future__ import annotations
+
+from collections import deque
+from typing import Any
+
+from .config import LocalizationConfig
+from .models import (
+    DroneState,
+    DroneStatusReport,
+    GPSMeasurement,
+    LocalEstimatedState,
+    LocalizationMode,
+    MessageType,
+    MissionTask,
+    MotionIntent,
+    NetworkMessage,
+    NodeIdentity,
+    PeerKnowledge,
+    TaskType,
+    Vector3,
+)
+
+
+class DroneNode:
+    """Portable autonomy core; it deliberately has no World/Simulation reference."""
+
+    def __init__(
+        self,
+        identity: NodeIdentity,
+        initial_estimate: Vector3,
+        localization: LocalizationConfig,
+        maximum_speed: float = 12.0,
+        heartbeat_interval: float = 0.5,
+        status_interval: float = 1.0,
+        peer_timeout: float = 3.0,
+    ) -> None:
+        self.identity = identity
+        self.estimated = LocalEstimatedState(position=initial_estimate.model_copy(deep=True))
+        self.state = DroneState.IDLE
+        self.current_task: MissionTask | None = None
+        self.task_queue: deque[MissionTask] = deque()
+        self.task_progress = 0.0
+        self.peers: dict[str, PeerKnowledge] = {}
+        self.known_obstacles: list[dict[str, Any]] = []
+        self.known_entities: dict[str, Vector3] = {}
+        self.local_mission_state: dict[str, dict[str, Any]] = {}
+        self.online = True
+        self._localization = localization
+        self._maximum_speed = maximum_speed
+        self._heartbeat_interval = heartbeat_interval
+        self._status_interval = status_interval
+        self._peer_timeout = peer_timeout
+        self._last_heartbeat = -heartbeat_interval
+        self._last_status = -status_interval
+        self._sequence = 0
+        self._trace_index = 0
+        self._recently_completed: list[str] = []
+        self._home = initial_estimate.model_copy(deep=True)
+
+    def update_battery_measurement(self, battery: float) -> None:
+        self.estimated.battery_estimate += (battery - self.estimated.battery_estimate) * 0.25
+
+    def update_sensor_confidence(self, confidence: float) -> None:
+        self.estimated.sensor_confidence += (confidence - self.estimated.sensor_confidence) * 0.4
+
+    def update_entity_measurement(self, entity_id: str, position: Vector3) -> None:
+        self.known_entities[entity_id] = position.model_copy(deep=True)
+
+    def update_localization(self, measurement: GPSMeasurement | None, dt: float) -> tuple[LocalizationMode, LocalizationMode]:
+        previous = self.estimated.localization_mode
+        if measurement is None or not measurement.available:
+            self.estimated.position = self.estimated.position.moved(self.estimated.velocity, dt)
+            self.estimated.position_uncertainty += self._localization.dead_reckoning_growth_mps * dt
+            self.estimated.localization_mode = LocalizationMode.DEAD_RECKONING
+        else:
+            rate = self._localization.convergence_rate
+            current = self.estimated.position
+            observed_velocity = Vector3(
+                x=(measurement.position.x - current.x) / max(dt, 1e-6),
+                y=(measurement.position.y - current.y) / max(dt, 1e-6),
+                z=(measurement.position.z - current.z) / max(dt, 1e-6),
+            )
+            self.estimated.position = Vector3(
+                x=current.x + (measurement.position.x - current.x) * rate,
+                y=current.y + (measurement.position.y - current.y) * rate,
+                z=current.z + (measurement.position.z - current.z) * rate,
+            )
+            self.estimated.velocity = Vector3(
+                x=self.estimated.velocity.x * 0.7 + observed_velocity.x * 0.3,
+                y=self.estimated.velocity.y * 0.7 + observed_velocity.y * 0.3,
+                z=self.estimated.velocity.z * 0.7 + observed_velocity.z * 0.3,
+            )
+            self.estimated.position_uncertainty += (
+                max(self._localization.nominal_uncertainty, measurement.accuracy_meters)
+                - self.estimated.position_uncertainty
+            ) * rate
+            self.estimated.localization_mode = (
+                LocalizationMode.GPS
+                if measurement.accuracy_meters <= self._localization.degraded_noise_meters * 0.5
+                else LocalizationMode.DEGRADED_GPS
+            )
+        return previous, self.estimated.localization_mode
+
+    def handle_message(self, message: NetworkMessage, now: float) -> list[NetworkMessage]:
+        replies: list[NetworkMessage] = []
+        if message.type in {MessageType.HEARTBEAT, MessageType.STATUS, MessageType.POSITION_UPDATE}:
+            payload = message.payload
+            position_data = payload.get("estimated_position")
+            self.peers[message.sender_id] = PeerKnowledge(
+                node_id=message.sender_id,
+                last_seen=now,
+                estimated_link_quality=float(payload.get("link_quality", 1.0)),
+                last_position=Vector3.model_validate(position_data) if position_data else None,
+                state=DroneState(payload.get("state", DroneState.IDLE)),
+                available=True,
+            )
+        elif message.type == MessageType.TASK_ASSIGNMENT:
+            task = MissionTask.model_validate(message.payload["task"])
+            self._accept_task(task)
+            replies.append(
+                self._message(
+                    now,
+                    MessageType.TASK_ACK,
+                    {"task_id": task.id, "accepted": True},
+                    recipient_id=message.sender_id,
+                )
+            )
+        elif message.type == MessageType.MISSION_STATE:
+            task_id = str(message.payload.get("task_id", ""))
+            self.local_mission_state[task_id] = dict(message.payload)
+        return replies
+
+    def _accept_task(self, task: MissionTask) -> None:
+        if self.current_task and self.current_task.id == task.id:
+            return
+        if any(queued.id == task.id for queued in self.task_queue):
+            return
+        if self.current_task is None:
+            self.current_task = task
+            self.state = DroneState.EXECUTING
+        elif task.priority > self.current_task.priority:
+            self.task_queue.append(self.current_task)
+            self.current_task = task
+        else:
+            self.task_queue.append(task)
+
+    def tick(self, now: float, dt: float) -> tuple[MotionIntent, list[NetworkMessage], list[str]]:
+        if not self.online:
+            return MotionIntent(hold=True), [], []
+        timed_out = self.detect_peer_loss(now)
+        messages: list[NetworkMessage] = []
+        if now - self._last_heartbeat >= self._heartbeat_interval - 1e-9:
+            messages.append(self._status_message(now, MessageType.HEARTBEAT))
+            self._last_heartbeat = now
+        if now - self._last_status >= self._status_interval - 1e-9:
+            messages.append(self._status_message(now, MessageType.STATUS))
+            self._last_status = now
+        if self.estimated.position_uncertainty > 25.0:
+            self.state = DroneState.DEGRADED
+        elif self.current_task:
+            self.state = DroneState.EXECUTING
+        else:
+            self.state = DroneState.IDLE
+        intent = self.choose_action(dt)
+        for task_id in self._recently_completed:
+            messages.append(
+                self._message(
+                    now,
+                    MessageType.TASK_COMPLETE,
+                    {"task_id": task_id},
+                    recipient_id="mission-control",
+                )
+            )
+        self._recently_completed.clear()
+        return intent, messages, timed_out
+
+    def detect_peer_loss(self, now: float) -> list[str]:
+        lost: list[str] = []
+        for peer in self.peers.values():
+            if peer.available and now - peer.last_seen > self._peer_timeout:
+                peer.available = False
+                peer.state = DroneState.LOST
+                lost.append(peer.node_id)
+        return lost
+
+    def choose_action(self, dt: float) -> MotionIntent:
+        task = self.current_task
+        if task is None:
+            return MotionIntent(hold=True)
+        target = self._task_target(task)
+        if target is None:
+            return MotionIntent(hold=True)
+        distance = self.estimated.position.distance_to(target)
+        if task.type in {TaskType.GOTO, TaskType.RETURN} and distance < 2.0:
+            self.task_progress = 1.0
+            self._complete_current_task()
+            return MotionIntent(hold=True)
+        if task.type == TaskType.TRACE and distance < 2.0:
+            if self._trace_index >= len(task.target.waypoints) - 1:
+                self.task_progress = 1.0
+                self._complete_current_task()
+                return MotionIntent(hold=True)
+            self._trace_index += 1
+            target = task.target.waypoints[self._trace_index]
+            self.task_progress = self._trace_index / max(1, len(task.target.waypoints) - 1)
+        if task.type == TaskType.SEARCH and task.target.waypoints and distance < 3.0:
+            self._trace_index = (self._trace_index + 1) % len(task.target.waypoints)
+            target = task.target.waypoints[self._trace_index]
+            self.task_progress = max(self.task_progress, self._trace_index / len(task.target.waypoints))
+        if task.type in {TaskType.WATCH, TaskType.HOLD, TaskType.REGROUP} and distance < 3.0:
+            self.task_progress = min(0.99, self.task_progress + dt * 0.02)
+            return MotionIntent(target=target, maximum_speed=self._maximum_speed * 0.2, hold=True)
+        self.task_progress = max(self.task_progress, min(0.95, self.task_progress + dt * 0.01))
+        conservative_factor = max(0.25, 1.0 - self.estimated.position_uncertainty / 100.0)
+        return MotionIntent(target=target, maximum_speed=self._maximum_speed * conservative_factor)
+
+    def _task_target(self, task: MissionTask) -> Vector3 | None:
+        if task.type in {TaskType.TRACE, TaskType.SEARCH} and task.target.waypoints:
+            return task.target.waypoints[self._trace_index % len(task.target.waypoints)]
+        if task.type == TaskType.FOLLOW and task.target.entity_id:
+            return self.known_entities.get(task.target.entity_id)
+        if task.type == TaskType.RETURN:
+            return self._home
+        return task.target.point
+
+    def _complete_current_task(self) -> None:
+        if self.current_task:
+            self._recently_completed.append(self.current_task.id)
+        self.current_task = self.task_queue.popleft() if self.task_queue else None
+        self._trace_index = 0
+        self.task_progress = 0.0 if self.current_task else 1.0
+        self.state = DroneState.EXECUTING if self.current_task else DroneState.IDLE
+
+    def _status_message(self, now: float, message_type: MessageType) -> NetworkMessage:
+        payload = {
+            "state": self.state,
+            "estimated_position": self.estimated.position.model_dump(mode="json"),
+            "position_uncertainty": self.estimated.position_uncertainty,
+            "battery_estimate": self.estimated.battery_estimate,
+            "current_task_id": self.current_task.id if self.current_task else None,
+            "workload": len(self.task_queue) + int(self.current_task is not None),
+            "capabilities": sorted(self.identity.capabilities),
+            "link_quality": self._mean_link_quality(),
+        }
+        return self._message(now, message_type, payload)
+
+    def status_report(self, now: float) -> DroneStatusReport:
+        return DroneStatusReport(
+            node_id=self.identity.node_id,
+            timestamp=now,
+            state=self.state,
+            estimated=self.estimated.model_copy(deep=True),
+            current_task_id=self.current_task.id if self.current_task else None,
+            workload=len(self.task_queue) + int(self.current_task is not None),
+            capabilities=self.identity.capabilities,
+        )
+
+    def _mean_link_quality(self) -> float:
+        active = [peer.estimated_link_quality for peer in self.peers.values() if peer.available]
+        return sum(active) / len(active) if active else 1.0
+
+    def _message(
+        self,
+        now: float,
+        message_type: MessageType,
+        payload: dict[str, Any],
+        recipient_id: str | None = None,
+    ) -> NetworkMessage:
+        self._sequence += 1
+        return NetworkMessage(
+            sender_id=self.identity.node_id,
+            recipient_id=recipient_id,
+            timestamp_sent=now,
+            type=message_type,
+            payload=payload,
+            sequence_number=self._sequence,
+        )
+
+    def fail(self) -> None:
+        self.online = False
+        self.state = DroneState.OFFLINE
+
+    def recover(self, now: float) -> None:
+        self.online = True
+        self.state = DroneState.IDLE
+        self._last_heartbeat = now - self._heartbeat_interval
+        self._last_status = now - self._status_interval
