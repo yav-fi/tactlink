@@ -1,12 +1,13 @@
 """Record hand-pose samples for a custom gesture from the webcam.
 
-    python scripts/collect_gestures.py --label thumbs_side
+    python scripts/collect_gestures.py --label two_flat
+    python scripts/collect_gestures.py --label two_flat --reset   # start this label over
     python scripts/collect_gestures.py --list
 
 Hold the pose, press SPACE to start/stop recording, Q when you have enough
-(aim for 150-300 samples per gesture, from a few angles and distances). Samples
-append to data/gestures/<label>.npy. Retrain afterwards with
-scripts/train_gestures.py.
+(aim for ~250 per gesture, from a few angles and distances). Each run APPENDS to
+data/gestures/<label>.npy - re-run to add more; `--target` is new samples per
+run, not a cap. Retrain afterwards with scripts/train_gestures.py.
 """
 
 from __future__ import annotations
@@ -49,8 +50,11 @@ def main() -> int:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--label", help="gesture name to record")
     p.add_argument("--camera", type=int, default=0)
-    p.add_argument("--target", type=int, default=250, help="stop after this many samples")
+    p.add_argument("--target", type=int, default=250,
+                   help="auto-stop after this many NEW samples this session")
     p.add_argument("--list", action="store_true", help="show sample counts and exit")
+    p.add_argument("--reset", action="store_true",
+                   help="delete this label's existing samples before recording")
     args = p.parse_args()
 
     if args.list or not args.label:
@@ -72,17 +76,30 @@ def main() -> int:
         print(f"could not open camera {args.camera}")
         return 1
 
+    if args.reset:
+        path = os.path.join(DATA_DIR, f"{args.label}.npy")
+        if os.path.exists(path):
+            os.remove(path)
+            print(f"cleared existing {args.label}.npy")
+
     existing = _counts().get(args.label, 0)
     rows: list[np.ndarray] = []
     recording = False
+    read_fails = 0
     font = cv2.FONT_HERSHEY_SIMPLEX
-    print(f"recording '{args.label}' (already have {existing}). SPACE=toggle, Q=save+quit")
+    print(f"recording '{args.label}' (already have {existing}). "
+          f"SPACE=start/stop, Q=save+quit. Auto-stops after {args.target} new samples.")
 
     try:
         while True:
             ok, frame = cap.read()
             if not ok:
-                break
+                read_fails += 1
+                if read_fails > 60:      # camera really gone, not just warming up
+                    print("camera stopped returning frames")
+                    break
+                continue
+            read_fails = 0
             frame = cv2.flip(frame, 1)
             hand = tracker.process(frame)
             tracker.draw(frame)
@@ -95,8 +112,8 @@ def main() -> int:
                         (140, 240, 140), 2)
             state = "REC" if recording else "paused"
             color = (60, 60, 240) if recording else (200, 200, 200)
-            cv2.putText(frame, f"{state}  {total}/{args.target}", (12, 58), font,
-                        0.7, color, 2)
+            cv2.putText(frame, f"{state}  new {len(rows)}/{args.target}   total {total}",
+                        (12, 58), font, 0.7, color, 2)
             if not hand.present:
                 cv2.putText(frame, "no hand", (12, 88), font, 0.6, (60, 60, 240), 2)
             cv2.imshow("collect gestures", frame)
@@ -106,8 +123,8 @@ def main() -> int:
                 break
             if key == ord(" "):
                 recording = not recording
-            if total >= args.target:
-                print("reached target")
+            if len(rows) >= args.target:
+                print("reached this session's target")
                 break
     finally:
         cap.release()
