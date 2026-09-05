@@ -51,10 +51,16 @@ package with the same target/draft pair (~65 tok/s, no LibraSpec).
 Once it's serving on `http://localhost:8081`, use it from Python:
 
 ```python
-from chat_client import complete_sync
+from chat_client import chat_sync
 
-result = complete_sync("Say hi in five words.")
+result = chat_sync("Say hi in five words.")
 print(result.text, result.timings)
 ```
 
-Set `CHAT_SERVER_URL` if the server runs on a different host/port.
+`chat_sync`/`chat` apply the model's own chat template (system/user/assistant turns)
+before sending, so replies act like an assistant instead of a raw continuation of your
+text. Use `complete`/`complete_sync` instead if you want to send an already-formatted
+prompt as-is with no template applied.
+
+Set `CHAT_SERVER_URL` if the server runs on a different host/port, or `CHAT_MODEL_DIR` if
+the chat template should be loaded from a model dir other than `models/qwen3.8-27b-4bit`.

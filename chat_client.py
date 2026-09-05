@@ -11,13 +11,35 @@ import json
 import os
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterator, Optional
+
+_DEFAULT_MODEL_DIR = Path(__file__).parent / "models" / "qwen3.8-27b-4bit"
+_tokenizer = None  # lazily loaded; only needed by chat()/chat_sync()
 
 
 @dataclass
 class CompletionResult:
     text: str
     timings: dict
+
+
+def _render_chat(user_message: str, system_message: Optional[str] = None) -> str:
+    """Apply the model's own chat template so a raw completion endpoint replies like
+    an assistant instead of free-associating a continuation of the bare text."""
+    global _tokenizer
+    if _tokenizer is None:
+        from transformers import AutoTokenizer
+
+        model_dir = os.environ.get("CHAT_MODEL_DIR", str(_DEFAULT_MODEL_DIR))
+        _tokenizer = AutoTokenizer.from_pretrained(model_dir, local_files_only=True)
+    messages = []
+    if system_message:
+        messages.append({"role": "system", "content": system_message})
+    messages.append({"role": "user", "content": user_message})
+    return _tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
+    )
 
 
 def complete(
@@ -92,3 +114,37 @@ def complete_sync(
                 timings = chunk.get("timings", {})
                 break
     return CompletionResult(text="".join(text_parts), timings=timings)
+
+
+def chat(
+    user_message: str,
+    system_message: Optional[str] = None,
+    n_predict: int = 256,
+    temperature: Optional[float] = None,
+    base_url: Optional[str] = None,
+) -> Iterator[str]:
+    """Like `complete`, but wraps `user_message` in the model's chat template first —
+    use this for actual conversation; use `complete`/`complete_sync` for raw
+    continuation of an already-formatted prompt."""
+    return complete(
+        _render_chat(user_message, system_message),
+        n_predict=n_predict,
+        temperature=temperature,
+        base_url=base_url,
+    )
+
+
+def chat_sync(
+    user_message: str,
+    system_message: Optional[str] = None,
+    n_predict: int = 256,
+    temperature: Optional[float] = None,
+    base_url: Optional[str] = None,
+) -> CompletionResult:
+    """Non-streaming version of `chat`."""
+    return complete_sync(
+        _render_chat(user_message, system_message),
+        n_predict=n_predict,
+        temperature=temperature,
+        base_url=base_url,
+    )
