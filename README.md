@@ -13,8 +13,8 @@ This repo hosts two hackathon workstreams:
 
 - **[Webcam gesture quadcopter control](#webcam-gesture-quadcopter-control)** —
   fly a simulated drone with hand gestures (`src/`).
-- **[Local LLM chat + benchmark](#model-setup)** — fast on-device chat
-  inference (`chat_client.py`, `scripts/`).
+- **[Local LLM chat + benchmark](#local-llm-chat--benchmark)** — fast on-device
+  chat inference (`chat_client.py`, `scripts/`).
 
 ---
 
@@ -75,6 +75,8 @@ override, serial) is a matter of writing one adapter that consumes the same
 struct.
 
 ---
+
+# Local LLM chat + benchmark
 
 ## Setup
 
