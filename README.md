@@ -117,7 +117,7 @@ Hold a sign steady for ~0.4 s to fire it; relax before repeating.
 | --- | --- |
 | 👍 Thumb up | **Arm + take off**; each one after that **steps the altitude up ~1.5 m** (to 9 m) |
 | 👎 Thumb down | **Land + disarm** |
-| ☝️ Pointing up | Orbit: fly out to a 10 m radius and circle the origin — point again to stop |
+| ☝️ Pointing up | Orbit: fly out to a 10 m radius and circle the origin, nose kept pointed inward — point again to stop |
 | 🤟 ILoveYou | Return to the start point and hover |
 | ✋ Open palm · ✊ Closed fist · ✌️ Victory | *no action* |
 

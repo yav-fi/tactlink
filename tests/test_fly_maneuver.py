@@ -85,6 +85,10 @@ def test_orbit_converges_to_ring_and_keeps_circling():
     assert sim.state.pos[2] > 1.0, sim.state.pos[2]
     # angle keeps advancing -> still circling
     assert len(set(np.round(angles, 1))) > 2, angles
+    # nose points inward at the origin: forward vector (-sin yaw, cos yaw) ~ -pos
+    fwd = np.array([-np.sin(sim.state.yaw), np.cos(sim.state.yaw)])
+    inward = -sim.state.pos[:2] / r
+    assert float(fwd @ inward) > 0.9, (fwd, inward)
 
 
 def test_orbit_repeat_gesture_stops():

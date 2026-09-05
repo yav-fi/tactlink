@@ -201,10 +201,11 @@ class GestureController:
             cmd.roll = float(body[0]) * mag
             cmd.pitch = float(body[1]) * mag
             cmd.throttle = self._alt_throttle(state)
-            # Point the nose along the direction of travel.
-            desired_yaw = math.atan2(-world_v[0], world_v[1])
+            # Keep the nose pointed inward at the origin while circling.
+            inward = -radial
+            desired_yaw = math.atan2(-inward[0], inward[1])
             err = (desired_yaw - state.yaw + math.pi) % (2 * math.pi) - math.pi
-            cmd.yaw_rate = float(np.clip(err * 1.2, -1.0, 1.0))
+            cmd.yaw_rate = float(np.clip(err * 1.5, -1.0, 1.0))
         return cmd
 
     def _blend(self, target: ControlInput) -> None:
