@@ -51,14 +51,8 @@ def _load_mission_integration():
 _DEMO_GESTURES = [
     (1.5, 2.7, "Thumb_Up"),       # arm + takeoff
     (6.0, 7.3, "Pointing_Up"),    # orbit the origin (until the next command)
-    (11.0, 11.7, "Open_Palm"),    # combo: open ->
-    (12.1, 12.8, "Closed_Fist"),  #        fist ->
-    (13.2, 13.9, "Open_Palm"),    #        open  => return home (within 3 s)
-    (17.0, 17.8, "Victory"),      # wiper combo: V up ->
-    (18.2, 19.0, "v_flat"),       #        V flat ->
-    (19.4, 20.2, "Victory"),      #        V up ->
-    (20.6, 21.4, "v_flat"),       #        V flat  => fly pointed (east)
-    (25.0, 26.5, "Thumb_Down"),   # disarm + land
+    (13.0, 14.0, "ILoveYou"),     # return home + hover
+    (18.0, 19.5, "Thumb_Down"),   # disarm + land
 ]
 
 

@@ -115,17 +115,20 @@ Hold a sign steady for ~0.4 s to fire it; relax before repeating.
 
 | Sign | Action |
 | --- | --- |
-| ✋ Open palm | Take off / arm |
-| ✊ Closed fist | Land / disarm |
-| ✌️ Victory | Cycle flight mode *(no-op unless hand flight is on)* |
-| 👍 Thumb up | Speed up *(no-op unless hand flight is on)* |
-| 👎 Thumb down | Speed down *(no-op unless hand flight is on)* |
+| 👍 Thumb up | **Arm + take off** |
+| 👎 Thumb down | **Land + disarm** |
 | ☝️ Pointing up | Orbit: fly out to a 10 m radius and circle the origin — point again to stop |
 | 🤟 ILoveYou | Return to the start point and hover |
+| ✋ Open palm · ✊ Closed fist · ✌️ Victory | *no standalone action — combo ingredients only* |
 
 Take off, land, orbit, return-home (and the `fly_*` dashes) run as autopilot
 routines that take over until they finish (`MODE` turns red in the HUD). Orbit
 runs until you point again, or any other command interrupts it.
+
+A gesture the model isn't ~55% sure of is ignored, which cuts flickery misreads.
+`Open_Palm` / `Closed_Fist` / `Victory` are set to `null` in
+`config/gesture_actions.json` so a misread of those does nothing on its own; they
+still work as combo steps.
 
 ## Custom gestures (train your own)
 
@@ -160,28 +163,25 @@ local.
 
 ## Gesture combos (sequences)
 
-Several gestures in order, inside a time window, can mean one command - like a
-gesture password. Configured in `config/gesture_sequences.json`:
+**Combos are off right now** (`"sequences": []` in
+`config/gesture_sequences.json`). The machinery stays: several gestures in order,
+inside a time window, fire one command - like a gesture password.
 
 ```json
 {
   "single_delay": 0.6,
   "sequences": [
-    { "pattern": ["Open_Palm", "Closed_Fist", "Open_Palm"], "window": 3.0, "action": "return_home" },
     { "pattern": ["Victory", "v_flat", "Victory", "v_flat"], "window": 5.0, "action": "fly_pointed" }
   ]
 }
 ```
 
-So flashing **open → fist → open within 3 s** triggers return-home. `pattern`
-entries are gesture names (canned or your own trained labels); `action` is any of
-the actions above.
-
-The second combo is the **"fly where I point"** gesture: a spread ✌️ V rotated
-**up → flat → up → flat** (a double wiper) within 5 s, then the drone dashes in
-the direction the fingers point on the final flat pose. `v_flat` is a custom
-label you train (spread V held horizontal - `python scripts/collect_gestures.py
---label v_flat`); the up pose reuses canned `Victory`.
+`pattern` entries are gesture names (canned or your own trained labels); `action`
+is any of the actions above plus `fly_pointed` (dash toward where the fingers
+point when the combo completes). The example above is the planned **"fly where I
+point"** wiper - a spread ✌️ V rotated up → flat → up → flat - and needs a
+trained `v_flat` label (`python scripts/collect_gestures.py --label v_flat`)
+before it can fire.
 
 Because a combo's gestures could also fire on their own (open palm = take off),
 any gesture used in a pattern has its single-gesture command **held back
