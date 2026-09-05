@@ -52,10 +52,10 @@ _DEMO_GESTURES = [
     (1.5, 3.0, "Open_Palm"),      # takeoff
     (7.0, 8.5, "Victory"),        # cycle flight mode
     (12.0, 13.3, "Pointing_Up"),  # 360 spin
-    (16.5, 17.4, "Open_Palm"),    # combo: open ->
-    (17.9, 18.8, "Closed_Fist"),  #        fist ->
-    (20.3, 21.2, "Open_Palm"),    #        open  => return home
-    (26.0, 28.0, "Closed_Fist"),  # land
+    (16.5, 17.2, "Open_Palm"),    # combo: open ->
+    (17.6, 18.3, "Closed_Fist"),  #        fist ->
+    (18.7, 19.4, "Open_Palm"),    #        open  => return home (within 3 s)
+    (25.0, 27.0, "Closed_Fist"),  # land
 ]
 
 
@@ -107,12 +107,43 @@ def _runtime_panel(gesture: str, status: str, width: int = 640, height: int = 72
     return panel
 
 
+def _gesture_check_panel(hand, gstate, log, width: int = 640, height: int = 720) -> np.ndarray:
+    """Dry-run panel: shows what the recognizer + interpreter see, nothing acts."""
+    panel = np.full((height, width, 3), (28, 26, 24), dtype=np.uint8)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(panel, "GESTURE CHECK  (no drone, nothing acts)", (24, 34), font,
+                0.6, (90, 220, 130), 1, cv2.LINE_AA)
+
+    g = hand.gesture if hand.present else "None"
+    src = f"  [{hand.gesture_source}]" if g != "None" else ""
+    cv2.putText(panel, f"{g}{src}", (24, 80), font, 0.9, (235, 235, 235), 2, cv2.LINE_AA)
+    if hand.present and g != "None":
+        cv2.putText(panel, f"score {hand.gesture_score:.2f}", (24, 106), font, 0.5,
+                    (150, 150, 150), 1, cv2.LINE_AA)
+
+    cv2.rectangle(panel, (24, 120), (224, 132), (60, 58, 55), -1)
+    cv2.rectangle(panel, (24, 120), (24 + int(200 * gstate.hold_progress), 132),
+                  (90, 220, 130), -1)
+
+    if gstate.sequence_hint:
+        cv2.putText(panel, f"combo: {gstate.sequence_hint}", (24, 168), font, 0.6,
+                    (90, 200, 255), 1, cv2.LINE_AA)
+
+    cv2.putText(panel, "fired:", (24, 220), font, 0.55, (150, 150, 150), 1, cv2.LINE_AA)
+    for i, line in enumerate(list(log)[-14:]):
+        cv2.putText(panel, line, (24, 248 + i * 26), font, 0.55, (235, 235, 235), 1,
+                    cv2.LINE_AA)
+    return panel
+
+
 def run(args: argparse.Namespace) -> int:
     controller = GestureController()
     interp = GestureInterpreter()
-    runtime_mode = bool(args.mission_url)
-    sim = None if runtime_mode else QuadSimulator()
-    viz = None if runtime_mode else Visualizer()
+    check_mode = args.check_gestures
+    runtime_mode = bool(args.mission_url) and not check_mode
+    sim = None if (runtime_mode or check_mode) else QuadSimulator()
+    viz = None if (runtime_mode or check_mode) else Visualizer()
+    event_log: list[str] = []
     mission_adapter = mission_client = mission_error_cls = None
     if runtime_mode:
         adapter_cls, client_cls, mission_error_cls = _load_mission_integration()
@@ -191,7 +222,12 @@ def run(args: argparse.Namespace) -> int:
 
             if dt > 0:
                 fps = 0.9 * fps + 0.1 * (1.0 / dt) if fps else 1.0 / dt
-            if runtime_mode:
+            if check_mode:
+                for ev in gstate.events:
+                    event_log.append(f"{elapsed:6.1f}s  {ev}")
+                    print(f"[{elapsed:6.1f}s] {ev}")
+                side_frame = _gesture_check_panel(hand, gstate, event_log)
+            elif runtime_mode:
                 gesture = hand.gesture if hand.present else "None"
                 side_frame = _runtime_panel(gesture, runtime_status)
             else:
@@ -219,7 +255,8 @@ def run(args: argparse.Namespace) -> int:
                 controller = GestureController()
                 interp = GestureInterpreter()
             if key == ord(" "):
-                kbd_event = "land" if runtime_mode or sim.state.armed else "takeoff"
+                armed = sim is not None and sim.state.armed
+                kbd_event = "land" if (runtime_mode or armed) else "takeoff"
     finally:
         if cap is not None:
             cap.release()
@@ -241,6 +278,9 @@ def main() -> int:
     p.add_argument("--duration", type=float, default=10.0,
                    help="seconds to simulate before exiting in --headless")
     p.add_argument("--out", type=str, default="", help="path to save a composite frame")
+    p.add_argument("--check-gestures", action="store_true",
+                   help="dry run: webcam + recognition + HUD only, the drone does "
+                        "not move and nothing is submitted")
     p.add_argument(
         "--mission-url",
         default="",

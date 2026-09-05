@@ -70,9 +70,11 @@ pip install -r requirements.txt
 ## Run
 
 ```sh
-python src/main.py                # live webcam, camera 0
-python src/main.py --camera 1     # a different camera
-python src/main.py --demo         # no camera: scripted flight, good for a first check
+python src/main.py                    # live webcam, camera 0
+python src/main.py --camera 1         # a different camera
+python src/main.py --demo             # no camera: scripted flight, good for a first check
+python src/main.py --check-gestures   # live webcam, recognition + HUD only - the drone
+                                      #   does not move and nothing is submitted
 python src/main.py --demo --headless --out flight.png   # render one sample frame
 ```
 
@@ -80,6 +82,14 @@ On first live run the MediaPipe model (`gesture_recognizer.task`, ~8 MB) is
 downloaded into `models/` automatically. `--demo` needs no camera and no model.
 
 Keys while running: `q` quit · `r` reset · `space` take off / land.
+
+**Testing gestures safely.** `--check-gestures` is the safe way to rehearse hand
+poses and combos: it shows the recognized gesture, hold bar, partial-combo hint,
+and a log of what *would* fire, without moving the (simulated) drone or touching
+a runtime. For the recognition/timing logic itself, `python tests/test_sequences.py`
+runs a deterministic, camera-free check of combos and the single-gesture delay.
+When first tuning a combo, map it to a harmless action (e.g. `speed_up`) so a
+misfire costs nothing.
 
 ## Flying (continuous, from hand pose)
 
