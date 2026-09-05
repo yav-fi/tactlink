@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from server.main import create_app
+from server.main import _default_engine, create_app
 from simulation.models import InterferenceConfig
 
 from .test_simulation import engine_for_test
+
+
+def test_default_demo_engine_includes_a_relay_specialist(monkeypatch) -> None:
+    monkeypatch.delenv("SIMULATION_DRONE_COUNT", raising=False)
+    engine = _default_engine()
+    assert len(engine.drones) == 4
+    assert any("relay" in drone.identity.capabilities for drone in engine.drones.values())
 
 
 def test_api_creates_mission_and_serializes_state() -> None:

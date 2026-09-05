@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
@@ -32,12 +33,24 @@ from .websocket import WebSocketHub
 PLAN_EVALUATION_SECONDS = 1.0
 
 
+def _default_engine() -> SimulationEngine:
+    """Build the demo runtime with enough nodes to include a relay specialist."""
+    raw_count = os.environ.get("SIMULATION_DRONE_COUNT", "4")
+    try:
+        drone_count = int(raw_count)
+    except ValueError as exc:
+        raise RuntimeError("SIMULATION_DRONE_COUNT must be an integer") from exc
+    if not 1 <= drone_count <= 32:
+        raise RuntimeError("SIMULATION_DRONE_COUNT must be between 1 and 32")
+    return SimulationEngine(drone_count=drone_count)
+
+
 def create_app(
     engine: SimulationEngine | None = None,
     start_runner: bool = True,
     mission_backend: str = "local-llm",
 ) -> FastAPI:
-    runtime = engine or SimulationEngine()
+    runtime = engine or _default_engine()
     hub = WebSocketHub()
 
     async def simulation_loop() -> None:

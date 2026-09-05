@@ -59,6 +59,33 @@ def assign_single_task(engine: SimulationEngine, target: Vector3 | None = None) 
     return task
 
 
+def test_central_mode_keeps_delivered_assignments_in_operator_projection() -> None:
+    config = SimulationConfig(
+        seed=31,
+        tick_rate_hz=10,
+        heartbeat_interval=0.2,
+        status_interval=0.2,
+        peer_timeout=0.6,
+        network=NetworkConfig(base_latency=0.0, jitter=0.0, base_packet_loss=0.0),
+    )
+    engine = SimulationEngine(config, scenario=ScenarioPreset.NORMAL, drone_count=3, mode="baseline")
+    engine.set_interference(InterferenceConfig())
+    task = engine.submit_mission(
+        MissionCommand(
+            type=TaskType.SEARCH,
+            target=MissionTarget(region_id="ALPHA"),
+            required_capabilities={"camera"},
+            desired_units=2,
+            minimum_units=1,
+        )
+    )
+    advance_until(engine, lambda: len(task.assigned_nodes) == 2)
+    failed = task.assigned_nodes[0]
+    engine.fail_drone(failed)
+    advance_until(engine, lambda: failed not in task.assigned_nodes and bool(task.assigned_nodes))
+    assert all(engine.world.is_online(node_id) for node_id in task.assigned_nodes)
+
+
 def test_drone_moves_toward_waypoint() -> None:
     engine = engine_for_test()
     target = Vector3(x=100, y=100, z=30)

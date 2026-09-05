@@ -208,8 +208,9 @@ struct.
 Start the local chat server and mission runtime in separate terminals, then translate and submit a natural-language instruction:
 
 ```sh
-./scripts/start_chat_server.sh
-.venv/bin/uvicorn server.main:app --reload
+./scripts/start_chat_server.sh --model qwen3.5-9b
+SIMULATION_DRONE_COUNT=4 CHAT_SERVER_URL=http://127.0.0.1:8081 \
+  .venv/bin/uvicorn server.main:app --reload
 .venv/bin/python -m integrations.llm_mission \
   "send two drones to search sector alpha" --submit
 ```
@@ -242,12 +243,16 @@ Python `SimulationSnapshot` and never advances drone physics in the browser.
 Run the UI beside the runtime on a non-conflicting port:
 
 ```sh
-# Terminal 1: distributed runtime + lightweight console
-.venv/bin/uvicorn server.main:app --reload --host 127.0.0.1 --port 8000
+# Terminal 1: Qwen 3.5 9B mission intelligence
+./scripts/start_chat_server.sh --model qwen3.5-9b
 
-# Terminal 2: Cesium operator UI
+# Terminal 2: four-node distributed runtime + lightweight console
+SIMULATION_DRONE_COUNT=4 CHAT_SERVER_URL=http://127.0.0.1:8081 \
+  .venv/bin/uvicorn server.main:app --reload --host 127.0.0.1 --port 8000
+
+# Terminal 3: Cesium operator UI
 npm --prefix 3d-mapping install
-npm --prefix 3d-mapping run dev
+VITE_RUNTIME_URL=http://127.0.0.1:8000 npm --prefix 3d-mapping run dev
 ```
 
 - Runtime console and API: <http://127.0.0.1:8000>
@@ -258,7 +263,11 @@ Connected mode consumes `ws://127.0.0.1:8000/ws`, converts backend local
 coordinates as x=east, y=north, z=up metres from the snapshot origin, and shows
 truth/estimated positions, uncertainty, plans, missions, links, relay roles,
 node details, and topology metrics. Its interference, preset, failure, control,
-pause, and reset controls call the FastAPI runtime. Local mode's mission JSON
+pause, and reset controls call the FastAPI runtime. Its command workspace can
+preview and confirm natural-language plans, apply live amendments, and ask
+read-only questions grounded in the current mission snapshot. The default four
+nodes include a relay-capable specialist; override the bounded demo fleet with
+`SIMULATION_DRONE_COUNT=1..32`. Local mode's mission JSON
 (`goto`, `hover`, `orbit`, `return_home`) remains browser-only.
 
 See [`3d-mapping/README.md`](3d-mapping/README.md) for Cesium token setup,
@@ -374,9 +383,22 @@ computed from the two simulations; no result is hardcoded:
 
 ```sh
 .venv/bin/python -m simulation.benchmark --seed 49281
+.venv/bin/python -m simulation.benchmark --seed 49281 --ablation --bandwidth 10
+.venv/bin/python -m simulation.replay runs/<run-directory>/fabric.jsonl
 ```
 
 Artifacts are written under `runs/` and intentionally ignored by Git.
+
+Run the mission-intelligence scorecard against the deterministic baseline or
+the live Qwen server with:
+
+```sh
+.venv/bin/python -m integrations.mission_compiler --baseline evaluate \
+  --output docs/evaluations/mission-baseline.json
+CHAT_SERVER_URL=http://127.0.0.1:8081 \
+  .venv/bin/python -m integrations.mission_compiler evaluate \
+  --output docs/evaluations/mission-qwen3.5-9b.json
+```
 
 ## External DroneNode worker
 

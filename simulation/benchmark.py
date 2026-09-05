@@ -29,9 +29,29 @@ def run_mode(
     config: SimulationConfig | None = None,
     label: str | None = None,
 ) -> dict[str, object]:
+    if config is None:
+        if mode == "baseline":
+            baseline_adaptive = AdaptiveConfig(
+                communication_aware_routing=False,
+                multi_relay_coordination=False,
+            )
+            baseline_adaptive.communication.enabled = False
+            baseline_adaptive.prediction.enabled = False
+            baseline_adaptive.counterfactual.enabled = False
+            baseline_adaptive.edge_compute.enabled = False
+            config = SimulationConfig(
+                seed=seed,
+                tick_rate_hz=10,
+                allocator=AllocatorWeights(workload=100),
+                network=NetworkConfig(adaptive_messaging=False),
+                adaptive=baseline_adaptive,
+            )
+        else:
+            config = SimulationConfig(
+                seed=seed, tick_rate_hz=10, allocator=AllocatorWeights(workload=100)
+            )
     engine = SimulationEngine(
-        config
-        or SimulationConfig(seed=seed, tick_rate_hz=10, allocator=AllocatorWeights(workload=100)),
+        config,
         scenario=ScenarioPreset.NORMAL,
         drone_count=4,
         mode=mode,
@@ -60,9 +80,14 @@ def run_mode(
         )
     )
     recovery_after_loss: float | None = None
-    failed_at = 24.0
-    failed_node = "drone-3"
+    # Fail an actually assigned search vehicle while the objective is active.
+    # The previous hard-coded t=24/drone-3 event often happened after SEARCH
+    # had already completed, so its "recovery" metric did not measure recovery.
+    failed_at = 14.0
+    failed_node: str | None = None
+    recovery_target = search.minimum_units
     network_recovery: float | None = None
+    network_degraded = False
     for step in range(int(duration * 10)):
         now = round(step / 10, 1)
         if now == 10.0:
@@ -70,17 +95,24 @@ def run_mode(
         elif now == 20.0:
             engine.fail_control()
         elif now == failed_at:
-            engine.fail_drone(failed_node, source="benchmark")
+            holders = sorted(
+                node_id for node_id in search.assigned_nodes if engine.world.is_online(node_id)
+            )
+            if holders:
+                failed_node = holders[0]
+                engine.fail_drone(failed_node, source="benchmark")
         elif now == 32.0:
             engine.inject_event(ScenarioEvent(timestamp=now, type="NETWORK_PARTITION", affected_nodes=["drone-1", "drone-3"], severity=1, duration=6))
         elif now == 45.0:
             engine.inject_event(ScenarioEvent(timestamp=now, type="GPS_OUTAGE", affected_nodes=["drone-3"], severity=1, duration=10))
         snapshot = engine.tick(0.1)
-        if recovery_after_loss is None and engine.time > failed_at:
+        if failed_node and recovery_after_loss is None and engine.time > failed_at:
             assigned = [node for node in search.assigned_nodes if engine.world.is_online(node)]
-            if failed_node not in assigned and len(assigned) >= search.desired_units:
+            if failed_node not in search.assigned_nodes and len(assigned) >= recovery_target:
                 recovery_after_loss = engine.time - failed_at
-        if network_recovery is None and engine.time >= 10 and snapshot.network.network_health >= 0.7:
+        if engine.time >= 10 and snapshot.network.network_health < 0.7:
+            network_degraded = True
+        if network_degraded and network_recovery is None and snapshot.network.network_health >= 0.7:
             network_recovery = engine.time - 10.0
     final = engine.snapshot(event_limit=500)
     recorder.record_snapshot(final)
@@ -102,6 +134,7 @@ def run_mode(
         "observation_count": final.world_knowledge.observation_count,
         "tasks_completed": sum(task.status == "COMPLETED" for task in final.missions),
         "recovery_after_node_loss_seconds": recovery_after_loss,
+        "failed_node": failed_node,
         "network_recovery_seconds": network_recovery,
         "control_result": "continued" if any(drone.truth.online and drone.current_task_id for drone in final.drones) else "halted",
         "world_model_sync_lag": final.world_knowledge.world_model_sync_lag,

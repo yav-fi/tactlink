@@ -215,6 +215,7 @@ class MissionManager:
                 continue
             previous_assignment = list(task.assigned_nodes)
             claims: dict[tuple[str, ...], int] = {}
+            active_holders: list[str] = []
             completed = False
             progress = task.progress
             for node in nodes:
@@ -225,6 +226,7 @@ class MissionManager:
                     claims[winners] = claims.get(winners, 0) + 1
                 current = getattr(node, "current_task", None)
                 if current is not None and current.id == task_id:
+                    active_holders.append(getattr(node, "identity").node_id)
                     progress = max(progress, float(getattr(node, "task_progress", 0.0)))
             if completed:
                 task.status = TaskStatus.COMPLETED
@@ -243,6 +245,13 @@ class MissionManager:
                         {"previous": previous_assignment, "winners": task.assigned_nodes},
                     )
                     self._ever_assigned.add(task_id)
+            elif active_holders:
+                # Central assignments do not create peer-auction claim maps.
+                # The executing nodes themselves are still authoritative
+                # evidence that the assignment arrived.
+                task.assigned_nodes = sorted(active_holders)
+                task.status = TaskStatus.IN_PROGRESS
+                task.progress = progress
             elif task.status not in {TaskStatus.COMPLETED, TaskStatus.CANCELLED}:
                 task.assigned_nodes = []
                 task.status = TaskStatus.PENDING

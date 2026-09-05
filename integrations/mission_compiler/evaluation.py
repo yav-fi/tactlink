@@ -95,7 +95,8 @@ def run_evaluation(backend: str = "baseline", chat_url: str | None = None) -> di
         observed_types = {item.type.value for item in plan.objectives} if plan else set()
         observed_regions = {item.target.region_id for item in plan.objectives if item.target.region_id} if plan else set()
         status_correct = result.status in case.expected
-        clarification_expected = case.expected == frozenset({CompileStatus.NEEDS_CLARIFICATION})
+        clarification_allowed = CompileStatus.NEEDS_CLARIFICATION in case.expected
+        clarification_required = case.expected == frozenset({CompileStatus.NEEDS_CLARIFICATION})
         semantics_correct = status_correct and (not case.expected_types or case.expected_types <= observed_types)
         grounding_correct = status_correct and (case.expected_region is None or case.expected_region in observed_regions)
         rows.append({
@@ -109,8 +110,13 @@ def run_evaluation(backend: str = "baseline", chat_url: str | None = None) -> di
             "semantic_correct": semantics_correct,
             "grounding_correct": grounding_correct,
             "clarification_correct": (
-                result.status == CompileStatus.NEEDS_CLARIFICATION
-            ) == clarification_expected,
+                clarification_allowed
+                if result.status == CompileStatus.NEEDS_CLARIFICATION
+                else not clarification_required
+            ),
+            "clarification_question": result.clarification_question,
+            "rejection_reason": result.rejection_reason,
+            "interpretation_summary": result.interpretation_summary,
             "plan": plan.model_dump(mode="json") if plan else None,
             "warnings": result.warnings,
             "diagnostics": result.diagnostics,
@@ -128,6 +134,9 @@ def run_evaluation(backend: str = "baseline", chat_url: str | None = None) -> di
             "observed_status": result.status.value,
             "status_correct": result.status == expected,
             "applied": result.applied,
+            "clarification_question": result.clarification_question,
+            "rejection_reason": result.rejection_reason,
+            "interpretation_summary": result.interpretation_summary,
             "warnings": result.warnings,
             "diagnostics": result.diagnostics,
         })
