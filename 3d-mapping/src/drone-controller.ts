@@ -45,7 +45,13 @@ export class DroneController {
       id: "drone_1",
       name: "Drone 1",
       position: new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, home.altitude)),
-      point: { pixelSize: 15, color: Cesium.Color.fromCssColorString("#35e8ff"), outlineColor: Cesium.Color.WHITE, outlineWidth: 2 },
+      orientation: new Cesium.ConstantProperty(this.orientationAt(home)),
+      box: {
+        dimensions: new Cesium.Cartesian3(16, 10, 4),
+        material: Cesium.Color.fromCssColorString("#35e8ff").withAlpha(0.9),
+        outline: true,
+        outlineColor: Cesium.Color.WHITE,
+      },
       label: { text: "DRONE 1", font: "600 13px system-ui", fillColor: Cesium.Color.WHITE, showBackground: true, backgroundColor: Cesium.Color.fromAlpha(Cesium.Color.BLACK, 0.7), pixelOffset: new Cesium.Cartesian2(0, -28) },
     });
   }
@@ -112,5 +118,11 @@ export class DroneController {
 
   private syncEntity(): void {
     this.entity.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude));
+    this.entity.orientation = new Cesium.ConstantProperty(this.orientationAt(this.position));
+  }
+
+  private orientationAt(position: Coordinates): Cesium.Quaternion {
+    const cartesian = Cesium.Cartesian3.fromDegrees(position.longitude, position.latitude, position.altitude);
+    return Cesium.Transforms.headingPitchRollQuaternion(cartesian, new Cesium.HeadingPitchRoll(Cesium.Math.toRadians(90), 0, 0));
   }
 }

@@ -7,6 +7,6 @@ body { margin: 0; overflow: hidden; }
 h1 { margin: 0; font-size: 1.35rem; } h2 { margin: 20px 0 8px; font-size: .88rem; } p { line-height: 1.4; }
 .status { margin: 9px 0 0; color: #b6cadf; font-size: .82rem; } .hint { color: #9db1c5; font-size: .76rem; }
 textarea { width: 100%; min-height: 190px; resize: vertical; padding: 10px; border: 1px solid #31516d; border-radius: 9px; color: #e7f6ff; background: #0b1a2c; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.actions { display: flex; gap: 8px; margin-top: 9px; } button { padding: 9px 11px; border: 0; border-radius: 8px; color: #052033; background: #52d8ff; cursor: pointer; font-weight: 750; } button.secondary { color: #dcefff; background: #203c56; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; } button { padding: 9px 11px; border: 0; border-radius: 8px; color: #052033; background: #52d8ff; cursor: pointer; font-weight: 750; } button.secondary { color: #dcefff; background: #203c56; }
 .state { display: grid; grid-template-columns: 95px 1fr; gap: 5px 10px; margin: 0; font-size: .82rem; } dt { color: #9db1c5; } dd { margin: 0; font-variant-numeric: tabular-nums; }
 @media (max-width: 600px) { .mission-panel { max-height: calc(100vh - 36px); overflow-y: auto; } }

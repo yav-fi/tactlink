@@ -30,6 +30,18 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
 viewer.scene.globe.enableLighting = true;
 viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude - 0.008, 900), orientation: { heading: 0, pitch: Cesium.Math.toRadians(-35), roll: 0 } });
 const drone = new DroneController(viewer, home);
+const activeCameraKeys = new Set<string>();
+
+function flyToFreeCameraOverview(): void {
+  viewer.trackedEntity = undefined;
+  viewer.scene.screenSpaceCameraController.enableInputs = true;
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude - 0.008, 900),
+    orientation: { heading: 0, pitch: Cesium.Math.toRadians(-35), roll: 0 },
+    duration: 0.8,
+  });
+  commandStatus.textContent = "Free camera active. Drag to look; W/A/S/D/R/F moves the camera.";
+}
 
 if (token) {
   try {
@@ -57,12 +69,34 @@ document.querySelector<HTMLButtonElement>("#reset-mission")!.addEventListener("c
   drone.reset();
   commandStatus.textContent = "Drone reset to its home coordinate.";
 });
+document.querySelector<HTMLButtonElement>("#free-camera")!.addEventListener("click", flyToFreeCameraOverview);
+
+window.addEventListener("keydown", (event) => {
+  if (event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement) return;
+  if (["KeyW", "KeyA", "KeyS", "KeyD", "KeyR", "KeyF"].includes(event.code)) {
+    activeCameraKeys.add(event.code);
+    event.preventDefault();
+  }
+});
+window.addEventListener("keyup", (event) => activeCameraKeys.delete(event.code));
+
+function updateFreeCamera(deltaSeconds: number): void {
+  if (activeCameraKeys.size === 0) return;
+  const distance = Math.max(viewer.camera.positionCartographic.height * 0.35, 20) * deltaSeconds;
+  if (activeCameraKeys.has("KeyW")) viewer.camera.moveForward(distance);
+  if (activeCameraKeys.has("KeyS")) viewer.camera.moveBackward(distance);
+  if (activeCameraKeys.has("KeyA")) viewer.camera.moveLeft(distance);
+  if (activeCameraKeys.has("KeyD")) viewer.camera.moveRight(distance);
+  if (activeCameraKeys.has("KeyR")) viewer.camera.moveUp(distance);
+  if (activeCameraKeys.has("KeyF")) viewer.camera.moveDown(distance);
+}
 
 let previousTime = Cesium.JulianDate.clone(viewer.clock.currentTime);
 viewer.clock.onTick.addEventListener((clock) => {
   const deltaSeconds = Math.max(0, Math.min(0.1, Cesium.JulianDate.secondsDifference(clock.currentTime, previousTime)));
   previousTime = Cesium.JulianDate.clone(clock.currentTime, previousTime);
   drone.update(deltaSeconds);
+  updateFreeCamera(deltaSeconds);
   const snapshot = drone.snapshot();
   stateElement.innerHTML = [
     ["State", snapshot.state], ["Position", `${snapshot.latitude.toFixed(5)}, ${snapshot.longitude.toFixed(5)}`], ["Altitude", `${snapshot.altitude.toFixed(0)} m`], ["Step", snapshot.totalSteps ? `${snapshot.currentStep} / ${snapshot.totalSteps}` : "—"],

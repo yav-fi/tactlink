@@ -19,6 +19,7 @@
           <div class="actions">
             <button id="run-mission" type="button">Run mission</button>
             <button id="reset-mission" type="button" class="secondary">Reset drone</button>
+            <button id="free-camera" type="button" class="secondary">Free camera</button>
           </div>
           <p id="command-status" class="hint">Commands execute locally and deterministically.</p>
         </section>
@@ -26,7 +27,7 @@
           <h2>Drone state</h2>
           <dl id="drone-state" class="state"></dl>
         </section>
-        <p class="hint">Add a Cesium ion token in <code>.env</code> to stream Google Photorealistic 3D Tiles.</p>
+        <p class="hint">Free camera: drag to look, scroll to zoom, and use W/A/S/D/R/F to move. Add a Cesium ion token in <code>.env</code> to stream Google Photorealistic 3D Tiles.</p>
       </aside>
     </main>
     <script type="module" src="/src/main.ts"></script>
