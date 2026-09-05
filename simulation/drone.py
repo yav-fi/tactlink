@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections import deque
 from typing import Any
 
+from planning import PlannerResult
+
+from .autonomy import PlanningAutonomy
 from .config import LocalizationConfig
 from .models import (
     DroneState,
@@ -23,6 +26,10 @@ from .models import (
 )
 
 
+WAYPOINT_CAPTURE_RADIUS = 6.0
+ARRIVAL_RADIUS = 2.5
+
+
 class DroneNode:
     """Portable autonomy core; it deliberately has no World/Simulation reference."""
 
@@ -35,6 +42,7 @@ class DroneNode:
         heartbeat_interval: float = 0.5,
         status_interval: float = 1.0,
         peer_timeout: float = 3.0,
+        autonomy: "PlanningAutonomy | None" = None,
     ) -> None:
         self.identity = identity
         self.estimated = LocalEstimatedState(position=initial_estimate.model_copy(deep=True))
@@ -56,11 +64,23 @@ class DroneNode:
         self._last_status = -status_interval
         self._sequence = 0
         self._trace_index = 0
+        self._autonomy = autonomy
+        self._planner = autonomy.new_planner() if autonomy else None
+        self.plan: PlannerResult | None = None
+        self._waypoint_index = 0
         self._recently_completed: list[str] = []
         self._home = initial_estimate.model_copy(deep=True)
 
     def update_battery_measurement(self, battery: float) -> None:
         self.estimated.battery_estimate += (battery - self.estimated.battery_estimate) * 0.25
+
+    @property
+    def home(self) -> Vector3:
+        return self._home.model_copy(deep=True)
+
+    @property
+    def maximum_speed(self) -> float:
+        return self._maximum_speed
 
     def update_sensor_confidence(self, confidence: float) -> None:
         self.estimated.sensor_confidence += (confidence - self.estimated.sensor_confidence) * 0.4
@@ -163,7 +183,7 @@ class DroneNode:
             self.state = DroneState.EXECUTING
         else:
             self.state = DroneState.IDLE
-        intent = self.choose_action(dt)
+        intent = self.choose_action(now, dt)
         for task_id in self._recently_completed:
             messages.append(
                 self._message(
@@ -185,10 +205,101 @@ class DroneNode:
                 lost.append(peer.node_id)
         return lost
 
-    def choose_action(self, dt: float) -> MotionIntent:
+    def choose_action(self, now: float, dt: float) -> MotionIntent:
+        """Use planner-driven motion when configured, otherwise fly directly."""
+
         task = self.current_task
         if task is None:
+            self.plan = None
             return MotionIntent(hold=True)
+        if self._planner is not None:
+            intent = self._planned_action(now, dt, task)
+            if intent is not None:
+                return intent
+            return MotionIntent(hold=True)
+        return self._direct_action(dt, task)
+
+    def _planned_action(self, now: float, dt: float, task: MissionTask) -> MotionIntent | None:
+        """Ask MissionPlanner where to go; ``None`` means planning failed."""
+
+        try:
+            context = self._autonomy.build_context(self, now)
+            stale = (
+                self.plan is None
+                or self.plan.task_id != task.id
+                or self._planner.should_replan(context, self.plan).should_replan
+            )
+            if stale:
+                self.plan = self._planner.plan(context)
+                self._waypoint_index = 0
+        except Exception:  # a planner fault must never stop the runtime
+            self.plan = None
+            return None
+
+        plan = self.plan
+        if plan is None or not plan.waypoints:
+            return MotionIntent(hold=True)
+
+        # Advance through the planned path instead of re-targeting waypoint 0 forever.
+        last = len(plan.waypoints) - 1
+        while (
+            self._waypoint_index < last
+            and self.estimated.position.distance_to(self._as_vector(plan.waypoints[self._waypoint_index]))
+            < WAYPOINT_CAPTURE_RADIUS
+        ):
+            self._waypoint_index += 1
+
+        target = self._as_vector(plan.waypoints[self._waypoint_index])
+        final = self._as_vector(plan.waypoints[last])
+        at_final = self._waypoint_index == last and self.estimated.position.distance_to(final) < ARRIVAL_RADIUS
+
+        if self._advance_planned_progress(task, plan, at_final, dt):
+            return MotionIntent(hold=True)
+
+        speed = plan.desired_speed if plan.desired_speed > 0 else self._maximum_speed
+        if plan.hold and at_final:
+            return MotionIntent(target=target, maximum_speed=speed * 0.2, hold=True)
+        return MotionIntent(target=target, maximum_speed=speed)
+
+    def _advance_planned_progress(
+        self, task: MissionTask, plan: PlannerResult, at_final: bool, dt: float
+    ) -> bool:
+        """Update task progress; return True when the task just completed."""
+
+        if task.type == TaskType.SEARCH:
+            coverage = float(plan.metadata.get("coverage_fraction", 0.0))
+            self.task_progress = max(self.task_progress, min(0.99, coverage))
+            if str(plan.phase) == "COMPLETE":
+                self.task_progress = 1.0
+                self._finish_planned_task(task)
+                return True
+            return False
+        if task.type in {TaskType.GOTO, TaskType.RETURN, TaskType.TRACE}:
+            if at_final:
+                self.task_progress = 1.0
+                self._finish_planned_task(task)
+                return True
+            self.task_progress = max(self.task_progress, min(0.95, self.task_progress + dt * 0.01))
+            return False
+        # WATCH / HOLD / FOLLOW / REGROUP are continuous behaviours.
+        if at_final:
+            self.task_progress = min(0.99, self.task_progress + dt * 0.02)
+        else:
+            self.task_progress = max(self.task_progress, min(0.95, self.task_progress + dt * 0.01))
+        return False
+
+    def _finish_planned_task(self, task: MissionTask) -> None:
+        if self._planner is not None:
+            self._planner.forget(self.identity.node_id, task.id)
+        self.plan = None
+        self._waypoint_index = 0
+        self._complete_current_task()
+
+    @staticmethod
+    def _as_vector(point: object) -> Vector3:
+        return Vector3(x=point.x, y=point.y, z=point.z)
+
+    def _direct_action(self, dt: float, task: MissionTask) -> MotionIntent:
         target = self._task_target(task)
         if target is None:
             return MotionIntent(hold=True)

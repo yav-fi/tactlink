@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -29,6 +31,15 @@ from controls import GestureController
 from gestures import GestureInterpreter
 from simulator import QuadSimulator
 from visualizer import Visualizer
+
+# ``python src/main.py`` puts src/ rather than the repository root on sys.path.
+# Add the root only for importing the sibling integration package.
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from integrations.gesture_mission import GestureMissionAdapter
+from integrations.mission_client import MissionClient, MissionClientError
 
 # (start, end) seconds -> gesture held during the demo timeline.
 _DEMO_GESTURES = [
@@ -63,18 +74,42 @@ def _demo_hand(t: float) -> HandState:
     )
 
 
-def _compose(cam_bgr: np.ndarray, sim_bgr: np.ndarray) -> np.ndarray:
-    h = sim_bgr.shape[0]
+def _compose(cam_bgr: np.ndarray, side_bgr: np.ndarray) -> np.ndarray:
+    h = side_bgr.shape[0]
     scale = h / cam_bgr.shape[0]
     cam_resized = cv2.resize(cam_bgr, (int(cam_bgr.shape[1] * scale), h))
-    return np.hstack([cam_resized, sim_bgr])
+    return np.hstack([cam_resized, side_bgr])
+
+
+def _runtime_panel(gesture: str, status: str, width: int = 640, height: int = 720) -> np.ndarray:
+    """Render runtime connection state without implying local drone telemetry."""
+    panel = np.full((height, width, 3), (28, 26, 24), dtype=np.uint8)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(panel, "RUNTIME MODE", (40, 90), font, 1.1, (90, 220, 130), 2, cv2.LINE_AA)
+    cv2.putText(
+        panel,
+        "drone state rendered elsewhere",
+        (40, 130),
+        font,
+        0.65,
+        (235, 235, 235),
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(panel, f"gesture: {gesture}", (40, 220), font, 0.7, (90, 200, 255), 2, cv2.LINE_AA)
+    cv2.putText(panel, status, (40, 270), font, 0.55, (180, 180, 180), 1, cv2.LINE_AA)
+    return panel
 
 
 def run(args: argparse.Namespace) -> int:
     controller = GestureController()
     interp = GestureInterpreter()
-    sim = QuadSimulator()
-    viz = Visualizer()
+    runtime_mode = bool(args.mission_url)
+    sim = None if runtime_mode else QuadSimulator()
+    viz = None if runtime_mode else Visualizer()
+    mission_adapter = GestureMissionAdapter() if args.mission_url else None
+    mission_client = MissionClient(args.mission_url) if args.mission_url else None
+    runtime_status = f"connected: {args.mission_url}" if runtime_mode else ""
 
     tracker = None
     cap = None
@@ -131,13 +166,30 @@ def run(args: argparse.Namespace) -> int:
             if kbd_event:
                 gstate.events.append(kbd_event)
                 kbd_event = None
-            cmd = controller.update(hand, gstate, sim.state)
-            state = sim.step(cmd, dt if dt > 0 else 1 / 60)
+            if mission_adapter and mission_client:
+                for event in gstate.events:
+                    mission = mission_adapter.event_to_command(event)
+                    if mission is None:
+                        continue
+                    try:
+                        created = mission_client.submit(mission)
+                        mission_id = created.get("id", mission.type)
+                        runtime_status = f"submitted: {mission_id}"
+                        print(f"runtime mission: {mission_id}")
+                    except MissionClientError as exc:
+                        runtime_status = f"submission rejected: {exc}"
+                        print(f"runtime mission rejected: {exc}")
 
             if dt > 0:
                 fps = 0.9 * fps + 0.1 * (1.0 / dt) if fps else 1.0 / dt
-            sim_frame = viz.render(state, cmd, fps, sim.trail, gstate)
-            composite = _compose(cam_frame, sim_frame)
+            if runtime_mode:
+                gesture = hand.gesture if hand.present else "None"
+                side_frame = _runtime_panel(gesture, runtime_status)
+            else:
+                cmd = controller.update(hand, gstate, sim.state)
+                state = sim.step(cmd, dt if dt > 0 else 1 / 60)
+                side_frame = viz.render(state, cmd, fps, sim.trail, gstate)
+            composite = _compose(cam_frame, side_frame)
 
             frame_count += 1
             if args.headless:
@@ -153,11 +205,12 @@ def run(args: argparse.Namespace) -> int:
             if key in (ord("q"), 27):
                 break
             if key == ord("r"):
-                sim.reset()
+                if sim is not None:
+                    sim.reset()
                 controller = GestureController()
                 interp = GestureInterpreter()
             if key == ord(" "):
-                kbd_event = "land" if sim.state.armed else "takeoff"
+                kbd_event = "land" if runtime_mode or sim.state.armed else "takeoff"
     finally:
         if cap is not None:
             cap.release()
@@ -179,6 +232,11 @@ def main() -> int:
     p.add_argument("--duration", type=float, default=10.0,
                    help="seconds to simulate before exiting in --headless")
     p.add_argument("--out", type=str, default="", help="path to save a composite frame")
+    p.add_argument(
+        "--mission-url",
+        default="",
+        help="submit discrete HOLD/RETURN gestures to this runtime URL (for example http://127.0.0.1:8000)",
+    )
     return run(p.parse_args())
 
 

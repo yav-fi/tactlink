@@ -183,6 +183,29 @@ struct.
 
 ---
 
+# Operator input → mission runtime
+
+Start the local chat server and mission runtime in separate terminals, then translate and submit a natural-language instruction:
+
+```sh
+./scripts/start_chat_server.sh
+.venv/bin/uvicorn server.main:app --reload
+.venv/bin/python -m integrations.llm_mission \
+  "send two drones to search sector alpha" --submit
+```
+
+The LLM output is treated as untrusted: it must be one JSON object, pass the canonical `simulation.models.MissionCommand` schema, and satisfy target semantics before submission. Invalid output is printed as a rejection and is never sent.
+
+The existing gesture demo can submit deliberate discrete gesture events to the same endpoint while retaining its local analog controls:
+
+```sh
+.venv/bin/python src/main.py --mission-url http://127.0.0.1:8000
+```
+
+`Closed_Fist`/`land` submits HOLD and `ILoveYou`/`return_home` submits RETURN. Other analog hand axes remain local. Custom entries in `config/gesture_actions.json` may map to values such as `mission:HOLD`, `mission:RETURN`, or another mission type; target-requiring types are submitted only when their adapter context supplies the required point, region, waypoints, or entity.
+
+---
+
 # Distributed mission runtime
 
 This repository includes a deterministic, multi-node autonomous aerial mission simulator. It separates simulator-owned ground truth from each drone's local estimate and routes all peer knowledge through a lossy, delayed network model. It is a software simulation and has not been validated for real-world or safety-critical deployment.

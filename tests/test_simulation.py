@@ -196,3 +196,106 @@ def test_seeded_scenario_repeats_event_sequence() -> None:
     second = seeded_scenario_signature(49281)
     assert first
     assert first == second
+
+
+def test_planner_drives_motion_and_routes_around_obstacles() -> None:
+    """GOTO across a known obstacle must produce planner waypoints, not a collision."""
+
+    from planning.models import Vector3 as PlanningVector3
+
+    engine = engine_for_test()
+    target = Vector3(x=100, y=100, z=30)
+    task = assign_single_task(engine, target)
+    node_id = task.assigned_nodes[0]
+    node = engine.drones[node_id]
+    environment = engine.autonomy.environment
+
+    engine.run_steps(5, 0.1)
+    assert node.plan is not None, "the planner, not choose_action's direct path, is driving"
+    assert str(node.plan.mode) == "TRANSIT"
+    assert len(node.plan.waypoints) > 1, "a detour around block-east is required"
+    assert environment.segment_intersects_obstacle(
+        PlanningVector3(x=node.home.x, y=node.home.y, z=30), PlanningVector3(x=100, y=100, z=30), 0.0
+    ), "the naive straight line really would have hit the obstacle"
+
+    track = []
+    for _ in range(200):
+        engine.tick(0.1)
+        track.append(engine.world.truth(node_id).position)
+
+    assert not [
+        point
+        for point in track
+        if not environment.is_free(PlanningVector3(x=point.x, y=point.y, z=point.z), 0.0)
+    ], "the flown track never enters an obstacle"
+    assert engine.world.truth(node_id).position.distance_to(target) < 3.0
+    assert node.task_progress == 1.0
+
+
+def test_planner_exception_holds_instead_of_flying_directly(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = engine_for_test()
+    task = assign_single_task(engine, Vector3(x=100, y=100, z=30))
+    node = engine.drones[task.assigned_nodes[0]]
+    node.plan = None
+
+    def fail_planning(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("planner unavailable")
+
+    monkeypatch.setattr(node._planner, "plan", fail_planning)
+
+    intent = node.choose_action(engine.time, 0.1)
+
+    assert intent.hold
+    assert intent.target is None
+
+
+def test_every_task_type_plans_without_crashing() -> None:
+    commands = [
+        (TaskType.WATCH, MissionTarget(region_id="ALPHA")),
+        (TaskType.SEARCH, MissionTarget(region_id="BRAVO")),
+        (TaskType.TRACE, MissionTarget(waypoints=[Vector3(x=0, y=40, z=25), Vector3(x=90, y=90, z=25)])),
+        (TaskType.FOLLOW, MissionTarget(entity_id="vehicle-1")),
+        (TaskType.REGROUP, MissionTarget(point=Vector3(x=-100, y=-60, z=25))),
+        (TaskType.HOLD, MissionTarget(point=Vector3(x=-20, y=-20, z=20))),
+    ]
+    for task_type, target in commands:
+        engine = engine_for_test()
+        task = engine.submit_mission(
+            MissionCommand(
+                type=task_type,
+                target=target,
+                required_capabilities={"camera"},
+                desired_units=2,
+                minimum_units=1,
+            )
+        )
+        engine.run_steps(60, 0.1)
+        assert task.assigned_nodes, f"{task_type} was never assigned"
+        for node_id in task.assigned_nodes:
+            plan = engine.drones[node_id].plan
+            assert plan is not None and plan.waypoints, f"{task_type} produced no plan for {node_id}"
+
+
+def test_drone_loss_does_not_break_planning() -> None:
+    engine = engine_for_test()
+    task = engine.submit_mission(
+        MissionCommand(
+            type=TaskType.SEARCH,
+            target=MissionTarget(region_id="BRAVO"),
+            required_capabilities={"camera"},
+            desired_units=2,
+            minimum_units=1,
+        )
+    )
+    advance_until(engine, lambda: len(task.assigned_nodes) == 2)
+    engine.run_steps(20, 0.1)
+    lost = task.assigned_nodes[0]
+    engine.fail_drone(lost)
+    engine.run_steps(60, 0.1)
+
+    survivors = [node_id for node_id in task.assigned_nodes if node_id != lost]
+    assert survivors, "the task was reassigned after the loss"
+    for node_id in survivors:
+        plan = engine.drones[node_id].plan
+        assert plan is not None and plan.waypoints
+        assert lost not in plan.metadata.get("team", []), "the lost drone left the planning roster"
