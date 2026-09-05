@@ -20,7 +20,7 @@ test = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["simulation*", "server*"]
+include = ["planning*", "simulation*", "server*"]
 
 [tool.setuptools.package-data]
 server = ["static/*.html"]
