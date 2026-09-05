@@ -36,6 +36,43 @@ def _two_fingers(hand) -> bool:
     return bool(f[1] and f[2] and not f[3] and not f[4])
 
 
+def _three_fingers(hand) -> bool:
+    f = hand.fingers
+    return bool(f[1] and f[2] and f[3] and not f[4])
+
+
+_THREE_HOLD_SEC = 0.4      # steady hold before "forward" fires
+_THREE_RELEASE_SEC = 0.4   # pose must drop this long before it can fire again
+
+
+class ThreeFingerForward:
+    """Three fingers (index+middle+ring) held sideways -> a 'forward' dash,
+    taken relative to the operator who gave it."""
+
+    def __init__(self):
+        self._held_since = None
+        self._fired = False
+        self._away_since = 0.0
+
+    def update(self, hand, now: float) -> list[str]:
+        ok = (ENABLED and hand is not None and getattr(hand, "present", False)
+              and _three_fingers(hand) and _orientation(hand.point_dir) == "H")
+        if not ok:
+            if self._away_since == 0.0:
+                self._away_since = now
+            if now - self._away_since >= _THREE_RELEASE_SEC:
+                self._fired = False
+            self._held_since = None
+            return []
+        self._away_since = 0.0
+        if self._held_since is None:
+            self._held_since = now
+        if not self._fired and now - self._held_since >= _THREE_HOLD_SEC:
+            self._fired = True
+            return ["fly_forward"]
+        return []
+
+
 def _orientation(point_dir) -> str | None:
     dx, dy = point_dir
     if dx == 0.0 and dy == 0.0:

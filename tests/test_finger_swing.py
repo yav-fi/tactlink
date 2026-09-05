@@ -10,11 +10,16 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 from control_types import HandState  # noqa: E402
-from finger_swing import FingerSwingDetector  # noqa: E402
+from finger_swing import FingerSwingDetector, ThreeFingerForward  # noqa: E402
 
 
 def _hand(dx, dy, two=True, present=True):
     return HandState(present=present, fingers=(False, two, two, False, False),
+                     point_dir=(dx, dy))
+
+
+def _three_hand(dx, dy, three=True):
+    return HandState(present=True, fingers=(False, True, True, three, False),
                      point_dir=(dx, dy))
 
 
@@ -61,6 +66,37 @@ def test_swing_resets_if_pose_lost():
     r.feed(0.0, 0.0, seconds=1.0, present=False)  # hand gone > LOST_SEC
     r.feed(0.0, -1.0).feed(0.9, 0.1)          # V, H again - only 2 now
     assert r.fired == []
+
+
+def test_three_fingers_sideways_fires_forward_once():
+    d = ThreeFingerForward()
+    t, fired = 0.0, []
+    for _ in range(16):                       # ~0.8 s held sideways
+        t += 0.05
+        fired += d.update(_three_hand(0.98, 0.05), t)
+    assert fired == ["fly_forward"]
+    for _ in range(6):                        # still held -> no repeat
+        t += 0.05
+        fired += d.update(_three_hand(0.98, 0.05), t)
+    assert fired == ["fly_forward"]
+
+
+def test_three_fingers_vertical_does_not_fire():
+    d = ThreeFingerForward()
+    t, fired = 0.0, []
+    for _ in range(20):
+        t += 0.05
+        fired += d.update(_three_hand(0.02, -0.99), t)
+    assert fired == []
+
+
+def test_two_fingers_do_not_fire_forward():
+    d = ThreeFingerForward()
+    t, fired = 0.0, []
+    for _ in range(20):
+        t += 0.05
+        fired += d.update(_three_hand(0.98, 0.05, three=False), t)
+    assert fired == []
 
 
 def _run_standalone():

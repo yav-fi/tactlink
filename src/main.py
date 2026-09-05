@@ -28,6 +28,7 @@ import numpy as np
 
 from control_types import HandState
 from gestures import GestureInterpreter
+from operators import OperatorPool
 from swarm import Swarm
 from visualizer import Visualizer
 
@@ -55,6 +56,7 @@ _DEMO_GESTURES = [
     (22.0, 23.5, "Thumb_Down"),   # disarm + land
 ]
 _DEMO_SWING = (10.5, 14.0)        # two-finger wiper V-H-V-H -> fly east
+_DEMO_THREE = (15.5, 16.6)        # three fingers sideways -> forward (operator-relative)
 
 
 def _demo_hand(t: float) -> HandState:
@@ -67,6 +69,10 @@ def _demo_hand(t: float) -> HandState:
         pd = (0.03, -0.99) if vertical else (0.98, 0.05)   # up / horizontal-right
         return HandState(present=True, fingers=(False, True, True, False, False),
                          fingers_up=2, point_dir=pd, gesture="None")
+
+    if _DEMO_THREE[0] <= t < _DEMO_THREE[1]:
+        return HandState(present=True, fingers=(False, True, True, True, False),
+                         fingers_up=3, point_dir=(0.98, 0.05), gesture="None")
 
     gesture = "None"
     for a, b, g in _DEMO_GESTURES:
@@ -148,6 +154,7 @@ def run(args: argparse.Namespace) -> int:
     runtime_mode = bool(args.mission_url) and not check_mode
     swarm = None if (runtime_mode or check_mode) else Swarm(args.drones)
     viz = None if (runtime_mode or check_mode) else Visualizer()
+    operators = OperatorPool(args.operators)
     event_log: list[str] = []
     mission_adapter = mission_client = mission_error_cls = None
     if runtime_mode:
@@ -211,6 +218,13 @@ def run(args: argparse.Namespace) -> int:
             if kbd_event:
                 gstate.events.append(kbd_event)
                 kbd_event = None
+            operators.step(dt if dt > 0 else 1 / 60)
+            # "forward" is relative to the operator who gestured.
+            gstate.events = [
+                f"fly_bearing:{operators.resolve_forward_bearing():.4f}"
+                if e == "fly_forward" else e
+                for e in gstate.events
+            ]
             if mission_adapter and mission_client:
                 for event in gstate.events:
                     mission = mission_adapter.event_to_command(event)
@@ -238,7 +252,7 @@ def run(args: argparse.Namespace) -> int:
             else:
                 _, cmd = swarm.step(hand, gstate, dt if dt > 0 else 1 / 60)
                 side_frame = viz.render(swarm.states(), cmd, fps, swarm.trails(),
-                                        gstate, swarm.selected)
+                                        gstate, swarm.selected, operators)
             composite = _compose(cam_frame, side_frame)
 
             frame_count += 1
@@ -279,6 +293,8 @@ def main() -> int:
     p.add_argument("--camera", type=int, default=0, help="webcam index (default 0)")
     p.add_argument("--drones", type=int, default=5,
                    help="squad size flown in formation (1 = single drone)")
+    p.add_argument("--operators", type=int, default=1,
+                   help="simulated people giving gestures (built for 5)")
     p.add_argument("--demo", action="store_true",
                    help="run without a camera using a scripted hand path")
     p.add_argument("--headless", action="store_true",

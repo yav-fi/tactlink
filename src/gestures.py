@@ -32,7 +32,7 @@ import os
 import time
 
 from control_types import FlightMode, GestureState
-from finger_swing import FingerSwingDetector, resolve_pointed_direction
+from finger_swing import FingerSwingDetector, ThreeFingerForward, resolve_pointed_direction
 from sequences import SequenceMatcher, load_config
 
 HOLD_SEC = 0.40           # steady-hold time before a gesture fires
@@ -105,6 +105,7 @@ class GestureInterpreter:
         self._combo_touch = -1e9   # last time a combo-member gesture was held
         self._point_dir = (0.0, 0.0)  # latest finger-pointing vector, for fly_pointed
         self._swing = FingerSwingDetector()  # two-finger V<->H wiper -> fly_pointed
+        self._three = ThreeFingerForward()   # three fingers sideways -> fly_forward
 
     @property
     def mode(self) -> FlightMode:
@@ -117,6 +118,7 @@ class GestureInterpreter:
         if hand is not None and getattr(hand, "present", False):
             self._point_dir = tuple(hand.point_dir)
         events.extend(self._swing.update(hand, now))   # two-finger wiper
+        events.extend(self._three.update(hand, now))   # three-finger forward
 
         if gesture != self._held:
             self._held = gesture

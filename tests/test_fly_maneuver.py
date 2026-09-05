@@ -115,6 +115,24 @@ def test_takeoff_holds_base_altitude():
     assert abs(state.pos[2] - _TAKEOFF_ALT) < 0.3, state.pos[2]
 
 
+def test_fly_bearing_dashes_along_the_given_angle():
+    import math
+    ctl = GestureController()
+    sim = QuadSimulator()
+    _armed_at(ctl, sim)
+    bearing = math.radians(30)               # east-north-east
+    for i in range(360):
+        ev = [f"fly_bearing:{bearing:.4f}"] if i == 0 else []
+        cmd = ctl.update(HandState(present=False), GestureState(events=ev), sim.state)
+        sim.step(cmd, 1 / 60)
+    moved = np.array(sim.state.pos[:2])
+    assert np.linalg.norm(moved) > 3.0
+    # direction of travel ~ the commanded bearing
+    ang = math.atan2(moved[1], moved[0])
+    assert abs((ang - bearing + math.pi) % (2 * math.pi) - math.pi) < 0.3
+    assert ctl.maneuver == ""
+
+
 def test_fly_dash_ignored_when_disarmed():
     ctl = GestureController()
     sim = QuadSimulator()

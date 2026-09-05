@@ -101,6 +101,17 @@ together. Return-home recentres the formation on the origin. The HUD shows
 `ARMED xN` and `sel #k`; `1`-`9` highlight a drone (per-drone "single-out"
 commanding is the next step — the hook is there, `Swarm.selected`).
 
+## Operators
+
+The end goal is the gesture model running on **five phones carried by people
+walking around**, any of whom can command the drone. `--operators N`
+(`src/operators.py`) stands up that model: N people with a position and a facing
+who wander a shared area. One webcam feeds the **active** operator (cyan in the
+3D view). Direction commands are taken **relative to the operator who gave
+them** — the three-finger "forward" dash flies along the *active operator's*
+bearing. Still to build: attributing gestures to different operators, and
+choosing which one is active.
+
 **Testing gestures safely.** `--check-gestures` is the safe way to rehearse hand
 poses and combos: it shows the recognized gesture, hold bar, partial-combo hint,
 and a log of what *would* fire, without moving the (simulated) drone or touching
@@ -129,6 +140,7 @@ Hold a sign steady for ~0.4 s to fire it; relax before repeating.
 | 👎 Thumb down | **Land + disarm** |
 | ☝️ Pointing up | Orbit: fly out to a 10 m radius and circle the origin, nose kept pointed inward — point again to stop |
 | 🤟 ILoveYou | Return to the start point and hover |
+| **Three fingers held sideways** (index+middle+ring) | Dash ~5 m **forward** — along the bearing the gesturing operator faces (`ThreeFingerForward`) |
 | ✋ Open palm · ✊ Closed fist · ✌️ Victory | *no action* |
 
 Take off, land, orbit, return-home (and the `fly_*` dashes) run as autopilot
@@ -229,6 +241,7 @@ any pattern are unaffected. Delete the file or set `"sequences": []` to disable
 | `src/controls.py` | Hand pose + gesture state → `ControlInput`; runs autopilot routines |
 | `src/simulator.py` | Arcade quadcopter physics (world frame: x right, y forward, z up) |
 | `src/swarm.py` | Leader + ring-formation followers flown as one squad |
+| `src/operators.py` | Simulated people (position + facing) giving gestures; "forward" is operator-relative |
 | `src/visualizer.py` | Look-at pinhole camera, multi-drone 3D render, control HUD |
 | `src/control_types.py` | Shared dataclasses and the `FlightMode` enum |
 | `scripts/collect_gestures.py` · `scripts/train_gestures.py` | Record samples · fit the custom model |

@@ -73,7 +73,7 @@ class Visualizer:
         self._arm_len = 0.55
 
     def render(self, states, cmd: ControlInput, fps: float = 0.0,
-              trails=None, gstate=None, selected=None) -> np.ndarray:
+              trails=None, gstate=None, selected=None, operators=None) -> np.ndarray:
         if isinstance(states, QuadState):        # single-drone convenience
             states = [states]
         trails = trails or [[] for _ in states]
@@ -86,6 +86,8 @@ class Visualizer:
                           target=self._look)
 
         self._draw_grid(img)
+        if operators is not None:
+            self._draw_operators(img, operators)
         # Far drones first so nearer ones draw on top.
         order = sorted(range(len(states)), key=lambda i: -float(
             np.linalg.norm(np.asarray(states[i].pos) - self.cam.pos)))
@@ -124,6 +126,22 @@ class Visualizer:
         L = self._arm_len
         return [np.array([L, L, 0.0]), np.array([L, -L, 0.0]),
                 np.array([-L, -L, 0.0]), np.array([-L, L, 0.0])]
+
+    def _draw_operators(self, img, operators):
+        for i, op in enumerate(operators.operators):
+            base = (float(op.pos[0]), float(op.pos[1]), 0.0)
+            head = (base[0], base[1], 1.7)                 # a standing person
+            active = i == operators.active
+            col = _SELECTED if active else _HUD_DIM
+            self._line(img, base, head, col, 3 if active else 2)
+            p = self.cam.project(head)
+            if p:
+                cv2.circle(img, p, 5 if active else 4, col, -1, cv2.LINE_AA)
+                cv2.putText(img, op.name, (p[0] + 8, p[1]),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, col, 1, cv2.LINE_AA)
+            fwd = op.facing_vec()
+            tip = (base[0] + fwd[0] * 1.6, base[1] + fwd[1] * 1.6, 0.0)
+            self._line(img, base, tip, col, 2)
 
     def _draw_shadow(self, img, state: QuadState):
         r = _rot(state.yaw, 0.0, 0.0)

@@ -147,6 +147,11 @@ class GestureController:
             self._dash_dir = _COMPASS[event]
             self._dash_start = np.array(state.pos[:2], dtype=float)
             self.maneuver = event
+        elif event.startswith("fly_bearing:") and self._armed:
+            bearing = float(event.split(":", 1)[1])
+            self._dash_dir = np.array([math.cos(bearing), math.sin(bearing)])
+            self._dash_start = np.array(state.pos[:2], dtype=float)
+            self.maneuver = "fly_bearing"
 
     def _run_maneuver(self, state) -> ControlInput:
         cmd = ControlInput(armed=self._armed, event=self.maneuver)
@@ -176,7 +181,7 @@ class GestureController:
                 cmd.roll = float(body[0]) * gain
                 cmd.pitch = float(body[1]) * gain
                 cmd.throttle = self._alt_throttle(state)
-        elif self.maneuver in _COMPASS:
+        elif self.maneuver in _COMPASS or self.maneuver == "fly_bearing":
             travelled = float(np.linalg.norm(np.array(state.pos[:2]) - self._dash_start))
             if travelled >= _DASH_DISTANCE:
                 self.maneuver = ""
