@@ -35,11 +35,24 @@ test("Survey cone stays attached, turns with heading, follows color and cleans u
     const rotation = Cesium.Matrix3.fromQuaternion(cone.orientation.getValue());
     const direction = Cesium.Matrix3.multiplyByVector(rotation, Cesium.Cartesian3.UNIT_Z, new Cesium.Cartesian3());
     const apex = Cesium.Cartesian3.subtract(cone.position.getValue(), Cesium.Cartesian3.multiplyByScalar(direction, 40, new Cesium.Cartesian3()), new Cesium.Cartesian3());
-    assert(Cesium.Cartesian3.distance(apex, body) < 1e-6);
-    const expected = Cesium.Matrix4.multiplyByPointAsVector(Cesium.Transforms.eastNorthUpToFixedFrame(body), new Cesium.Cartesian3(Math.sin(heading), Math.cos(heading), 0), new Cesium.Cartesian3());
+    const mount = Cesium.Matrix4.multiplyByPoint(Cesium.Transforms.eastNorthUpToFixedFrame(body), new Cesium.Cartesian3(0, 0, -2), new Cesium.Cartesian3());
+    assert(Cesium.Cartesian3.distance(apex, mount) < 1e-6);
+    const expected = Cesium.Matrix4.multiplyByPointAsVector(Cesium.Transforms.eastNorthUpToFixedFrame(body), new Cesium.Cartesian3(Math.sin(heading) * 0.5, Math.cos(heading) * 0.5, -Math.sqrt(3) / 2), new Cesium.Cartesian3());
     assert(Cesium.Cartesian3.distance(direction, expected) < 1e-6);
   }
   survey.setColor("#ff6666");
+  const pitches = [];
+  for (const up of [-1, 0, 1]) {
+    survey.stopManualMotion();
+    survey.moveManually(0, 1, up, 0.1, 0);
+    const body = entities.getById(survey.id).position.getValue();
+    const worldDirection = Cesium.Matrix3.multiplyByVector(Cesium.Matrix3.fromQuaternion(cone.orientation.getValue()), Cesium.Cartesian3.UNIT_Z, new Cesium.Cartesian3());
+    const localDirection = Cesium.Matrix4.multiplyByPointAsVector(Cesium.Matrix4.inverseTransformation(Cesium.Transforms.eastNorthUpToFixedFrame(body), new Cesium.Matrix4()), worldDirection, new Cesium.Cartesian3());
+    const pitch = Math.asin(localDirection.z);
+    pitches.push(pitch);
+    assert(pitch + Math.atan2(30, 80) < 0, "entire cone must stay below its underside mount");
+  }
+  assert(pitches[0] < pitches[1] && pitches[1] < pitches[2], "descent and ascent change camera pitch");
   assert.equal(cone.cylinder.material.color.getValue().withAlpha(1).toCssHexString(), "#ff6666");
   assert(fleet.deployBulk(home, 2, 30, "survey").every(d => d.droneType === "survey"));
   fleet.clear(); assert.equal(entities.values.length, 0);
@@ -96,7 +109,7 @@ test("failed building queries do not freeze drones or leave the camera in an off
   });
   assert.equal(viewer.scene.view, mainView);
   // A failed building query must not bypass a real ground collision.
-  viewer.scene.globe.getHeight = () => 79;
+  viewer.scene.globe.getHeight = () => 79.9;
   fleet.moveBatch(0, 0, -1, 0.1, 0);
   assert(members.every(d => d.collisionBlocked));
 });
@@ -104,7 +117,7 @@ test("failed building queries do not freeze drones or leave the camera in an off
 test("low-clearance drones can climb out, but cannot descend through ground", () => {
   const viewer = { entities: new Cesium.EntityCollection(), scene: {
     pickFromRay: () => undefined,
-    globe: { pick: () => undefined, getHeight: () => 75 },
+    globe: { pick: () => undefined, getHeight: () => 79.9 },
   } };
   const drone = new Fleet(viewer).deploy(home);
   drone.setManualControl(true);
@@ -125,7 +138,7 @@ test("wall and ground checks block manual motion, batches, missions and replay",
     globe: { getHeight: () => 0, pick: () => undefined },
     pickFromRay(ray, excluded, width) {
       assert.equal(excluded, entities.values);
-      assert.equal(width, 10);
+      assert.equal(width, 1);
       return obstacle ? { position: Cesium.Ray.getPoint(ray, 1) } : undefined;
     },
   } };

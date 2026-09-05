@@ -117,7 +117,10 @@ export class DroneController {
     if (droneType === "survey") {
       this.surveyCone = viewer.entities.add({
         id: `${id}_survey_cone`,
-        position: new Cesium.CallbackPositionProperty(() => Cesium.Cartesian3.add(this.visualPosition(), Cesium.Cartesian3.multiplyByScalar(this.viewDirection(), 40, new Cesium.Cartesian3()), new Cesium.Cartesian3()), false),
+        position: new Cesium.CallbackPositionProperty(() => {
+          const mount = Cesium.Matrix4.multiplyByPoint(Cesium.Transforms.eastNorthUpToFixedFrame(this.visualPosition()), new Cesium.Cartesian3(0, 0, -2), new Cesium.Cartesian3());
+          return Cesium.Cartesian3.add(mount, Cesium.Cartesian3.multiplyByScalar(this.viewDirection(), 40, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+        }, false),
         orientation: new Cesium.CallbackProperty(() => {
           const direction = this.viewDirection();
           const axis = Cesium.Cartesian3.cross(Cesium.Cartesian3.UNIT_Z, direction, new Cesium.Cartesian3());
@@ -134,8 +137,16 @@ export class DroneController {
   }
 
   private viewDirection(): Cesium.Cartesian3 {
-    if (this.state !== "MANUAL" && this.travelDirection) return this.travelDirection;
-    return Cesium.Matrix4.multiplyByPointAsVector(Cesium.Transforms.eastNorthUpToFixedFrame(this.visualPosition()), new Cesium.Cartesian3(Math.sin(this.manualHeading), Math.cos(this.manualHeading), 0), new Cesium.Cartesian3());
+    const frame = Cesium.Transforms.eastNorthUpToFixedFrame(this.visualPosition());
+    const velocity = this.state === "MANUAL" && !this.replayEntity ? this.manualVelocity
+      : this.travelDirection ? Cesium.Matrix4.multiplyByPointAsVector(Cesium.Matrix4.inverseTransformation(frame, new Cesium.Matrix4()), this.travelDirection, new Cesium.Cartesian3()) : Cesium.Cartesian3.ZERO;
+    const horizontal = Math.hypot(velocity.x, velocity.y);
+    const heading = this.state === "MANUAL" && !this.replayEntity || horizontal < 0.0001 ? this.manualHeading : Math.atan2(velocity.x, velocity.y);
+    const flightPitch = Cesium.Cartesian3.magnitude(velocity) < 0.0001 ? 0 : Math.atan2(velocity.z, horizontal);
+    // Underside camera points down 60 degrees in level flight. Limit pitch so
+    // even the cone's upper rim (half-angle ~21 degrees) remains below its mount.
+    const pitch = Cesium.Math.clamp(-Math.PI / 3 + flightPitch, Cesium.Math.toRadians(-85), Cesium.Math.toRadians(-30));
+    return Cesium.Matrix4.multiplyByPointAsVector(frame, new Cesium.Cartesian3(Math.sin(heading) * Math.cos(pitch), Math.cos(heading) * Math.cos(pitch), Math.sin(pitch)), new Cesium.Cartesian3());
   }
 
   private showCrash(at = this.visualPosition()): void {

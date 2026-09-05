@@ -1,7 +1,7 @@
 import * as Cesium from "cesium";
 
 // Compact gameplay hitbox; release/replay prisms are enlarged visual markers.
-export const DRONE_CLEARANCE = 5;
+export const DRONE_CLEARANCE = 0.5;
 type RayScene = Cesium.Scene & {
   view?: unknown;
   pickFromRay(ray: Cesium.Ray, exclude: Cesium.Entity[], width: number): { position?: Cesium.Cartesian3 } | undefined;
