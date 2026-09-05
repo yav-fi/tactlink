@@ -2,7 +2,7 @@ import {worldCoordinates, geographicCoordinates} from './map-math.mjs';
 import {prepareAddition} from './command-entry.mjs';
 const $ = id => document.getElementById(id);
 const R = 6378137, rad = Math.PI / 180;
-let lines = [], preview = null, revision = 0, timer, zoom = 18;
+let lines = [], preview = null, partialPreview = null, revision = 0, timer, zoom = 18;
 let center = {lat:38.8895, lon:-77.0353};
 const map = $('map'), svg = $('drawing');
 const number = id => $(id).value.trim() === '' ? NaN : Number($(id).value);
@@ -14,6 +14,7 @@ function inputFeedback(text, error=false) {
 }
 function message(text, error=false) {
   $('status').textContent=text; $('status').classList.toggle('error', error);
+  $('placement-feedback').textContent=text;
   const match=error && text.match(/Command (\d+):/i);
   $('show-command-error').hidden=!match || Number(match[1]) > lines.length;
   if(match){
@@ -46,7 +47,7 @@ try {
 } catch { /* Ignore malformed drafts. */ }
 function exportState() { $('export').disabled = !preview || !validLocation(home()) || !Number.isFinite(home().altitude_msl_m) || !$('home-confirmed').checked; }
 function changed() {
-  revision++; preview=null; exportState(); save(); draw(); renderCommands();
+  revision++; preview=null; partialPreview=null; exportState(); save(); draw(); renderCommands();
   clearTimeout(timer);
   if (!lines.length) { message('Add a takeoff command to begin.'); $('summary').textContent=''; return; }
   message('Validating draft…');
@@ -61,14 +62,25 @@ function changed() {
       const end=result.end_state;
       message(`Validated · ${result.commands.length} commands. ${end.airborne?'Mission ends airborne.':'Mission ends on the ground.'}`);
       $('summary').textContent=`Ends ${end.north_m.toFixed(1)} m north, ${end.east_m.toFixed(1)} m east, ${end.altitude_m.toFixed(1)} m above home.`;
-    } catch(error) { if(current===revision){message(error.message,true); $('summary').textContent='Export is unavailable until the draft is valid.';} }
+    } catch(error) { if(current===revision){
+      message(error.message,true); $('summary').textContent='Export is unavailable until the draft is valid.';
+      const index=Number(error.message.match(/Command (\d+):/i)?.[1])-1;
+      if(index>0)try {
+        const result=await post('/api/preview',{text:lines.slice(0,index).join(', ')});
+        if(current!==revision)return;
+        partialPreview=result;draw();
+        message(`${error.message} Showing only the valid first ${index} commands. Fix the sequence or start fresh with a backup.`,true);
+      }catch { /* Keep the original validation error visible. */ }
+    } }
   },200);
 }
 function renderCommands() {
-  const selected=$('insert-position').value;
-  $('insert-position').replaceChildren(new Option('At the end of the mission','end'));
-  lines.forEach((line,index)=>$('insert-position').add(new Option(`Before ${index+1}: ${line}`,String(index))));
-  if([...$('insert-position').options].some(option=>option.value===selected))$('insert-position').value=selected;
+  for(const id of ['insert-position','map-position']){
+    const selected=$(id).value;
+    $(id).replaceChildren(new Option('At the end of the mission','end'));
+    lines.forEach((line,index)=>$(id).add(new Option(`Before ${index+1}: ${line}`,String(index))));
+    if([...$(id).options].some(option=>option.value===selected))$(id).value=selected;
+  }
   $('commands').replaceChildren(); $('count').textContent=lines.length; $('empty').hidden=lines.length>0;
   lines.forEach((line,index)=>{
     const li=document.createElement('li'), head=document.createElement('div'); head.className='row-head';
@@ -83,7 +95,37 @@ function renderCommands() {
     input.onkeydown=e=>{if(e.key==='Enter')input.blur();}; li.append(head,input); $('commands').append(li);
   });
 }
-function add(line) { lines.push(line); changed(); }
+let addingPlacement=false;
+async function add(line) {
+  if(addingPlacement)return;
+  addingPlacement=true;const current=revision;
+  message('Checking map command...');
+  try {
+    const result=await prepareAddition([...lines],line,$('map-position').value,post);
+    if(current!==revision)throw new Error('Draft changed while checking. Try placing again.');
+    lines=result.lines;changed();
+    message(`Added command ${result.index+1}: ${line}`);
+  }catch(error){message(`Nothing added. ${error.message} Choose an insertion point before Land, or start fresh with a backup.`,true);}
+  finally{addingPlacement=false;}
+}
+$('fresh-start').onclick=()=>{
+  try{localStorage.setItem('waypoint-draft-backup-v1',JSON.stringify({lines,home:home()}));}
+  catch{message('Cannot save a backup. Your draft has been kept.',true);return;}
+  lines=[`take off to ${number('altitude')} meters`];
+  $('map-position').value=$('insert-position').value='end';
+  $('action').value='waypoint';placementFields();
+  $('restore-draft').hidden=false;changed();
+};
+$('restore-draft').onclick=()=>{
+  try{
+    const draft=JSON.parse(localStorage.getItem('waypoint-draft-backup-v1'));
+    if(!Array.isArray(draft?.lines))throw new Error('No saved backup is available.');
+    lines=draft.lines;
+    for(const [id,key] of [['latitude','latitude_deg'],['longitude','longitude_deg'],['home-altitude','altitude_msl_m']])$(id).value=draft.home[key]??'';
+    $('home-confirmed').checked=false;changed();
+  }catch(error){message(error.message,true);}
+};
+try{$('restore-draft').hidden=!localStorage.getItem('waypoint-draft-backup-v1');}catch{}
 function placementFields() {
   const kind=$('action').value;
   $('alt-field').hidden=!['waypoint','takeoff','change_altitude'].includes(kind);
@@ -153,11 +195,12 @@ function draw() {
   }
   const boundary=Array.from({length:73},(_,i)=>pointPixel({x:200*Math.cos(i*Math.PI/36),y:200*Math.sin(i*Math.PI/36),z:0}));
   element('polyline',{points:boundary.map(p=>`${p.x},${p.y}`).join(' '),fill:'none',stroke:'#809882','stroke-dasharray':'6 6','stroke-width':1.5});
-  if(preview){
-    const pts=preview.segments.flatMap(s=>s.points.map(pointPixel));
+  const displayed=preview||partialPreview;
+  if(displayed){
+    const pts=displayed.segments.flatMap(s=>s.points.map(pointPixel));
     element('polyline',{points:pts.map(p=>`${p.x},${p.y}`).join(' '),fill:'none',stroke:'#197350','stroke-width':3,'stroke-linejoin':'round'});
     const endpoints=new Map();
-    for(const s of preview.segments){
+    for(const s of displayed.segments){
       endpoints.set(s.command_index,s.end);
       if(s.type==='arc'){const p=pointPixel(s.center);element('circle',{cx:p.x,cy:p.y,r:5,fill:'#e7a643',stroke:'white','stroke-width':2});element('text',{x:p.x+9,y:p.y-9,fill:'#80510c','font-size':11},'Orbit center');}
     }

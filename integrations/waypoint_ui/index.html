@@ -15,7 +15,9 @@
     <div class="fields"><label id="alt-field">Altitude above home (m)<input id="altitude" type="number" value="10" min="0.1" max="50" step="any"></label><label id="radius-field" hidden>Orbit radius (m)<input id="radius" type="number" value="20" min="0.1" max="200" step="any"></label></div>
     <div id="orbit-fields" hidden class="fields"><label>Direction<select id="direction"><option>clockwise</option><option>counterclockwise</option></select></label><label>Laps<input id="laps" type="number" value="1" min="1" max="10" step="1"></label></div>
     <label id="duration-field" hidden>Hover duration (s)<input id="duration" type="number" value="5" min="0.1" max="300" step="any"></label>
+    <label>Place map commands<select id="map-position"><option value="end">At the end of the mission</option></select></label>
     <button id="add-placement" class="secondary">Add command</button><p id="placement-help" class="muted">Click a destination on the map. Add takeoff first.</p>
+    <p id="placement-feedback" role="status" aria-live="polite"></p>
   </section>
   <section><h2><span>03</span> Type or speak</h2>
     <label for="instruction">Instruction / editable transcript</label><textarea id="instruction" rows="4" placeholder="Take off to 10 meters, fly north 20 meters, then land"></textarea>
@@ -37,6 +39,8 @@
   </div>
   <div class="map-footer"><span><i class="dot"></i> Planned path</span><span>Dashed boundary: 200 m from home</span><span id="cursor">East / north · meters</span></div>
   <div id="status" role="status">Add a takeoff command to begin.</div>
+  <button id="fresh-start" class="secondary">Start fresh with takeoff (keep backup)</button>
+  <button id="restore-draft" class="secondary" hidden>Restore previous draft</button>
   <p class="footnote">Plan and export only. This page does not upload, arm, or start an aircraft. Map imagery does not establish obstacle clearance.</p>
 </section>
 <aside class="mission-panel"><div class="list-title"><div><small>YOUR MISSION</small><h2>Command sequence <span id="count">0</span></h2></div><button class="secondary" id="clear">Clear</button></div>
