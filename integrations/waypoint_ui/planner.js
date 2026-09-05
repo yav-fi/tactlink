@@ -15,7 +15,7 @@ function inputFeedback(text, error=false) {
 function message(text, error=false) {
   $('status').textContent=text; $('status').classList.toggle('error', error);
   const match=error && text.match(/Command (\d+):/i);
-  $('show-command-error').hidden=!match;
+  $('show-command-error').hidden=!match || Number(match[1]) > lines.length;
   if(match){
     const index=Number(match[1]);
     $('show-command-error').textContent=`Show command ${index}`;
