@@ -1,4 +1,26 @@
 :root { color: #edf6ff; background: #07111f; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+[hidden] { display: none !important; }
+.panel-tabs { display: flex; gap: 4px; padding: 4px; margin: 16px 0; border-radius: 10px; background: #0b1a2c; }
+.panel-tabs button { flex: 1; color: #b6cadf; background: transparent; }
+.panel-tabs button[aria-selected="true"] { color: #052033; background: #52d8ff; }
+.panel-tabs button:focus-visible { outline: 2px solid #edf6ff; outline-offset: 2px; }
+.advanced-controls { margin: 14px 0; padding: 10px 12px; border: 1px solid #294359; border-radius: 9px; }
+.advanced-controls summary { cursor: pointer; font-size: .8rem; color: #b6cadf; }
+.advanced-controls[open] summary { margin-bottom: 10px; }
+.mission-panel > section { border-top: 1px solid #294359; margin-top: 16px; padding-top: 2px; }
+.actions > button { flex: 1 1 auto; }
+#panel-batches > button { width: 100%; }
+#undo-action { margin-top: 12px; width: 100%; }
+#fleet-overview { max-height: 240px; overflow-y: auto; }
+.fleet-card { border-left: 3px solid; padding: 8px 10px; margin-bottom: 8px; background: #102438; border-radius: 5px; font-size: .78rem; }
+.fleet-card p { margin: 5px 0 0; color: #b6cadf; }
+#apply-batch-speed, #control-batch { margin-top: 8px; }
+label { display: block; margin: 8px 0 5px; font-size: .82rem; }
+input:not([type="checkbox"]), select { width: 100%; padding: 8px; color: #edf6ff; background: #203c56; border: 1px solid #31516d; border-radius: 8px; }
+#group-members { max-height: 170px; overflow: auto; margin: 10px 0; }
+.member-row { display: flex; align-items: center; gap: 8px; }
+.member-swatch { width: 10px; height: 10px; border-radius: 50%; }
+#save-group, #choose-destination { margin-top: 8px; }
 .runtime-only { display: none; }
 .runtime-mode .runtime-only { display: block; }
 .runtime-mode .local-only { display: none; }
