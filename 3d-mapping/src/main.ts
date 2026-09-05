@@ -4,7 +4,6 @@ import * as Cesium from "cesium";
 import { DroneController } from "./drone-controller";
 import { Fleet, DRONE_COLORS } from "./fleet";
 import { parseMission, sampleMission } from "./mission";
-import { previewCoordinate, previewMission, type FlightPreview } from "./flight-preview";
 
 const home = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
 const token = import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined;
@@ -37,42 +36,6 @@ const stopReplayButton = document.querySelector<HTMLButtonElement>("#stop-paths"
 const replayTime = document.querySelector<HTMLParagraphElement>("#playback-time")!;
 const replayStatus = document.querySelector<HTMLParagraphElement>("#playback-status")!;
 let drone: DroneController | undefined;
-const previewButton = document.querySelector<HTMLButtonElement>("#preview-flight")!;
-const previewStatus = document.querySelector<HTMLParagraphElement>("#preview-status")!;
-let flightRoute: Cesium.Entity | undefined;
-const bridgeUrl = (import.meta.env.VITE_FLIGHT_BRIDGE_URL ?? "http://127.0.0.1:8765").replace(/\/$/, "");
-previewButton.addEventListener("click", async () => {
-  const selected = drone;
-  if (!selected) { previewStatus.textContent = "Deploy and select a drone first."; return; }
-  previewButton.disabled = true;
-  previewStatus.textContent = "Validating flight instruction...";
-  try {
-    const response = await fetch(`${bridgeUrl}/api/preview`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: document.querySelector<HTMLTextAreaElement>("#flight-text")!.value }),
-      signal: AbortSignal.timeout(10000),
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "Flight instruction was rejected.");
-    if (drone !== selected || !fleet.drones.has(selected.id)) throw new Error("Selected drone changed; generate the preview again.");
-    const path = result as FlightPreview;
-    const mission = previewMission(path, selected.id, selected.homeCoordinates, selected.speedMph * 0.44704);
-    const positions = path.segments.flatMap(segment => segment.points.map(point => {
-      const geo = previewCoordinate(point, selected.homeCoordinates);
-      return Cesium.Cartesian3.fromDegrees(geo.longitude, geo.latitude, geo.altitude);
-    }));
-    if (flightRoute) viewer.entities.remove(flightRoute);
-    flightRoute = viewer.entities.add({ name: "Validated flight preview", polyline: {
-      positions, width: 3, material: Cesium.Color.CYAN, arcType: Cesium.ArcType.NONE, clampToGround: false,
-    } });
-    missionInput.value = JSON.stringify(mission, null, 2);
-    previewStatus.textContent = `Path ready for ${selected.id}. Run mission animates the simulated drone. Landing returns to deployment height.`;
-  } catch (error) {
-    previewStatus.textContent = error instanceof Error ? error.message : "Cannot reach the flight bridge on port 8765.";
-  } finally {
-    previewButton.disabled = false;
-  }
-});
 const droneSelect = document.querySelector<HTMLSelectElement>("#selected-drone")!;
 const speedInput = document.querySelector<HTMLInputElement>("#drone-speed")!;
 const speedStatus = document.querySelector<HTMLParagraphElement>("#speed-status")!;
@@ -205,7 +168,6 @@ function refreshFleet(): void {
     document.querySelector<HTMLButtonElement>(`#${id}`)!.disabled = deploying || !drone || fleet.replay.running;
   }
   document.querySelector<HTMLButtonElement>("#deploy-drone")!.disabled = fleet.replay.running;
-  previewButton.disabled = fleet.replay.running;
   replayButton.disabled = deploying || fleet.replay.running || !fleet.drones.size;
   stopReplayButton.disabled = !fleet.replay.running;
 }
@@ -302,8 +264,6 @@ document.querySelector<HTMLButtonElement>("#reset-all")!.addEventListener("click
   cancelDeployment();
   fleet.clear();
   replayStatus.textContent = "Record paths by piloting drones, then run them together.";
-  if (flightRoute) viewer.entities.remove(flightRoute);
-  flightRoute = undefined;
   drone = undefined;
   refreshFleet();
   commandStatus.textContent = "All drones and routes cleared. Deploy a new drone to begin.";
@@ -344,7 +304,6 @@ document.querySelector<HTMLButtonElement>("#reset-mission")!.addEventListener("c
   commandStatus.textContent = "Drone reset to its home coordinate.";
 });
 document.querySelector<HTMLButtonElement>("#orbit-monument")!.addEventListener("click", activateOrbitCamera);
-document.querySelector<HTMLButtonElement>("#free-camera")!.addEventListener("click", flyToFreeCameraOverview);
 controlDroneButton.addEventListener("click", () => {
   if (!drone || deploying) return;
   if (controllingDrone) {
