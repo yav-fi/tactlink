@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="DNHacks geospatial drone mission simulator" />
+    <title>Drone Mission Control</title>
+  </head>
+  <body>
+    <main id="app">
+      <div id="cesiumContainer" aria-label="3D map"></div>
+      <aside class="mission-panel">
+        <p class="eyebrow">DNHacks 2026</p>
+        <h1>Drone mission control</h1>
+        <p id="world-status" class="status">Starting map…</p>
+        <section>
+          <h2>Mission command</h2>
+          <textarea id="mission-json" spellcheck="false" aria-label="Mission command JSON"></textarea>
+          <div class="actions">
+            <button id="run-mission" type="button">Run mission</button>
+            <button id="reset-mission" type="button" class="secondary">Reset drone</button>
+          </div>
+          <p id="command-status" class="hint">Commands execute locally and deterministically.</p>
+        </section>
+        <section>
+          <h2>Drone state</h2>
+          <dl id="drone-state" class="state"></dl>
+        </section>
+        <p class="hint">Add a Cesium ion token in <code>.env</code> to stream Google Photorealistic 3D Tiles.</p>
+      </aside>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

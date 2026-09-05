@@ -1,3 +1,7 @@
 models/
 __pycache__/
 benchmark_result.json
+.env
+.env.local
+3d-mapping/node_modules/
+3d-mapping/dist/
