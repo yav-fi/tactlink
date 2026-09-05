@@ -20,6 +20,61 @@ function loadSource(name) {
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
 
+test("photorealistic ground can be below the hidden fallback ellipsoid", () => {
+  const viewer = { entities: new Cesium.EntityCollection(), scene: {
+    pickFromRay: () => undefined,
+    globe: { show: false, pick: () => { throw new Error("hidden globe must not be queried"); }, getHeight: () => 0 },
+  } };
+  const drone = new Fleet(viewer).deploy({ ...home, altitude: -11 });
+  drone.setManualControl(true);
+  drone.moveManually(1, 0, 0, 0.1);
+  assert(drone.snapshot().longitude > home.longitude);
+  assert.equal(drone.collisionBlocked, false);
+  viewer.scene.pickFromRay = ray => ({ position: Cesium.Ray.getPoint(ray, 1) });
+  drone.moveManually(1, 0, 0, 0.1);
+  assert.equal(drone.collisionBlocked, true);
+});
+
+test("failed building queries do not freeze drones or leave the camera in an offscreen view", () => {
+  const mainView = {};
+  const viewer = { entities: new Cesium.EntityCollection(), scene: {
+    view: mainView,
+    pickFromRay() { this.view = {}; throw new Error("depth framebuffer unavailable"); },
+    globe: { pick: () => undefined, getHeight: () => 0 },
+  } };
+  const fleet = new Fleet(viewer);
+  const members = fleet.deployBulk(home, 2, 30);
+  fleet.takeBatch(members.map(d => d.id), 60);
+  const before = members.map(d => d.snapshot());
+  fleet.moveBatch(1, 0, 0, 0.1, 0);
+  members.forEach((d, i) => {
+    assert(d.snapshot().longitude > before[i].longitude);
+    assert.equal(d.collisionBlocked, false);
+  });
+  assert.equal(viewer.scene.view, mainView);
+  // A failed building query must not bypass a real ground collision.
+  viewer.scene.globe.getHeight = () => 79;
+  fleet.moveBatch(0, 0, -1, 0.1, 0);
+  assert(members.every(d => d.collisionBlocked));
+});
+
+test("low-clearance drones can climb out, but cannot descend through ground", () => {
+  const viewer = { entities: new Cesium.EntityCollection(), scene: {
+    pickFromRay: () => undefined,
+    globe: { pick: () => undefined, getHeight: () => 75 },
+  } };
+  const drone = new Fleet(viewer).deploy(home);
+  drone.setManualControl(true);
+  drone.moveManually(0, 0, 1, 0.1);
+  assert(drone.snapshot().altitude > home.altitude);
+  assert.equal(drone.collisionBlocked, false);
+  drone.stopManualMotion();
+  const altitude = drone.snapshot().altitude;
+  drone.moveManually(0, 0, -1, 0.1);
+  assert.equal(drone.snapshot().altitude, altitude);
+  assert.equal(drone.collisionBlocked, true);
+});
+
 test("wall and ground checks block manual motion, batches, missions and replay", () => {
   const entities = new Cesium.EntityCollection();
   let obstacle = false;

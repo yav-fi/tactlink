@@ -3,35 +3,60 @@ import * as Cesium from "cesium";
 // Enclose the 16 x 10 x 4 m display prism, independent of heading.
 export const DRONE_CLEARANCE = 10;
 type RayScene = Cesium.Scene & {
+  view?: unknown;
   pickFromRay(ray: Cesium.Ray, exclude: Cesium.Entity[], width: number): { position?: Cesium.Cartesian3 } | undefined;
 };
+const queryWarnings = new WeakMap<Cesium.Viewer, string>();
+export function collisionWarning(viewer: Cesium.Viewer): string | undefined { return queryWarnings.get(viewer); }
 
 export function movementBlocked(viewer: Cesium.Viewer, from: Cesium.Cartesian3, to: Cesium.Cartesian3): boolean {
   const scene = viewer.scene as RayScene | undefined;
   if (!scene) return false; // Controller-only simulations have no map geometry.
   const distance = Cesium.Cartesian3.distance(from, to);
   if (distance < 0.00001) return false;
+  queryWarnings.delete(viewer);
   const ray = new Cesium.Ray(from, Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(to, from, new Cesium.Cartesian3()), new Cesium.Cartesian3()));
   // Exclude every application entity: trails, labels and release prisms are not buildings.
   // Cesium's ray width sweeps a square footprint around the center ray.
-  try {
-    if (scene.pickFromRay) {
+  const originalView = scene.view;
+  if (scene.pickFromRay) {
+    try {
       const hit = scene.pickFromRay(ray, viewer.entities.values, DRONE_CLEARANCE * 2)?.position;
       if (hit && Cesium.Cartesian3.distance(from, hit) <= distance + DRONE_CLEARANCE) return true;
+    } catch (error) {
+      queryWarnings.set(viewer, `Building collision query unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      // Cesium switches to an offscreen view internally, but does not restore it if it throws.
+      if (originalView !== undefined) scene.view = originalView;
     }
+  } else {
+    queryWarnings.set(viewer, "Building collision queries are unavailable in this browser.");
+  }
+  // Google tiles can have valid negative ellipsoid heights. The hidden fallback
+  // globe is not the ground in that mode; its sea-level surface would trap drones.
+  if (scene.globe?.show === false) return false;
+  try {
     const terrainHit = scene.globe?.pick(ray, scene);
     if (terrainHit && Cesium.Cartesian3.distance(from, terrainHit) <= distance + DRONE_CLEARANCE) return true;
+  } catch {
+    queryWarnings.set(viewer, "Terrain ray query unavailable; using ground height checks.");
+  }
     // Sample the full segment as well: endpoint-only checks can tunnel through slopes.
     const count = Math.ceil(distance / 5);
     if (count > 2000) return true; // Reject extreme typed speeds without unbounded frame work.
+    const origin = Cesium.Cartographic.fromCartesian(from);
+    let previousClearance: number | undefined;
+    try { previousClearance = origin.height - (scene.globe?.getHeight(origin) ?? 0); } catch { /* Use endpoint checks below. */ }
     for (let i = 1; i <= count; i++) {
       const point = Cesium.Cartographic.fromCartesian(Cesium.Cartesian3.lerp(from, to, i / count, new Cesium.Cartesian3()));
-      const ground = scene.globe?.getHeight(point) ?? 0;
-      if (point.height < ground + DRONE_CLEARANCE) return true;
+      let ground = 0;
+      try { ground = scene.globe?.getHeight(point) ?? 0; } catch {
+        queryWarnings.set(viewer, "Terrain heights unavailable; using the fallback ellipsoid ground.");
+      }
+      const clearance = point.height - ground;
+      // A drone placed below the margin must be able to climb back out.
+      if (clearance < DRONE_CLEARANCE && !(previousClearance !== undefined && clearance > previousClearance + 0.00001)) return true;
+      previousClearance = clearance;
     }
     return false;
-  } catch {
-    // If a geometry query fails, keep the last safe position rather than fly unchecked.
-    return true;
-  }
 }

@@ -19,6 +19,8 @@ To load Google Photorealistic 3D Tiles, create a Cesium ion token with that data
 
 ## Mission contract
 
+Photorealistic-map collisions use the tile mesh, not the hidden fallback globe: valid flight positions can have negative ellipsoid heights. Failed geometry queries display a warning rather than freezing movement; building protection is unavailable while those queries fail. Fallback-globe ground checks still run independently, and drones starting inside the clearance margin can climb out.
+
 The left panel has **Individual drone** and **Batches** tabs. Single deployment, selected-drone speed and mission editing live in the first; bulk deployment, batch piloting/speed, selection and saved groups live in the second. Placement controls appear in the matching tab. Fleet playback, reset-all, camera controls and drone state are shared. Switching tabs preserves selection and flight state; picking up a batch opens its tab automatically.
 
 Collision checks stop movement against loaded buildings and terrain with a conservative 10 m clearance around the displayed prism. Manual batches stop together if any member is blocked; steer away to continue. Missions stop on collision, and playback counts blocked drones separately from arrivals. Checks sweep movement segments, including segments crossed by delayed playback frames. Deployment requires at least 15 m above the picked surface. These are collision stops, not automatic rerouting or drone-to-drone collision handling. Cesium's internal `pickFromRay` query only sees geometry rendered in the current view: unloaded/offscreen buildings and gaps in photogrammetry remain limitations. GPU ray queries per moving drone may affect large-fleet performance.

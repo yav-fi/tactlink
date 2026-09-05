@@ -4,6 +4,7 @@ import * as Cesium from "cesium";
 import { DroneController } from "./drone-controller";
 import { Fleet, DRONE_COLORS } from "./fleet";
 import { formationSlots } from "./formation";
+import { collisionWarning } from "./collision";
 import { parseMission, sampleMission } from "./mission";
 
 const home = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
@@ -567,7 +568,11 @@ viewer.clock.onTick.addEventListener((clock) => {
   updateFreeCamera(Math.min(0.1, Math.max(0, (cameraTime - previousCameraTime) / 1000)));
   previousCameraTime = cameraTime;
   const snapshot = drone?.snapshot();
-  if (controllingDrone && drone?.collisionBlocked) commandStatus.textContent = "Obstacle ahead: movement stopped. Steer away or climb to continue.";
+  if (controllingDrone) {
+    commandStatus.textContent = drone?.collisionBlocked
+      ? "Obstacle ahead: movement stopped. Steer away or climb to continue."
+      : collisionWarning(viewer) ?? "Pilot control active. Esc releases; WASD moves; R/F changes height.";
+  }
   if (!snapshot) { stateElement.innerHTML = "<dt>Fleet</dt><dd>No drones deployed</dd>"; return; }
   stateElement.innerHTML = [
     ["State", snapshot.state], ["Position", `${snapshot.latitude.toFixed(5)}, ${snapshot.longitude.toFixed(5)}`], ["Altitude", `${snapshot.altitude.toFixed(0)} m`], ["Step", snapshot.totalSteps ? `${snapshot.currentStep} / ${snapshot.totalSteps}` : "—"],
