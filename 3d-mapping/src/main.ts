@@ -28,11 +28,28 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
 });
 
 viewer.scene.globe.enableLighting = true;
-viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude - 0.008, 900), orientation: { heading: 0, pitch: Cesium.Math.toRadians(-35), roll: 0 } });
 const drone = new DroneController(viewer, home);
 const activeCameraKeys = new Set<string>();
+const monumentTarget = Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, 20);
+const orbitCamera = { heading: Cesium.Math.toRadians(30), pitch: Cesium.Math.toRadians(-22), range: 450 };
+let cameraMode: "orbit" | "free" = "orbit";
+let isOrbitDragging = false;
+const cameraHandler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
+
+function applyOrbitCamera(): void {
+  viewer.camera.lookAt(monumentTarget, new Cesium.HeadingPitchRange(orbitCamera.heading, orbitCamera.pitch, orbitCamera.range));
+}
+
+function activateOrbitCamera(): void {
+  cameraMode = "orbit";
+  viewer.trackedEntity = undefined;
+  viewer.scene.screenSpaceCameraController.enableInputs = false;
+  applyOrbitCamera();
+  commandStatus.textContent = "Orbit camera active. Drag the map to see every side of the monument; scroll to zoom.";
+}
 
 function flyToFreeCameraOverview(): void {
+  cameraMode = "free";
   viewer.trackedEntity = undefined;
   viewer.scene.screenSpaceCameraController.enableInputs = true;
   viewer.camera.flyTo({
@@ -42,6 +59,21 @@ function flyToFreeCameraOverview(): void {
   });
   commandStatus.textContent = "Free camera active. Drag to look; W/A/S/D/R/F moves the camera.";
 }
+
+cameraHandler.setInputAction(() => { isOrbitDragging = cameraMode === "orbit"; }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+cameraHandler.setInputAction(() => { isOrbitDragging = false; }, Cesium.ScreenSpaceEventType.LEFT_UP);
+cameraHandler.setInputAction((movement: { startPosition: Cesium.Cartesian2; endPosition: Cesium.Cartesian2 }) => {
+  if (!isOrbitDragging || cameraMode !== "orbit") return;
+  orbitCamera.heading -= (movement.endPosition.x - movement.startPosition.x) * 0.008;
+  orbitCamera.pitch = Cesium.Math.clamp(orbitCamera.pitch + (movement.endPosition.y - movement.startPosition.y) * 0.006, Cesium.Math.toRadians(-85), Cesium.Math.toRadians(-5));
+  applyOrbitCamera();
+}, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+cameraHandler.setInputAction((delta: number) => {
+  if (cameraMode !== "orbit") return;
+  orbitCamera.range = Cesium.Math.clamp(orbitCamera.range + delta * 0.22, 80, 4_000);
+  applyOrbitCamera();
+}, Cesium.ScreenSpaceEventType.WHEEL);
+activateOrbitCamera();
 
 if (token) {
   try {
@@ -69,6 +101,7 @@ document.querySelector<HTMLButtonElement>("#reset-mission")!.addEventListener("c
   drone.reset();
   commandStatus.textContent = "Drone reset to its home coordinate.";
 });
+document.querySelector<HTMLButtonElement>("#orbit-monument")!.addEventListener("click", activateOrbitCamera);
 document.querySelector<HTMLButtonElement>("#free-camera")!.addEventListener("click", flyToFreeCameraOverview);
 
 window.addEventListener("keydown", (event) => {
