@@ -52,3 +52,14 @@ def test_controls_fail_recover_and_interference() -> None:
         response = client.post("/api/interference", json=config.model_dump(mode="json"))
         assert response.status_code == 200
         assert response.json()["gps_interference"] == 0.4
+
+
+def test_control_failure_is_simulated_without_stopping_api() -> None:
+    engine = engine_for_test(drone_count=4)
+    app = create_app(engine, start_runner=False)
+    with TestClient(app) as client:
+        response = client.post("/api/control/fail")
+        assert response.status_code == 200
+        state = client.get("/api/state").json()
+        assert state["control_available"] is False
+        assert state["running"] is True

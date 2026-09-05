@@ -4,6 +4,7 @@ import * as Cesium from "cesium";
 import { DroneController } from "./drone-controller";
 import { Fleet, DRONE_COLORS } from "./fleet";
 import { parseMission, sampleMission } from "./mission";
+import { startRuntimeMode } from "./runtime";
 import { previewCoordinate, previewMission, type FlightPreview } from "./flight-preview";
 
 const home = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
@@ -12,6 +13,8 @@ const status = document.querySelector<HTMLParagraphElement>("#world-status")!;
 const commandStatus = document.querySelector<HTMLParagraphElement>("#command-status")!;
 const missionInput = document.querySelector<HTMLTextAreaElement>("#mission-json")!;
 const stateElement = document.querySelector<HTMLDListElement>("#drone-state")!;
+const runtimeMode = new URLSearchParams(window.location.search).get("mode") === "runtime";
+document.body.classList.toggle("runtime-mode", runtimeMode);
 
 missionInput.value = JSON.stringify(sampleMission, null, 2);
 if (token) Cesium.Ion.defaultAccessToken = token;
@@ -29,6 +32,7 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
   timeline: false,
   baseLayer: false,
 });
+if (runtimeMode) startRuntimeMode(viewer);
 
 viewer.scene.globe.enableLighting = true;
 const fleet = new Fleet(viewer);
@@ -394,10 +398,11 @@ let previousCameraTime = performance.now();
 viewer.clock.onTick.addEventListener((clock) => {
   const deltaSeconds = Math.max(0, Math.min(0.1, Cesium.JulianDate.secondsDifference(clock.currentTime, previousTime)));
   previousTime = Cesium.JulianDate.clone(clock.currentTime, previousTime);
-  for (const item of fleet.drones.values()) item.update(deltaSeconds);
+  if (!runtimeMode) for (const item of fleet.drones.values()) item.update(deltaSeconds);
   const cameraTime = performance.now();
   updateFreeCamera(Math.min(0.1, Math.max(0, (cameraTime - previousCameraTime) / 1000)));
   previousCameraTime = cameraTime;
+  if (runtimeMode) return;
   const snapshot = drone?.snapshot();
   if (!snapshot) { stateElement.innerHTML = "<dt>Fleet</dt><dd>No drones deployed</dd>"; return; }
   stateElement.innerHTML = [

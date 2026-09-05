@@ -48,6 +48,7 @@ _BEHAVIORS = {
     TaskType.REGROUP: plan_regroup,
     TaskType.HOLD: plan_hold,
     TaskType.RETURN: plan_return,
+    TaskType.RELAY: plan_goto,
 }
 
 

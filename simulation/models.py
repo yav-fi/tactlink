@@ -48,6 +48,7 @@ class TaskType(StrEnum):
     HOLD = "HOLD"
     RETURN = "RETURN"
     REGROUP = "REGROUP"
+    RELAY = "RELAY"
 
 
 class TaskStatus(StrEnum):
@@ -70,6 +71,21 @@ class MessageType(StrEnum):
     POSITION_UPDATE = "POSITION_UPDATE"
     CAPABILITY_UPDATE = "CAPABILITY_UPDATE"
     TASK_COMPLETE = "TASK_COMPLETE"
+    MISSION_ANNOUNCE = "MISSION_ANNOUNCE"
+    TASK_BID = "TASK_BID"
+    TASK_AWARD = "TASK_AWARD"
+    TASK_RELEASE = "TASK_RELEASE"
+    MISSION_SYNC = "MISSION_SYNC"
+    WORLD_UPDATE = "WORLD_UPDATE"
+
+
+class ObservationType(StrEnum):
+    REGION_OBSERVED = "REGION_OBSERVED"
+    CELL_OBSERVED = "CELL_OBSERVED"
+    ENTITY_OBSERVED = "ENTITY_OBSERVED"
+    OBSTACLE_OBSERVED = "OBSTACLE_OBSERVED"
+    LINK_OBSERVED = "LINK_OBSERVED"
+    ROUTE_OBSERVED = "ROUTE_OBSERVED"
 
 
 class EventCategory(StrEnum):
@@ -80,6 +96,7 @@ class EventCategory(StrEnum):
     FAILURE = "FAILURE"
     AUTONOMY = "AUTONOMY"
     ALLOCATION = "ALLOCATION"
+    KNOWLEDGE = "KNOWLEDGE"
 
 
 class EventType(StrEnum):
@@ -106,11 +123,59 @@ class EventType(StrEnum):
     REPLAN_REQUESTED = "REPLAN_REQUESTED"
     INTERFERENCE_CHANGED = "INTERFERENCE_CHANGED"
     RANDOM_EVENT = "RANDOM_EVENT"
+    CONTROL_LOST = "CONTROL_LOST"
+    CONTROL_RECOVERED = "CONTROL_RECOVERED"
+    MISSION_REPLICATED = "MISSION_REPLICATED"
+    TASK_AUCTION_STARTED = "TASK_AUCTION_STARTED"
+    TASK_BID = "TASK_BID"
+    TASK_AUCTION_WON = "TASK_AUCTION_WON"
+    TASK_RELEASED = "TASK_RELEASED"
+    NETWORK_PARTITION_RISK = "NETWORK_PARTITION_RISK"
+    NETWORK_HEALED = "NETWORK_HEALED"
+    RELAY_TASK_CREATED = "RELAY_TASK_CREATED"
+    RELAY_REPOSITIONING = "RELAY_REPOSITIONING"
+    RELAY_ESTABLISHED = "RELAY_ESTABLISHED"
+    LINK_QUALITY_CHANGED = "LINK_QUALITY_CHANGED"
+    OBSERVATION_CREATED = "OBSERVATION_CREATED"
+    OBSERVATION_SHARED = "OBSERVATION_SHARED"
+    WORLD_MODEL_UPDATED = "WORLD_MODEL_UPDATED"
+    WORLD_MODEL_RECONCILED = "WORLD_MODEL_RECONCILED"
+    COVERAGE_CHANGED = "COVERAGE_CHANGED"
+    INFORMATION_STALE = "INFORMATION_STALE"
+    MISSION_EFFECTIVENESS_CHANGED = "MISSION_EFFECTIVENESS_CHANGED"
+    OBJECTIVE_DEGRADED = "OBJECTIVE_DEGRADED"
+    OBJECTIVE_RECOVERED = "OBJECTIVE_RECOVERED"
+    RESOURCE_REPRIORITIZED = "RESOURCE_REPRIORITIZED"
+    LEASE_GRANTED = "LEASE_GRANTED"
+    LEASE_EXPIRED = "LEASE_EXPIRED"
+    LEASE_CONFLICT_RESOLVED = "LEASE_CONFLICT_RESOLVED"
+    WORKER_CONNECTED = "WORKER_CONNECTED"
+    WORKER_DISCONNECTED = "WORKER_DISCONNECTED"
+    SIGNATURE_REJECTED = "SIGNATURE_REJECTED"
+    REPLAY_STARTED = "REPLAY_STARTED"
+    REPLAY_FINISHED = "REPLAY_FINISHED"
 
 
 class TrustLevel(StrEnum):
     UNVERIFIED = "UNVERIFIED"
     TRUSTED = "TRUSTED"
+
+
+class NodeCapabilities(BaseModel):
+    mobility: bool = True
+    compute_score: float = Field(default=1.0, ge=0.0)
+    sensors: set[str] = Field(default_factory=set)
+    communication_roles: set[str] = Field(default_factory=lambda: {"peer"})
+    battery_powered: bool = True
+    relay: bool = False
+    storage_score: float = Field(default=1.0, ge=0.0)
+
+
+class PolicyResult(BaseModel):
+    allowed: bool = True
+    reason_codes: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    recommended_action: str | None = None
 
 
 class MissionTarget(BaseModel):
@@ -132,6 +197,14 @@ class MissionCommand(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class TaskLease(BaseModel):
+    task_id: str
+    owner: str
+    lease_id: str
+    lease_expires: float
+    revision: int
+
+
 class MissionTask(BaseModel):
     id: str = Field(default_factory=lambda: f"task-{uuid4().hex[:10]}")
     type: TaskType
@@ -144,6 +217,9 @@ class MissionTask(BaseModel):
     assigned_nodes: list[str] = Field(default_factory=list)
     progress: float = Field(default=0.0, ge=0.0, le=1.0)
     capability: float = Field(default=0.0, ge=0.0, le=1.0)
+    effectiveness: float = Field(default=0.0, ge=0.0, le=1.0)
+    effectiveness_components: dict[str, float] = Field(default_factory=dict)
+    leases: list[TaskLease] = Field(default_factory=list)
     created_at: float = 0.0
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -182,6 +258,7 @@ class NodeIdentity(BaseModel):
     trust_level: TrustLevel = TrustLevel.UNVERIFIED
     authorization_level: str = "simulation"
     metadata: dict[str, Any] = Field(default_factory=dict)
+    resources: NodeCapabilities = Field(default_factory=NodeCapabilities)
 
 
 class MotionIntent(BaseModel):
@@ -199,6 +276,49 @@ class NetworkMessage(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     sequence_number: int = 0
     signature: str | None = None
+
+
+class Observation(BaseModel):
+    observation_id: str
+    source_node_id: str
+    timestamp: float
+    observation_type: ObservationType
+    domain_key: str
+    geometry: dict[str, Any] = Field(default_factory=dict)
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    uncertainty: float = Field(default=0.0, ge=0.0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CoverageCell(BaseModel):
+    cell_id: str
+    region_id: str
+    center: Vector3
+    size_m: float
+    last_observed: float | None = None
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    observed_by: str | None = None
+    observation_count: int = 0
+    freshness: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class RegionCoverage(BaseModel):
+    region_id: str
+    total_cells: int = 0
+    observed_cells: int = 0
+    fresh_cells: int = 0
+    coverage: float = Field(default=0.0, ge=0.0, le=1.0)
+    fresh_coverage: float = Field(default=0.0, ge=0.0, le=1.0)
+    mean_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    cells: list[CoverageCell] = Field(default_factory=list)
+
+
+class WorldKnowledgeMetrics(BaseModel):
+    regions: list[RegionCoverage] = Field(default_factory=list)
+    observation_count: int = 0
+    mean_observation_confidence: float = 0.0
+    world_model_sync_lag: float = 0.0
+    duplicate_task_execution_count: int = 0
 
 
 class DroneStatusReport(BaseModel):
@@ -232,6 +352,13 @@ class DronePublicState(BaseModel):
     task_queue: list[str]
     task_progress: float
     peers: dict[str, PeerKnowledge]
+    current_plan: list[Vector3] = Field(default_factory=list)
+    role: str = "MISSION"
+    local_mission_revision: int = 0
+    observation_count: int = 0
+    known_cells: dict[str, int] = Field(default_factory=dict)
+    last_world_reconciliation: float | None = None
+    policy: PolicyResult = Field(default_factory=PolicyResult)
 
 
 class LinkState(BaseModel):
@@ -241,6 +368,21 @@ class LinkState(BaseModel):
     quality: float
     latency_seconds: float
     partitioned: bool = False
+    distance_m: float = 0.0
+    obstructed: bool = False
+    packet_loss: float = 0.0
+
+
+class NetworkMetrics(BaseModel):
+    network_health: float = Field(default=1.0, ge=0.0, le=1.0)
+    connected_components: list[list[str]] = Field(default_factory=list)
+    largest_component_fraction: float = Field(default=1.0, ge=0.0, le=1.0)
+    mean_link_quality: float = Field(default=1.0, ge=0.0, le=1.0)
+    packet_loss_recent: float = Field(default=0.0, ge=0.0, le=1.0)
+    active_nodes: int = 0
+    degraded_nodes: int = 0
+    relay_nodes: list[str] = Field(default_factory=list)
+    gps_degraded_count: int = 0
 
 
 class InterferenceConfig(BaseModel):
@@ -281,6 +423,13 @@ class SimulationSnapshot(BaseModel):
     links: list[LinkState]
     interference: InterferenceConfig
     mission_capability: float
+    mission_effectiveness: float = Field(default=0.0, ge=0.0, le=1.0)
+    world_knowledge: WorldKnowledgeMetrics = Field(default_factory=WorldKnowledgeMetrics)
+    network: NetworkMetrics = Field(default_factory=NetworkMetrics)
+    control_available: bool = True
+    origin_lat: float = 38.8895
+    origin_lon: float = -77.0353
+    origin_alt: float = 20.0
     events: list[SimulationEvent] = Field(default_factory=list)
 
 

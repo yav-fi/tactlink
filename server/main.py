@@ -9,6 +9,7 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from simulation.models import (
     DronePublicState,
@@ -59,6 +60,12 @@ def create_app(engine: SimulationEngine | None = None, start_runner: bool = True
     )
     app.state.engine = runtime
     app.state.websocket_hub = hub
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> HTMLResponse:
@@ -86,7 +93,10 @@ def create_app(engine: SimulationEngine | None = None, start_runner: bool = True
 
     @app.post("/api/missions", status_code=201)
     async def create_mission(command: MissionCommand) -> MissionTask:
-        return runtime.submit_mission(command)
+        try:
+            return runtime.submit_mission(command)
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
 
     @app.post("/api/simulation/pause")
     async def pause() -> dict[str, bool]:
@@ -141,6 +151,26 @@ def create_app(engine: SimulationEngine | None = None, start_runner: bool = True
         except KeyError as exc:
             raise HTTPException(404, f"unknown drone: {node_id}") from exc
         return {"node_id": node_id, "status": "online"}
+
+    @app.post("/api/workers/{node_id}/connect")
+    async def connect_worker(node_id: str, uri: str = Query(..., pattern=r"^wss?://")) -> dict[str, str]:
+        try:
+            runtime.attach_external_worker(node_id, uri)
+        except KeyError as exc:
+            raise HTTPException(404, f"unknown drone: {node_id}") from exc
+        except (OSError, RuntimeError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"node_id": node_id, "worker": uri, "status": "connected"}
+
+    @app.post("/api/control/fail")
+    async def fail_control() -> dict[str, str]:
+        runtime.fail_control()
+        return {"control": "offline", "mission_execution": "peer-to-peer"}
+
+    @app.post("/api/control/recover")
+    async def recover_control() -> dict[str, str]:
+        runtime.recover_control()
+        return {"control": "online"}
 
     @app.websocket("/ws")
     async def websocket_state(websocket: WebSocket) -> None:

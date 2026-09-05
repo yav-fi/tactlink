@@ -31,11 +31,16 @@ This repo hosts five hackathon workstreams:
 ```sh
 pip install -r requirements.txt
 git clone https://github.com/kaarelkaarelson/mlx-bench.git ~/mlx-bench
+brew install macmon ProducerGuy/tap/thermalforge
+sudo thermalforge install
 ./scripts/download_model.sh
 ./scripts/build_dflash_draft.sh
 ```
 
 ## Commands
+
+All five scripts above take `--model qwen3.5-9b|qwen3.8-27b` (default `qwen3.5-9b`);
+`start_chat_server.sh`/`ask.sh`/`benchmark.sh` always agree on which is running.
 
 ```sh
 ./scripts/start_chat_server.sh   # spin up the inference server
@@ -45,12 +50,15 @@ git clone https://github.com/kaarelkaarelson/mlx-bench.git ~/mlx-bench
 
 ## Performance
 
-| Hardware | Model | Decode tok/s |
-| --- | --- | --- |
-| MacBook Pro, Apple M3 Max, 48GB | mlx-community/Qwen3.8-27B-4bit + w4:gs64 DFlash2 draft + LibraSpec | 72.3 |
+| Hardware | Model | Draft Head | Plug-in Algorithms | Decode tok/s |
+| --- | --- | --- | --- | --- |
+| MacBook Pro, Apple M4, 16GB | [Qwen3.5-9B-4bit](https://huggingface.co/mlx-community/Qwen3.5-9B-4bit) | [DFlash](https://huggingface.co/z-lab/Qwen3.5-9B-DFlash) (w4:gs64) | — (no selector, LibraSpec auto-disabled) | **47.6** ([receipt](docs/Sep5-03-24-40-PM.md)) |
+| MacBook Pro, Apple M3 Max, 48GB | [Qwen3.5-9B-4bit](https://huggingface.co/mlx-community/Qwen3.5-9B-4bit) | [DFlash](https://huggingface.co/z-lab/Qwen3.5-9B-DFlash) (w4:gs64) | — (no selector, LibraSpec auto-disabled) | **125.9** |
+| MacBook Pro, Apple M3 Max, 48GB | [Qwen3.8-27B-4bit](https://huggingface.co/mlx-community/Qwen3.8-27B-4bit) | [DFlash2](https://huggingface.co/z-lab/Qwen3.8-27B-DFlash2) (w4:gs64) | [LibraSpec](https://arxiv.org/abs/2608.08721) | **72.3** |
 
-Measured with `./scripts/benchmark.sh`, thermally gated (GPU cooled to 37.4°C, fans
-verified at max RPM before/after) — see `benchmark_result.json` for the full receipt.
+Measured with `./scripts/benchmark.sh` using a 512-token generation after an untimed
+warmup. Runs are thermally gated, with fans verified at maximum RPM before and after;
+the latest local run is also written to the ignored `benchmark_result.json` file.
 
 ---
 
@@ -228,26 +236,30 @@ the required point, region, waypoints, or entity.
 
 # Cesium 3D mapping
 
-The Cesium frontend is a separate, browser-local geospatial drone simulator.
-Run it beside the distributed mission runtime on an explicit, non-conflicting
-port:
+Cesium has two explicit modes. **Backend runtime** renders the authoritative
+Python `SimulationSnapshot` and never advances drone physics in the browser.
+**Local sandbox** preserves the original browser-only fleet and mission tools.
+Run the UI beside the runtime on a non-conflicting port:
 
 ```sh
 # Terminal 1: distributed runtime + lightweight console
 .venv/bin/uvicorn server.main:app --reload --host 127.0.0.1 --port 8000
 
-# Terminal 2: Cesium mapping simulator
+# Terminal 2: Cesium operator UI
 npm --prefix 3d-mapping install
 npm --prefix 3d-mapping run dev
 ```
 
 - Runtime console and API: <http://127.0.0.1:8000>
-- Cesium mapping simulator: <http://127.0.0.1:5173>
+- Cesium connected mode: <http://127.0.0.1:5173/?mode=runtime>
+- Cesium local sandbox: <http://127.0.0.1:5173/?mode=local>
 
-The Cesium mission JSON (`goto`, `hover`, `orbit`, `return_home`) executes only
-inside that browser app. It is intentionally distinct from the canonical
-distributed-runtime `simulation.models.MissionCommand`; the two UIs do not
-claim to show the same authoritative drone state.
+Connected mode consumes `ws://127.0.0.1:8000/ws`, converts backend local
+coordinates as x=east, y=north, z=up metres from the snapshot origin, and shows
+truth/estimated positions, uncertainty, plans, missions, links, relay roles,
+node details, and topology metrics. Its interference, preset, failure, control,
+pause, and reset controls call the FastAPI runtime. Local mode's mission JSON
+(`goto`, `hover`, `orbit`, `return_home`) remains browser-only.
 
 See [`3d-mapping/README.md`](3d-mapping/README.md) for Cesium token setup,
 controls, and its local mission format.
@@ -272,13 +284,19 @@ uvicorn server.main:app --reload
 
 Open <http://127.0.0.1:8000> for the lightweight control console. API documentation is at <http://127.0.0.1:8000/docs>.
 
-Run the accelerated end-to-end scenario with:
+Run the accelerated end-to-end "killer" scenario with:
 
 ```sh
 ./scripts/demo
 ```
 
-Add `--realtime` to play it at wall-clock speed. The scenario allocates WATCH and SEARCH tasks across four drones, fails Drone 2 at 10 seconds, waits for heartbeat timeout and reassignment, removes GPS from Drone 3, and raises network packet loss.
+Add `--realtime` to play it at wall-clock speed. With seed `49281`, nodes
+auction WATCH and SEARCH tasks, network interference degrades the physical
+mesh, simulated mission control goes offline, an executing drone fails, peers
+detect it through missing heartbeats and re-auction its work, a relay-capable
+drone physically moves toward a topology-repair point, and GPS is removed from
+one survivor. The final summary distinguishes the simulator host from the
+simulated control authority.
 
 If `python3 -m simulation.demo` reports that `pydantic` is missing, it is using the system Python instead of the project environment. Either activate the environment with `source .venv/bin/activate` first, or invoke it directly:
 
@@ -298,6 +316,96 @@ Important endpoints:
 - `POST /api/simulation/scenario/{NORMAL|DEGRADED|CONTESTED|CHAOS}`
 - `POST /api/interference`, `/api/events/inject`
 - `POST /api/drones/{id}/fail`, `/api/drones/{id}/recover`
+- `POST /api/drones/fail-random`
+- `POST /api/control/fail`, `/api/control/recover`
 - WebSocket `/ws` sends JSON state snapshots at the configured publish rate.
 
-The in-process `DroneNode` intentionally has no reference to `World` or `SimulationEngine`. Its inputs are measurements, delivered messages, and typed task assignments; its outputs are messages and `MotionIntent`. Those ports are defined as protocols in `simulation/interfaces.py` so a later process or laptop transport can implement the same boundary.
+The `NetworkSimulator` alone receives a read-only ground-truth position
+provider so distance and obstacle line of sight affect real packet delivery,
+latency, and loss. `DroneNode` still has no `World` or `SimulationEngine`
+reference. Nodes replicate mission announcements, exchange explainable bids,
+deterministically select winners (cost then node ID), gossip awards and
+completion, and re-auction after local heartbeat timeouts. `MissionManager`
+accepts commands and maintains an operator projection; it no longer assigns
+tasks. The Python host remains a centralized simulation clock/world and is not
+claimed to be a physically distributed simulator.
+
+## World knowledge and mission effectiveness
+
+Every `DroneNode` now owns a separate `WorldBelief`. The simulator generates
+typed observations only when a capable node is physically within sensor range;
+the observation enters that node's belief first and reaches peers only through
+normal delayed, lossy `WORLD_UPDATE` messages. Periodic anti-entropy converges
+newer/high-confidence cell and entity records after partitions heal. The
+operator snapshot exposes both the aggregate view and per-node known-cell
+counts without making simulator truth available to autonomy.
+
+SEARCH regions are deterministic circular grids. Their progress and
+effectiveness come from observed cells rather than planned-waypoint completion:
+45% coverage, 35% fresh coverage, and 20% mean confidence. WATCH uses 75%
+freshness and 25% confidence from the most recent region observation; FOLLOW
+uses entity freshness times confidence; RELAY uses measured network health;
+other motion tasks use actual task progress. Freshness decays by half every
+`sensing.freshness_half_life_seconds`. Priority-weighted effectiveness is
+reported separately from assignment/resource capability.
+
+Fabric awards carry deterministic task leases (`owner`, `lease_id`, expiry,
+revision). Reachable owners renew them, expired owners stop, and equal-revision
+partition conflicts resolve by later expiry and then node ID. The local policy
+layer holds motion when position uncertainty is excessive or battery reserve is
+required. `NodeIdentity.resources` provides the first generic mobility,
+compute, sensing, communications, power, relay, and storage abstraction while
+preserving the legacy capability set.
+
+## Record, replay, and compare
+
+The integrated 55-second demo writes a JSONL timeline containing the seed,
+configuration, commands, disturbances, events, state, network history,
+coverage, and effectiveness:
+
+```sh
+.venv/bin/python -m simulation.demo --seed 49281
+.venv/bin/python -m simulation.replay runs/demo-49281.jsonl
+```
+
+Run the same initial state and disturbance schedule in the reasonable
+centralized baseline and resilient fabric modes. The table and JSON output are
+computed from the two simulations; no result is hardcoded:
+
+```sh
+.venv/bin/python -m simulation.benchmark --seed 49281
+```
+
+Artifacts are written under `runs/` and intentionally ignored by Git.
+
+## External DroneNode worker
+
+An autonomy core can run in another local process or on a LAN host over a
+reliable WebSocket transport. The worker receives only measurements, locally
+generated sensor observations, messages that survived the simulated network,
+mission data carried in those messages, and simulation timing. It returns
+`MotionIntent`, outbound messages, timeouts, and public node state; world truth
+and physics remain in the host.
+
+```sh
+# Process / laptop 1
+.venv/bin/python -m simulation.worker --node-id drone-3 --host 0.0.0.0 --port 8765
+
+# Before the first simulation tick, attach through Python:
+engine.attach_external_worker("drone-3", "ws://127.0.0.1:8765")
+
+# Or against a paused/not-yet-ticked FastAPI engine:
+curl -X POST 'http://127.0.0.1:8000/api/workers/drone-3/connect?uri=ws://127.0.0.1:8765'
+```
+
+In-process autonomy remains the default. A worker disconnect causes a HOLD and
+a `WORKER_DISCONNECTED` event. Set `SimulationConfig.security.enabled=True` to
+derive local seeded Ed25519 development identities, sign node messages, and
+reject unknown, missing, or invalid node signatures. Security is disabled by
+default and is simulation authentication, not a production PKI.
+
+Connected Cesium mode renders unknown/fresh/stale coverage cells, coverage and
+confidence metrics, node-local belief counts, objective effectiveness, a
+filtered mission timeline, auction/lease events, and a compact network-health
+history in addition to the existing truth/debug, localization, route, link,
+relay, and task layers.

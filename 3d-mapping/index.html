@@ -13,7 +13,37 @@
         <p class="eyebrow">DNHacks 2026</p>
         <h1>Drone mission control</h1>
         <p id="world-status" class="status">Starting map…</p>
-        <section>
+        <nav class="mode-switch" aria-label="Runtime mode">
+          <a href="?mode=runtime">Backend runtime</a>
+          <a href="?mode=local">Local sandbox</a>
+        </nav>
+        <section class="runtime-only">
+          <h2>Distributed runtime</h2>
+          <p id="runtime-status" class="status">Connecting to backend…</p>
+          <dl id="runtime-metrics" class="state metrics"></dl>
+          <h3>Network history</h3>
+          <svg id="network-history" viewBox="0 0 300 60" role="img" aria-label="Network health history"></svg>
+          <h3>Mission timeline</h3>
+          <div id="runtime-timeline" class="timeline" aria-live="polite"></div>
+          <label for="runtime-preset">Scenario preset</label>
+          <select id="runtime-preset">
+            <option>NORMAL</option><option>DEGRADED</option><option>CONTESTED</option><option>CHAOS</option>
+          </select>
+          <div class="sliders">
+            <label for="gps-interference">GPS interference <input id="gps-interference" type="range" min="0" max="1" step="0.05" value="0" /></label>
+            <label for="network-interference">Network interference <input id="network-interference" type="range" min="0" max="1" step="0.05" value="0" /></label>
+            <label for="sensor-interference">Sensor interference <input id="sensor-interference" type="range" min="0" max="1" step="0.05" value="0" /></label>
+            <label for="node-failure-rate">Node failure rate <input id="node-failure-rate" type="range" min="0" max="0.2" step="0.005" value="0" /></label>
+          </div>
+          <div class="actions">
+            <button id="runtime-fail-drone" type="button">Fail random drone</button>
+            <button id="runtime-fail-control" type="button" class="danger">Fail control</button>
+            <button id="runtime-pause" type="button" class="secondary">Pause / resume</button>
+            <button id="runtime-reset" type="button" class="secondary">Reset</button>
+          </div>
+          <p class="hint">Click a drone for its task, battery, localization, peer, and capability details. Solid links are usable; red dashed links are unavailable.</p>
+        </section>
+        <section class="local-only">
           <h2>Drone fleet</h2>
           <div class="actions">
             <button id="deploy-drone" type="button">Deploy a new drone</button>
@@ -34,7 +64,7 @@
           <input id="drone-speed" type="number" min="0.1" step="any" value="60" disabled />
           <p id="speed-status" class="hint" role="status">Default: 60 mph · 26.82 m/s</p>
         </section>
-        <section>
+        <section class="local-only">
           <h2>Mission command</h2>
           <label for="flight-text">Flight instruction</label>
           <textarea id="flight-text" aria-label="Flight instruction">take off to 10 meters, orbit home at a radius of 20 meters clockwise once, then land</textarea>
@@ -61,7 +91,7 @@
           <h2>Drone state</h2>
           <dl id="drone-state" class="state"></dl>
         </section>
-        <p class="hint">Click the map, then hold W/A/S/D to fly or R/F to move up/down. Movement keys automatically leave orbit mode. In free camera, Ctrl + drag rotates the view. Orbit monument: drag to circle it and scroll to zoom.</p>
+        <p class="hint local-only">Click the map, then hold W/A/S/D to fly or R/F to move up/down. Movement keys automatically leave orbit mode. In free camera, Ctrl + drag rotates the view. Orbit monument: drag to circle it and scroll to zoom.</p>
       </aside>
     </main>
     <script type="module" src="/src/main.ts"></script>

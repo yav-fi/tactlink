@@ -24,14 +24,21 @@ from .models import (
     MissionTask,
     MissionTarget,
     NodeIdentity,
+    NodeCapabilities,
+    ObservationType,
+    MessageType,
     ScenarioEvent,
     SimulationSnapshot,
     TaskType,
     Vector3,
+    WorldKnowledgeMetrics,
 )
 from .network import NetworkSimulator
+from .resilience import NetworkResilienceManager
 from .scenarios import PRESET_INTERFERENCE, ScenarioEngine, ScenarioPreset
 from .world import BoxObstacle, MovingEntity, Region, World, WorldDefinition
+from .world_model import CoverageGrid, WorldBelief
+from .authentication import MessageAuthenticator, deterministic_private_key, public_key_text
 
 
 class SimulationEngine:
@@ -41,9 +48,14 @@ class SimulationEngine:
         world_definition: WorldDefinition | None = None,
         scenario: ScenarioPreset | str = ScenarioPreset.NORMAL,
         drone_count: int = 3,
+        mode: str = "fabric",
     ) -> None:
         self.config = config or SimulationConfig()
         self.scenario = ScenarioPreset(scenario)
+        if mode not in {"fabric", "baseline"}:
+            raise ValueError("mode must be 'fabric' or 'baseline'")
+        self.mode = mode
+        self._recorder: object | None = None
         self.time = 0.0
         self.running = True
         self.events = EventBus(self.config.recent_event_limit)
@@ -57,6 +69,8 @@ class SimulationEngine:
             random.Random(self.config.seed + 101),
             self.interference,
             self.events,
+            position_provider=lambda node_id: self.world.truth(node_id).position if node_id in self.world.node_ids else None,
+            world_definition=definition,
         )
         self.scenario_engine = ScenarioEngine(self.scenario, random.Random(self.config.seed + 202))
         self._measurement_rng = random.Random(self.config.seed + 303)
@@ -65,7 +79,19 @@ class SimulationEngine:
         self._failure_counter = 0
         self.allocator = TaskAllocator(self.config.allocator)
         self.missions = MissionManager(self.allocator, self.events, self.config.peer_timeout)
+        self.resilience = NetworkResilienceManager(
+            self.events, self.config.relay_health_threshold, self.config.relay_evaluation_seconds
+        )
         self.drones: dict[str, DroneNode] = {}
+        self._coverage_templates = [
+            CoverageGrid(region.id, region.center, region.radius, self.config.sensing.cell_size_m)
+            for region in definition.regions
+        ]
+        self._last_sensed: dict[str, float] = {}
+        self._coverage_event_bucket: dict[str, int] = {}
+        self._fresh_event_bucket: dict[str, int] = {}
+        self._last_reconcile_event: dict[str, float] = {}
+        self._external_workers: dict[str, object] = {}
         self._initial_drone_count = drone_count
         self._create_default_drones(drone_count)
         self.events.emit(
@@ -122,6 +148,12 @@ class SimulationEngine:
             {"camera", "mapping", "relay", "navigation"},
             {"camera", "relay", "navigation"},
         ]
+        keys = {
+            f"drone-{index + 1}": deterministic_private_key(self.config.seed, f"drone-{index + 1}")
+            for index in range(count)
+        }
+        public_keys = {node_id: public_key_text(key) for node_id, key in keys.items()}
+        self._message_verifier = MessageAuthenticator(public_keys) if self.config.security.enabled else None
         for index in range(count):
             node_id = f"drone-{index + 1}"
             position = positions[index % len(positions)].model_copy(deep=True)
@@ -133,6 +165,13 @@ class SimulationEngine:
                     node_id=node_id,
                     name=f"Drone {index + 1}",
                     capabilities=capabilities[index % len(capabilities)],
+                    public_key=public_keys[node_id] if self.config.security.enabled else None,
+                    resources=NodeCapabilities(
+                        mobility=True,
+                        sensors=capabilities[index % len(capabilities)] & {"camera", "thermal", "mapping"},
+                        communication_roles={"peer", "relay"} if "relay" in capabilities[index % len(capabilities)] else {"peer"},
+                        relay="relay" in capabilities[index % len(capabilities)],
+                    ),
                     metadata={"airframe": "simulated-multirotor"},
                 ),
                 position,
@@ -142,6 +181,16 @@ class SimulationEngine:
                 self.config.status_interval,
                 self.config.peer_timeout,
                 autonomy=self.autonomy,
+                allocator=self.allocator,
+                auction_window=self.config.auction_window_seconds,
+                auction_rebroadcast=self.config.auction_rebroadcast_seconds,
+                coverage_grids=self._coverage_templates,
+                distributed_coordination=self.mode == "fabric",
+                lease_seconds=self.config.task_lease_seconds,
+                authenticator=(
+                    MessageAuthenticator(public_keys, keys[node_id])
+                    if self.config.security.enabled else None
+                ),
             )
             self.events.emit(
                 self.time,
@@ -153,6 +202,8 @@ class SimulationEngine:
             )
 
     def submit_mission(self, command: MissionCommand) -> MissionTask:
+        if not self.missions.control_available:
+            raise RuntimeError("mission control is offline; existing replicated missions continue")
         if command.target.point is None and command.target.region_id:
             region = next(
                 (region for region in self.world.definition.regions if region.id == command.target.region_id),
@@ -169,7 +220,25 @@ class SimulationEngine:
                         Vector3(x=region.center.x + radius, y=region.center.y + radius, z=region.center.z),
                         Vector3(x=region.center.x - radius, y=region.center.y + radius, z=region.center.z),
                     ]
-        return self.missions.submit_mission(command, self.time)
+        task = self.missions.submit_mission(command, self.time)
+        if self._recorder is not None:
+            self._recorder.record_mission(self.time, command)
+        self.network.send(self.missions.announcement(task, self.time), self.time)
+        return task
+
+    def _submit_relay_mission(self, command: MissionCommand) -> MissionTask | None:
+        online = self._online_node_ids()
+        if not online:
+            return None
+        task = self.missions.submit_mission(command, self.time)
+        if self.missions.control_available:
+            self.network.send(self.missions.announcement(task, self.time), self.time)
+        else:
+            initiator = min(online)
+            for message in self.drones[initiator].introduce_mission(task, self.time):
+                self.network.send(message, self.time)
+        self.resilience.task_created(task, self.time)
+        return task
 
     def tick(self, dt: float | None = None) -> SimulationSnapshot:
         if not self.running:
@@ -187,27 +256,65 @@ class SimulationEngine:
         for node_id, node in sorted(self.drones.items()):
             if not self.world.is_online(node_id):
                 continue
+            delivered: list[object] = []
             for message in self.network.receive(node_id):
+                if message.sender_id != NetworkSimulator.CONTROL_ID and message.signature is None:
+                    message = message.model_copy(deep=True)
+                    message.payload["link_quality"] = self.network.link_state(
+                        message.sender_id, node_id, self.time
+                    ).quality
+                if node_id in self._external_workers:
+                    delivered.append(message)
+                    continue
+                before_observations = len(node.world_belief.observations)
+                rejected_before = node.rejected_signature_count
                 for reply in node.handle_message(message, self.time):
                     self.network.send(reply, self.time)
+                if node.rejected_signature_count > rejected_before:
+                    self.events.emit(
+                        self.time, EventCategory.NETWORK, EventType.SIGNATURE_REJECTED,
+                        node_id, f"{node_id} rejected an invalid or unknown signed message",
+                        [node_id, message.sender_id], {"message_id": message.message_id, "sender": message.sender_id},
+                    )
+                learned = len(node.world_belief.observations) - before_observations
+                if (
+                    learned > 0
+                    and message.type == MessageType.WORLD_UPDATE
+                    and self.time - self._last_reconcile_event.get(node_id, -99.0) >= 4.0
+                ):
+                    self._last_reconcile_event[node_id] = self.time
+                    self.events.emit(
+                        self.time, EventCategory.KNOWLEDGE, EventType.WORLD_MODEL_RECONCILED,
+                        node_id, f"{node_id} reconciled {learned} remote observations",
+                        [node_id, message.sender_id], {"learned": learned, "source": message.sender_id},
+                    )
             old_mode = node.estimated.localization_mode
             measurement = self._gps_measurement(node_id)
-            _, new_mode = node.update_localization(measurement, step)
-            node.update_battery_measurement(self.world.truth(node_id).actual_battery)
             sensor_noise = self.interference.sensor_severity(node_id)
-            node.update_sensor_confidence(max(0.05, 1.0 - sensor_noise))
-            for entity in self.world.definition.entities:
-                noise = sensor_noise * 12.0
-                node.update_entity_measurement(
-                    entity.id,
-                    Vector3(
-                        x=entity.position.x + self._measurement_rng.gauss(0, noise),
-                        y=entity.position.y + self._measurement_rng.gauss(0, noise),
-                        z=entity.position.z + self._measurement_rng.gauss(0, noise * 0.25),
-                    ),
-                )
+            if node_id in self._external_workers:
+                before_ids = set(node.world_belief.observations)
+                self._sense_node(node_id, node, sensor_noise)
+                local_observations = [
+                    observation for observation_id, observation in node.world_belief.observations.items()
+                    if observation_id not in before_ids and observation.source_node_id == node_id
+                ]
+                try:
+                    intent, outgoing, timed_out = self._external_workers[node_id].tick(
+                        node, self.time, step, delivered, measurement,
+                        self.world.truth(node_id).actual_battery,
+                        max(0.05, 1.0 - sensor_noise),
+                        local_observations,
+                    )
+                except Exception as exc:
+                    intent, outgoing, timed_out = self._worker_failure(node_id, exc)
+                new_mode = node.estimated.localization_mode
+            else:
+                _, new_mode = node.update_localization(measurement, step)
+                node.update_battery_measurement(self.world.truth(node_id).actual_battery)
+                node.update_sensor_confidence(max(0.05, 1.0 - sensor_noise))
+                self._sense_node(node_id, node, sensor_noise)
+                intent, outgoing, timed_out = node.tick(self.time, step)
             self._emit_localization_transition(node_id, old_mode, new_mode)
-            intent, outgoing, timed_out = node.tick(self.time, step)
             self.world.set_motion_intent(node_id, intent)
             for peer_id in timed_out:
                 self.events.emit(
@@ -222,15 +329,170 @@ class SimulationEngine:
                 self.network.send(message, self.time)
 
         for message in self.network.receive(NetworkSimulator.CONTROL_ID):
-            self.missions.handle_message(message, self.time)
+            if self._message_verifier is not None and not self._message_verifier.verify(message):
+                self.events.emit(
+                    self.time, EventCategory.NETWORK, EventType.SIGNATURE_REJECTED,
+                    "mission-control", "Mission control rejected an invalid or unknown signed message",
+                    [message.sender_id], {"message_id": message.message_id},
+                )
+            else:
+                self.missions.handle_message(message, self.time)
 
-        # Replans already pending run first. New timeout-triggered replans wait one tick,
-        # preserving an observable degraded-capability state.
-        for assignment in self.missions.allocate(self.time):
-            self.network.send(assignment, self.time)
         self.missions.detect_timeouts(self.time)
+        if self.mode == "baseline" and self.missions.control_available:
+            for message in self.missions.allocate(self.time):
+                self.network.send(message, self.time)
+        online_nodes = [self.drones[node_id] for node_id in self._online_node_ids()]
+        self.missions.observe_node_states(online_nodes, self.time)
         self.missions.update_capability(self.time)
-        return self.snapshot()
+        aggregate = self._aggregate_belief()
+        self._emit_knowledge_metrics(aggregate)
+        network_metrics = self.network.metrics(self.time)
+        self.missions.update_effectiveness(
+            self.time,
+            aggregate,
+            self.config.sensing.freshness_half_life_seconds,
+            network_metrics.network_health,
+        )
+        relay_command = self.resilience.evaluate(
+            self.time,
+            self.network,
+            self.world,
+            list(self.missions.tasks.values()),
+            [node_id for node_id, node in self.drones.items() if "relay" in node.identity.capabilities],
+        )
+        if relay_command is not None and self.mode == "fabric":
+            self._submit_relay_mission(relay_command)
+        snapshot = self.snapshot()
+        if self._recorder is not None:
+            self._recorder.record_snapshot(snapshot)
+        return snapshot
+
+    def attach_external_worker(self, node_id: str, uri: str) -> None:
+        """Move one autonomy core into a WebSocket worker before the run starts."""
+        if self.time != 0.0:
+            raise RuntimeError("external workers must attach before the first simulation tick")
+        if node_id not in self.drones:
+            raise KeyError(node_id)
+        from .worker import WebSocketWorkerClient
+        self._external_workers[node_id] = WebSocketWorkerClient(
+            uri, self.drones[node_id], self.config, self.world.definition, self.mode,
+            self._message_verifier.public_keys if self._message_verifier is not None else None,
+        )
+        self.events.emit(
+            self.time, EventCategory.AUTONOMY, EventType.WORKER_CONNECTED,
+            node_id, f"{node_id} autonomy connected through external worker transport",
+            [node_id], {"transport": "websocket", "uri": uri},
+        )
+
+    def _worker_failure(self, node_id: str, exc: Exception) -> tuple[object, list[object], list[str]]:
+        worker = self._external_workers.pop(node_id, None)
+        if worker is not None:
+            worker.close()
+        self.events.emit(
+            self.time, EventCategory.FAILURE, EventType.WORKER_DISCONNECTED,
+            node_id, f"{node_id} external autonomy worker disconnected; vehicle is holding",
+            [node_id], {"error": str(exc)},
+        )
+        from .models import MotionIntent
+        return MotionIntent(hold=True), [], []
+
+    def attach_recorder(self, recorder: object) -> None:
+        self._recorder = recorder
+        recorder.write_header(
+            seed=self.config.seed,
+            scenario=str(self.scenario),
+            mode=self.mode,
+            config=self.config.model_dump(mode="json"),
+        )
+        recorder.record_snapshot(self.snapshot())
+
+    def _sense_node(self, node_id: str, node: DroneNode, sensor_noise: float) -> None:
+        if "camera" not in node.identity.capabilities and "thermal" not in node.identity.capabilities:
+            return
+        interval = self.config.sensing.update_interval_seconds
+        if self.time - self._last_sensed.get(node_id, -interval) < interval - 1e-9:
+            return
+        self._last_sensed[node_id] = self.time
+        truth_position = self.world.truth(node_id).position
+        radius = self.config.sensing.observation_radius_m
+        created = 0
+        for grid in node.world_belief.grids.values():
+            for cell in grid.cells_within(truth_position, radius):
+                distance = cell.center.distance_to(truth_position)
+                confidence = max(
+                    0.05,
+                    (1.0 - sensor_noise)
+                    * (1.0 - self.config.sensing.confidence_falloff * distance / radius),
+                )
+                node.create_observation(
+                    self.time,
+                    ObservationType.CELL_OBSERVED,
+                    f"cell:{grid.region_id}:{cell.cell_id}",
+                    {
+                        "region_id": grid.region_id,
+                        "cell_id": cell.cell_id,
+                        "center": cell.center.model_dump(mode="json"),
+                    },
+                    confidence,
+                    node.estimated.position_uncertainty,
+                    {"sensor": "camera"},
+                )
+                created += 1
+        for entity in self.world.definition.entities:
+            distance = truth_position.distance_to(entity.position)
+            if distance > radius:
+                continue
+            noise = max(0.25, sensor_noise * 12.0)
+            observed = Vector3(
+                x=entity.position.x + self._measurement_rng.gauss(0, noise),
+                y=entity.position.y + self._measurement_rng.gauss(0, noise),
+                z=entity.position.z + self._measurement_rng.gauss(0, noise * 0.25),
+            )
+            node.create_observation(
+                self.time,
+                ObservationType.ENTITY_OBSERVED,
+                f"entity:{entity.id}",
+                {"position": observed.model_dump(mode="json")},
+                max(0.05, (1.0 - sensor_noise) * (1.0 - 0.5 * distance / radius)),
+                noise,
+                {"entity_id": entity.id, "sensor": "camera"},
+            )
+            created += 1
+        if created and len(node.world_belief.observations) == created:
+            self.events.emit(
+                self.time, EventCategory.KNOWLEDGE, EventType.OBSERVATION_CREATED,
+                node_id, f"{node_id} began building its local world belief",
+                [node_id], {"created": created, "sensor_radius_m": radius},
+            )
+
+    def _aggregate_belief(self) -> WorldBelief:
+        aggregate = WorldBelief(self._coverage_templates)
+        for node_id in self._online_node_ids():
+            aggregate.merge(self.drones[node_id].world_belief.observations.values(), self.time)
+        return aggregate
+
+    def _emit_knowledge_metrics(self, belief: WorldBelief) -> None:
+        for region_id, grid in belief.grids.items():
+            metrics = grid.metrics(self.time, self.config.sensing.freshness_half_life_seconds)
+            coverage_bucket = int(metrics.coverage * 20 + 1e-9)
+            previous_coverage = self._coverage_event_bucket.get(region_id, 0)
+            if coverage_bucket > previous_coverage:
+                self._coverage_event_bucket[region_id] = coverage_bucket
+                self.events.emit(
+                    self.time, EventCategory.KNOWLEDGE, EventType.COVERAGE_CHANGED,
+                    "coverage-monitor", f"{region_id} sensed coverage reached {metrics.coverage:.0%}",
+                    [region_id], metrics.model_dump(mode="json", exclude={"cells"}),
+                )
+            fresh_bucket = int(metrics.fresh_coverage * 10 + 1e-9)
+            previous_fresh = self._fresh_event_bucket.get(region_id, fresh_bucket)
+            if fresh_bucket < previous_fresh:
+                self.events.emit(
+                    self.time, EventCategory.KNOWLEDGE, EventType.INFORMATION_STALE,
+                    "freshness-monitor", f"{region_id} fresh coverage fell to {metrics.fresh_coverage:.0%}",
+                    [region_id], metrics.model_dump(mode="json", exclude={"cells"}),
+                )
+            self._fresh_event_bucket[region_id] = fresh_bucket
 
     def run_steps(self, count: int, dt: float | None = None) -> SimulationSnapshot:
         snapshot = self.snapshot()
@@ -335,6 +597,28 @@ class SimulationEngine:
             [node_id],
         )
 
+    def fail_control(self) -> None:
+        if not self.missions.control_available:
+            return
+        self.missions.control_available = False
+        self.network.set_online(NetworkSimulator.CONTROL_ID, False)
+        self.events.emit(
+            self.time, EventCategory.FAILURE, EventType.CONTROL_LOST, "operator",
+            "Simulated mission control is offline; nodes continue from replicated mission state",
+            list(self.drones),
+        )
+
+    def recover_control(self) -> None:
+        if self.missions.control_available:
+            return
+        self.missions.control_available = True
+        self.network.set_online(NetworkSimulator.CONTROL_ID, True)
+        self.events.emit(
+            self.time, EventCategory.SIMULATION, EventType.CONTROL_RECOVERED, "operator",
+            "Simulated mission control rejoined as an observer and mission ingress",
+            list(self.drones),
+        )
+
     def fail_random_drone(self) -> str:
         online = self._online_node_ids()
         if not online:
@@ -361,6 +645,8 @@ class SimulationEngine:
 
     def inject_event(self, event: ScenarioEvent) -> None:
         event = event.model_copy(update={"timestamp": self.time})
+        if self._recorder is not None:
+            self._recorder.record_scenario_event(event)
         kind = event.type.upper()
         if kind == "NODE_FAILURE":
             for node_id in event.affected_nodes:
@@ -408,7 +694,11 @@ class SimulationEngine:
         config = self.config.model_copy(deep=True)
         scenario = self.scenario
         count = self._initial_drone_count
-        self.__init__(config=config, scenario=scenario, drone_count=count)
+        recorder = self._recorder
+        for worker in self._external_workers.values():
+            worker.close()
+        self.__init__(config=config, scenario=scenario, drone_count=count, mode=self.mode)
+        self._recorder = recorder
         self.events.emit(
             self.time,
             EventCategory.SIMULATION,
@@ -434,8 +724,57 @@ class SimulationEngine:
                     task_queue=[task.id for task in node.task_queue],
                     task_progress=node.task_progress,
                     peers={key: value.model_copy(deep=True) for key, value in node.peers.items()},
+                    current_plan=[
+                        Vector3(x=point.x, y=point.y, z=point.z)
+                        for point in (node.plan.waypoints if node.plan else [])
+                    ],
+                    role="RELAY" if node.current_task and node.current_task.type == TaskType.RELAY else "MISSION",
+                    local_mission_revision=node._mission_revision,
+                    observation_count=len(node.world_belief.observations),
+                    known_cells={
+                        region_id: sum(1 for cell in grid.cells.values() if cell.last_observed is not None)
+                        for region_id, grid in node.world_belief.grids.items()
+                    },
+                    last_world_reconciliation=node.world_belief.last_reconciled_at,
+                    policy=node.last_policy_result,
                 )
             )
+        network_metrics = self.network.metrics(self.time)
+        network_metrics.degraded_nodes = sum(1 for drone in drones if drone.state == "DEGRADED")
+        network_metrics.relay_nodes = [drone.identity.node_id for drone in drones if drone.role == "RELAY"]
+        network_metrics.gps_degraded_count = sum(
+            1 for drone in drones if drone.estimated.localization_mode != LocalizationMode.GPS
+        )
+        aggregate = self._aggregate_belief()
+        regions = [
+            grid.metrics(self.time, self.config.sensing.freshness_half_life_seconds)
+            for grid in aggregate.grids.values()
+        ]
+        observations = list(aggregate.domain_latest.values())
+        sync_lag = 0.0
+        for node in self.drones.values():
+            if not node.online:
+                continue
+            for domain_key, latest in aggregate.domain_latest.items():
+                local = node.world_belief.domain_latest.get(domain_key)
+                sync_lag = max(sync_lag, latest.timestamp - (local.timestamp if local else 0.0))
+        duplicate_count = 0
+        for task_id in self.missions.tasks:
+            executing = sum(
+                1 for node in self.drones.values()
+                if node.online and node.current_task is not None and node.current_task.id == task_id
+            )
+            desired = self.missions.tasks[task_id].desired_units
+            duplicate_count += max(0, executing - desired)
+        world_knowledge = WorldKnowledgeMetrics(
+            regions=regions,
+            observation_count=len(aggregate.observations),
+            mean_observation_confidence=(
+                sum(item.confidence for item in observations) / len(observations) if observations else 0.0
+            ),
+            world_model_sync_lag=max(0.0, sync_lag),
+            duplicate_task_execution_count=duplicate_count,
+        )
         return SimulationSnapshot(
             simulation_time=self.time,
             running=self.running,
@@ -445,6 +784,10 @@ class SimulationEngine:
             links=self.network.links(self.time),
             interference=self.interference.config.model_copy(deep=True),
             mission_capability=self.missions.overall_capability,
+            mission_effectiveness=self.missions.overall_effectiveness,
+            world_knowledge=world_knowledge,
+            network=network_metrics,
+            control_available=self.missions.control_available,
             events=self.events.recent(event_limit),
         )
 

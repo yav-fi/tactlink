@@ -1,6 +1,7 @@
 # 3D mapping
 
-Browser-based geospatial drone simulator for the DNHacks mission-control project. It uses CesiumJS, with no game engine, and accepts deterministic mission JSON for a simulated drone.
+CesiumJS operator interface for the DNHacks distributed runtime, with the
+original deterministic browser simulator preserved as a separate local mode.
 
 ## Run it
 
@@ -11,13 +12,35 @@ npm install
 npm run dev
 ```
 
-Open <http://127.0.0.1:5173>. The Vite development server is pinned to port
+Start `uvicorn server.main:app --reload` from the repository root, then open
+<http://127.0.0.1:5173/?mode=runtime>. The Vite development server is pinned to port
 5173 so it can run alongside the distributed runtime and its control console on
 port 8000.
 
 To load Google Photorealistic 3D Tiles, create a Cesium ion token with that dataset enabled and assign it to `VITE_CESIUM_ION_ACCESS_TOKEN` in `.env`. Without a token, the app still runs on Cesium's fallback globe.
 
-## Mission contract
+## Backend runtime mode
+
+The WebSocket snapshot is authoritative. The browser creates/upgrades Cesium
+entities from backend truth and does not run `DroneController.update` for them.
+It renders estimated position separately, uncertainty ellipses, current plan,
+mission points, usable/unavailable links, relay roles, and topology metrics.
+It also renders the backend's SEARCH grid as unknown, fresh, or stale cells;
+shows coverage, observation confidence, capability and outcome effectiveness;
+and includes a filtered event timeline plus compact network-health history.
+Selecting a drone shows how many observations and cells that node knows, making
+belief divergence during a partition visible without exposing truth to node
+autonomy.
+Backend local metres are converted in one helper using Cesium's east-north-up
+fixed frame around the snapshot's `origin_lat`, `origin_lon`, and `origin_alt`.
+
+Use the panel to change GPS/network/sensor interference, node failure rate, or
+scenario preset; fail a random drone or simulated mission control; pause; and
+reset. These are local HTTP calls to port 8000.
+
+## Local sandbox mission contract
+
+Open <http://127.0.0.1:5173/?mode=local> for the original browser simulator.
 
 The scene starts with an empty fleet. Click **Deploy a new drone**, navigate with the free camera, click a surface, choose height above that surface and confirm **Deploy here**. Placement records no route. Select a drone from the fleet list to pilot it. Colors cycle through eight choices; Reset all drones removes the fleet and its routes. Release markers are prisms and the live arrow is three meters long.
 
