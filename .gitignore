@@ -1,7 +1,16 @@
+# Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+venv/
 *.egg-info/
 .coverage
 
+# Downloaded models / weights (fetched locally, never committed)
+models/
+
+# Local artifacts / rendered output
+*.png
+flight.png
+benchmark_result.json
