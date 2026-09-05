@@ -40,3 +40,17 @@ Supported actions are `goto`, `hover`, `orbit`, and `return_home`. This is a
 local browser-simulator contract, not the canonical distributed-runtime
 `simulation.models.MissionCommand` contract; movement remains deterministic in
 the browser.
+
+## Text flight preview
+
+Start the Python flight bridge from the repository root with
+`.venv/Scripts/python.exe -m integrations.flight_bridge` after installing
+`requirements-flight.txt`. Deploy a drone, enter an instruction, and click
+**Preview text path** to draw its validated route and populate the mission editor.
+**Run mission** animates it locally. Preview zero is the selected drone's
+deployment height; landing in this preview returns to that height.
+
+The default bridge URL is `http://127.0.0.1:8765`; override it with
+`VITE_FLIGHT_BRIDGE_URL` in your local environment. See
+[the bridge guide](../docs/flight-bridge.md) for HTTP/WebSocket contracts,
+ArduPilot telemetry setup, and Mission Planner export.
