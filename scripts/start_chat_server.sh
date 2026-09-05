@@ -1,48 +1,66 @@
 #!/usr/bin/env bash
-# Starts the DFlash2-accelerated chat backend (chad serve) as a local sidecar.
+# Starts the DFlash-accelerated chat backend (chad serve) as a local sidecar.
 #
-# Uses mlx-community/Qwen3.8-27B-4bit (this project's models/qwen3.8-27b-4bit,
-# see scripts/download_model.sh) as the target, with the matching w4:gs64
-# DFlash2 draft head (see scripts/build_dflash_draft.sh) — the benchmarked,
-# corrected number for this exact pairing is ~65 tok/s decode (see
-# dflash2-mlx/README.md's "Cross-runtime comparison" table), not the ~100 tok/s
-# chad's own default bundled (different) model reports.
+# Usage: ./scripts/start_chat_server.sh [--model qwen3.5-9b|qwen3.8-27b]
+# Default: qwen3.5-9b. See scripts/model_registry.sh for the target/draft
+# pairing — download/build the pair first with scripts/download_model.sh
+# and scripts/build_dflash_draft.sh (same --model flag).
 #
-# If a local checkout of the LibraSpec-enabled chad fork is present
-# (CHAD_REPO_DIR, default ~/dflash2-mlx/runtime/chad — a private repo), it is
-# used instead of the public chad-code package: LibraSpec (CHAD_LIBRASPEC=1)
-# pushes the same pairing to ~66 tok/s. Falls back to the public `chad-code`
-# PyPI package (no LibraSpec) when that checkout isn't present.
+# LibraSpec (an extra decode-speed algorithm on top of DFlash2's candidate
+# selector) is applied over the public `chad-code` package (see
+# requirements.txt) via the small file overrides in patches/chad/ — no
+# private repo or extra install needed, this works out of the box for
+# anyone who installs requirements.txt. It's a documented no-op (and a pure
+# overhead cost, no upside) on a plain DFlash v1 draft with no selector, so
+# it's auto-disabled whenever the resolved model's draft isn't DFlash2 —
+# override by setting CHAD_LIBRASPEC yourself before running this script.
 set -euo pipefail
 
 PORT="${CHAT_SERVER_PORT:-8081}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CHAD_REPO_DIR="${CHAD_REPO_DIR:-$HOME/dflash2-mlx/runtime/chad}"
+source "$SCRIPT_DIR/model_registry.sh"
 
-export CHAD_MODEL="${CHAD_MODEL:-$PROJECT_ROOT/models/qwen3.8-27b-4bit}"
-export CHAD_DFLASH_PATH="${CHAD_DFLASH_PATH:-$PROJECT_ROOT/models/dflash2-w4gs64}"
-export CHAD_LIBRASPEC="${CHAD_LIBRASPEC:-1}"
-export CHAD_LIBRASPEC_ALPHA="${CHAD_LIBRASPEC_ALPHA:-8.0}"
+MODEL="qwen3.5-9b"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --model) MODEL="$2"; shift 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+resolve_model "$MODEL"
+
+export CHAD_MODEL="${CHAD_MODEL:-$PROJECT_ROOT/$TARGET_DIR}"
+export CHAD_DFLASH_PATH="${CHAD_DFLASH_PATH:-$PROJECT_ROOT/$DRAFT_DIR}"
+
+if [ -z "${CHAD_LIBRASPEC+x}" ]; then
+  if [ "$DRAFT_GEN" = "dflash2" ]; then
+    export CHAD_LIBRASPEC=1
+    export CHAD_LIBRASPEC_ALPHA="${CHAD_LIBRASPEC_ALPHA:-8.0}"
+  else
+    echo "note: $MODEL's draft has no DFlash2 candidate selector, so LibraSpec" >&2
+    echo "      has no confidence signal to trim on (mathematically a no-op that" >&2
+    echo "      still pays its per-round sync cost) — leaving it disabled." >&2
+  fi
+fi
 
 if [ ! -e "$CHAD_MODEL" ]; then
-  echo "Target model not found at $CHAD_MODEL — run scripts/download_model.sh first." >&2
+  echo "Target model not found at $CHAD_MODEL — run: scripts/download_model.sh --model $MODEL" >&2
   exit 1
 fi
 if [ ! -e "$CHAD_DFLASH_PATH" ]; then
-  echo "DFlash2 draft not found at $CHAD_DFLASH_PATH — run scripts/build_dflash_draft.sh first." >&2
+  echo "DFlash draft not found at $CHAD_DFLASH_PATH — run: scripts/build_dflash_draft.sh --model $MODEL" >&2
   exit 1
 fi
 
-if [ -d "$CHAD_REPO_DIR" ]; then
-  echo "using LibraSpec-enabled chad at $CHAD_REPO_DIR" >&2
-  exec uv run --project "$CHAD_REPO_DIR" chad-code serve --port "$PORT"
-fi
-
-if ! command -v uvx >/dev/null 2>&1; then
-  echo "uvx not found. Install it with: pip install -U uv" >&2
+CHAD_PKG_DIR="$(python3 -c "import chad, os; print(os.path.dirname(chad.__file__))" 2>/dev/null || true)"
+if [ -z "$CHAD_PKG_DIR" ]; then
+  echo "chad-code not installed. Install it with: pip install -r requirements.txt" >&2
   exit 1
 fi
-echo "LibraSpec fork not found at $CHAD_REPO_DIR — falling back to public chad-code (no LibraSpec)." >&2
-unset CHAD_LIBRASPEC CHAD_LIBRASPEC_ALPHA
-exec uvx chad-code serve --port "$PORT"
+
+cp "$PROJECT_ROOT/patches/chad/engine.py" "$CHAD_PKG_DIR/engine.py"
+cp "$PROJECT_ROOT/patches/chad/mlx_dflash.py" "$CHAD_PKG_DIR/mlx_dflash.py"
+cp "$PROJECT_ROOT/patches/chad/wide_block.py" "$CHAD_PKG_DIR/wide_block.py"
+
+exec chad-code serve --port "$PORT"

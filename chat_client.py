@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Optional
 
-_DEFAULT_MODEL_DIR = Path(__file__).parent / "models" / "qwen3.8-27b-4bit"
+_DEFAULT_MODEL_DIR = Path(__file__).parent / "models" / "qwen3.5-9b-4bit"
 _tokenizer = None  # lazily loaded; only needed by chat()/chat_sync()
 
 
