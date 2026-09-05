@@ -154,7 +154,12 @@ def run(args: argparse.Namespace) -> int:
     runtime_mode = bool(args.mission_url) and not check_mode
     swarm = None if (runtime_mode or check_mode) else Swarm(args.drones)
     viz = None if (runtime_mode or check_mode) else Visualizer()
-    operators = OperatorPool(args.operators)
+    operators = OperatorPool(max(args.operators, 4) if args.demo else args.operators)
+    if args.demo:                        # deterministic: a line of people facing east
+        operators.wander_enabled = False
+        for i, op in enumerate(operators.operators):
+            op.pos[:] = [i * 6.0 - (operators.n - 1) * 3.0, 0.0]
+            op.heading = 0.0
     event_log: list[str] = []
     mission_adapter = mission_client = mission_error_cls = None
     if runtime_mode:
@@ -219,6 +224,10 @@ def run(args: argparse.Namespace) -> int:
                 gstate.events.append(kbd_event)
                 kbd_event = None
             operators.step(dt if dt > 0 else 1 / 60)
+            if swarm is not None:
+                # Control goes to whoever the drone is nearest; idle drone trails them.
+                operators.set_active_by_proximity(swarm.drones[0].state.pos[:2])
+                gstate.follow_pos = tuple(float(v) for v in operators.active_op.pos)
             # "forward" is relative to the operator who gestured.
             gstate.events = [
                 f"fly_bearing:{operators.resolve_forward_bearing():.4f}"

@@ -49,6 +49,7 @@ class GestureState:
     sequence_hint: str = ""        # partial combo in progress, e.g. "Open_Palm>Closed_Fist>…"
     events: list = field(default_factory=list)  # command strings fired this frame
     maneuver: str = ""             # autopilot routine currently running, if any
+    follow_pos: tuple | None = None  # (x, y) the idle drone should trail, if any
 
 
 @dataclass

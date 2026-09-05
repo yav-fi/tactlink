@@ -96,6 +96,9 @@ class Visualizer:
             self._draw_shadow(img, states[i])
             self._draw_drone(img, states[i], highlighted=(i == selected and len(states) > 1))
         self._draw_hud(img, states, cmd, fps, gstate, selected)
+        if operators is not None and len(operators.operators) > 1:
+            cv2.putText(img, f"CTRL {operators.active_op.name}", (self.w - 130, 54),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, _SELECTED, 1, cv2.LINE_AA)
         return img
 
     # -- world -----------------------------------------------------------

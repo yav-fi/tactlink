@@ -103,14 +103,23 @@ commanding is the next step — the hook is there, `Swarm.selected`).
 
 ## Operators
 
-The end goal is the gesture model running on **five phones carried by people
-walking around**, any of whom can command the drone. `--operators N`
-(`src/operators.py`) stands up that model: N people with a position and a facing
-who wander a shared area. One webcam feeds the **active** operator (cyan in the
-3D view). Direction commands are taken **relative to the operator who gave
-them** — the three-finger "forward" dash flies along the *active operator's*
-bearing. Still to build: attributing gestures to different operators, and
-choosing which one is active.
+The picture: **N people, each with a chest-mounted phone** running the gesture
+model, all in the scene; one virtual drone flies **above** them. `--operators N`
+(`src/operators.py`) simulates the people — position, facing, wander.
+
+- **Control = proximity.** The drone obeys whichever operator it is currently
+  **nearest** to (recomputed every frame). The HUD shows `CTRL opN`, and that
+  operator is cyan in the 3D view.
+- **Idle = follow.** With no command running, the drone gently trails the
+  operator it is nearest to, staying at altitude above them.
+- **Direction is operator-relative.** The three-finger "forward" dash flies along
+  the *controlling operator's* facing (their chest camera points where they
+  face).
+- **Handoff is emergent.** Dash the drone toward someone else; when it arrives it
+  is nearest to them, so they take control. No dedicated handoff gesture.
+
+One webcam drives whoever currently has control. Next: real phones streaming
+their own gesture + position data into the sim.
 
 **Testing gestures safely.** `--check-gestures` is the safe way to rehearse hand
 poses and combos: it shows the recognized gesture, hold bar, partial-combo hint,
@@ -136,7 +145,7 @@ Hold a sign steady for ~0.4 s to fire it; relax before repeating.
 
 | Sign | Action |
 | --- | --- |
-| 👍 Thumb up | **Arm + take off**; each one after that **steps the altitude up ~1.5 m** (to 9 m) |
+| 👍 Thumb up | **Arm + take off** (to ~3 m, above the operators); each one after that **steps the altitude up ~1.5 m** (to 9 m) |
 | 👎 Thumb down | **Land + disarm** |
 | ☝️ Pointing up | Orbit: fly out to a 10 m radius and circle the origin, nose kept pointed inward — point again to stop |
 | 🤟 ILoveYou | Return to the start point and hover |

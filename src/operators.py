@@ -56,6 +56,12 @@ class OperatorPool:
     def active_op(self) -> Operator:
         return self.operators[self.active]
 
+    def set_active_by_proximity(self, xy) -> int:
+        """Control goes to the operator nearest the drone (horizontal distance)."""
+        xy = np.asarray(xy, dtype=float)
+        self.active = int(np.argmin([np.linalg.norm(op.pos - xy) for op in self.operators]))
+        return self.active
+
     def step(self, dt: float) -> None:
         if self.wander_enabled:
             for op in self.operators:

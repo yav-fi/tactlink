@@ -24,7 +24,7 @@ _ROLL_DEAD_ZONE = 0.18
 _ROLL_FULL_SCALE = 0.7
 _SMOOTHING = 0.35
 
-_TAKEOFF_ALT = 1.3     # altitude the first takeoff climbs to
+_TAKEOFF_ALT = 3.0     # altitude the first takeoff climbs to (above the operators)
 _CLIMB_STEP = 1.5      # extra metres per thumbs-up once airborne
 _MAX_ALT = 9.0
 _SPIN_RATE = 1.0
@@ -68,8 +68,10 @@ class GestureController:
             target = self._run_maneuver(state)
         elif HAND_FLIGHT_ENABLED and hand.present:
             target = self._fly(hand, gstate)
+        elif self._armed and gstate.follow_pos is not None:
+            target = self._follow_point(state, gstate.follow_pos)
         else:
-            # Gestures-only: hold position, seek the target altitude.
+            # Gestures-only, no target: hold position, seek the target altitude.
             target = ControlInput(armed=self._armed,
                                   throttle=self._alt_throttle(state) if self._armed else 0.0)
 
@@ -118,6 +120,18 @@ class GestureController:
         """Throttle command to climb toward / hold ``self._alt_target`` (with damping)."""
         err = self._alt_target - state.pos[2]
         return float(np.clip(err * 1.3 - state.vel[2] * 0.45, -0.45, 1.0))
+
+    def _follow_point(self, state, xy) -> ControlInput:
+        """Gently trail a point on the ground (the nearest operator), staying above."""
+        err = np.asarray(xy, dtype=float) - np.asarray(state.pos[:2])
+        dist = float(np.linalg.norm(err))
+        cmd = ControlInput(armed=self._armed, throttle=self._alt_throttle(state))
+        if dist > 0.6:                          # dead zone so it settles overhead
+            body = self._world_to_body(err / dist, state.yaw)
+            gain = min(1.0, dist / 4.0) * 0.6   # easy-going, not a chase
+            cmd.roll = float(body[0]) * gain
+            cmd.pitch = float(body[1]) * gain
+        return cmd
 
     # -- autopilot routines ------------------------------------------
     def _start_maneuver(self, event: str, state) -> None:

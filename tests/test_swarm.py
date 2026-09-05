@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 import numpy as np  # noqa: E402
 
 from control_types import GestureState, HandState  # noqa: E402
+from controls import _TAKEOFF_ALT  # noqa: E402
 from swarm import Swarm, formation_slots  # noqa: E402
 
 
@@ -33,14 +34,14 @@ def test_formation_slots_shape_and_balance():
 
 def test_one_drone_matches_single_flight():
     sw = _run(Swarm(1), {0: ["takeoff"]}, 600)
-    assert abs(sw.states()[0].pos[2] - 1.3) < 0.3
+    assert abs(sw.states()[0].pos[2] - _TAKEOFF_ALT) < 0.4
     assert sw.states()[0].armed
 
 
 def test_whole_swarm_takes_off_together():
     sw = _run(Swarm(5), {0: ["takeoff"]}, 600)
     alts = [s.pos[2] for s in sw.states()]
-    assert all(abs(a - 1.3) < 0.4 for a in alts), alts
+    assert all(abs(a - _TAKEOFF_ALT) < 0.5 for a in alts), alts
     assert all(s.armed for s in sw.states())
 
 

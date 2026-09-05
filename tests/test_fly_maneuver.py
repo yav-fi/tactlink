@@ -133,6 +133,20 @@ def test_fly_bearing_dashes_along_the_given_angle():
     assert ctl.maneuver == ""
 
 
+def test_idle_drone_follows_the_given_point():
+    ctl = GestureController()
+    sim = QuadSimulator()
+    _armed_at(ctl, sim, alt=3.0)
+    sim.state.pos[:2] = [0.0, 0.0]
+    target = (6.0, -4.0)
+    for _ in range(600):
+        cmd = ctl.update(HandState(present=False),
+                         GestureState(follow_pos=target), sim.state)
+        sim.step(cmd, 1 / 60)
+    assert np.linalg.norm(np.array(sim.state.pos[:2]) - target) < 1.2, sim.state.pos
+    assert abs(sim.state.pos[2] - 3.0) < 0.4          # stayed at altitude
+
+
 def test_fly_dash_ignored_when_disarmed():
     ctl = GestureController()
     sim = QuadSimulator()

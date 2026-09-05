@@ -23,6 +23,15 @@ def test_pool_size_and_active():
     assert pool.active_op.name == "op4"
 
 
+def test_active_is_nearest_operator_to_the_drone():
+    pool = OperatorPool(5)
+    pool.wander_enabled = False
+    pool.operators[0].pos[:] = [10.0, 0.0]
+    pool.operators[3].pos[:] = [0.5, 0.5]
+    assert pool.set_active_by_proximity([0.0, 0.0]) == 3
+    assert pool.set_active_by_proximity([11.0, 0.0]) == 0
+
+
 def test_forward_bearing_is_active_operator_heading():
     pool = OperatorPool(3)
     pool.wander_enabled = False
