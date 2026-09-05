@@ -36,6 +36,8 @@ export class DroneController {
   private stepElapsed = 0;
   private orbitCenter: Coordinates | null = null;
   private state = "IDLE";
+  private manualHeading = 0;
+  private manualVelocity = new Cesium.Cartesian3();
   private readonly entity: Cesium.Entity;
 
   constructor(private readonly viewer: Cesium.Viewer, home: Coordinates) {
@@ -65,6 +67,7 @@ export class DroneController {
   }
 
   setManualControl(enabled: boolean): void {
+    this.stopManualMotion();
     this.mission = null;
     this.stepIndex = 0;
     this.stepElapsed = 0;
@@ -72,11 +75,19 @@ export class DroneController {
     this.state = enabled ? "MANUAL" : "HOVERING";
   }
 
-  moveManually(east: number, north: number, up: number, seconds: number): void {
+  stopManualMotion(): void {
+    this.manualVelocity = new Cesium.Cartesian3();
+  }
+
+  moveManually(east: number, north: number, up: number, seconds: number, heading = 0): void {
     if (this.state !== "MANUAL") return;
-    const scale = 45 * seconds / Math.max(1, Math.hypot(east, north, up));
-    this.position = destinationPoint(this.position, east * scale, north * scale);
-    this.position.altitude = Math.max(2, this.position.altitude + up * scale);
+    this.manualHeading = heading;
+    const scale = 45 / Math.max(1, Math.hypot(east, north, up));
+    const target = new Cesium.Cartesian3(east * scale, north * scale, up * scale);
+    const damping = target.equals(Cesium.Cartesian3.ZERO) ? 16 : 10;
+    Cesium.Cartesian3.lerp(this.manualVelocity, target, 1 - Math.exp(-damping * seconds), this.manualVelocity);
+    this.position = destinationPoint(this.position, this.manualVelocity.x * seconds, this.manualVelocity.y * seconds);
+    this.position.altitude = Math.max(2, this.position.altitude + this.manualVelocity.z * seconds);
     this.syncEntity();
   }
 
@@ -139,6 +150,6 @@ export class DroneController {
 
   private orientationAt(position: Coordinates): Cesium.Quaternion {
     const cartesian = Cesium.Cartesian3.fromDegrees(position.longitude, position.latitude, position.altitude);
-    return Cesium.Transforms.headingPitchRollQuaternion(cartesian, new Cesium.HeadingPitchRoll(Cesium.Math.toRadians(90), 0, 0));
+    return Cesium.Transforms.headingPitchRollQuaternion(cartesian, new Cesium.HeadingPitchRoll(Cesium.Math.toRadians(90) + (this.state === "MANUAL" ? this.manualHeading : 0), 0, 0));
   }
 }

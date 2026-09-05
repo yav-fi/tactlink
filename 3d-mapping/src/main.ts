@@ -32,8 +32,17 @@ const drone = new DroneController(viewer, home);
 const activeCameraKeys = new Set<string>();
 const controlDroneButton = document.querySelector<HTMLButtonElement>("#control-drone")!;
 let controllingDrone = false;
+const pilotView = { heading: 0, pitch: Cesium.Math.toRadians(-18), range: 65 };
+let steering = false;
+
+function clearInput(): void {
+  activeCameraKeys.clear();
+  steering = false;
+  drone.stopManualMotion();
+}
 
 function releaseDrone(): void {
+  clearInput();
   if (controllingDrone) drone.setManualControl(false);
   controllingDrone = false;
   activeCameraKeys.clear();
@@ -72,15 +81,25 @@ function flyToFreeCameraOverview(): void {
   commandStatus.textContent = "Free camera active. W/A/S/D moves; R/F moves up/down. Ctrl + drag rotates the view.";
 }
 
-cameraHandler.setInputAction(() => { isOrbitDragging = cameraMode === "orbit"; }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
-cameraHandler.setInputAction(() => { isOrbitDragging = false; }, Cesium.ScreenSpaceEventType.LEFT_UP);
+cameraHandler.setInputAction(() => { isOrbitDragging = cameraMode === "orbit"; steering = controllingDrone; }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+cameraHandler.setInputAction(() => { isOrbitDragging = false; steering = false; }, Cesium.ScreenSpaceEventType.LEFT_UP);
+window.addEventListener("pointerup", () => { steering = false; isOrbitDragging = false; });
 cameraHandler.setInputAction((movement: { startPosition: Cesium.Cartesian2; endPosition: Cesium.Cartesian2 }) => {
+  if (controllingDrone && steering) {
+    pilotView.heading += (movement.endPosition.x - movement.startPosition.x) * 0.005;
+    pilotView.pitch = Cesium.Math.clamp(pilotView.pitch + (movement.endPosition.y - movement.startPosition.y) * 0.004, -1.2, -0.05);
+    return;
+  }
   if (!isOrbitDragging || cameraMode !== "orbit") return;
   orbitCamera.heading -= (movement.endPosition.x - movement.startPosition.x) * 0.008;
   orbitCamera.pitch = Cesium.Math.clamp(orbitCamera.pitch + (movement.endPosition.y - movement.startPosition.y) * 0.006, Cesium.Math.toRadians(-85), Cesium.Math.toRadians(-5));
   applyOrbitCamera();
 }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 cameraHandler.setInputAction((delta: number) => {
+  if (controllingDrone) {
+    pilotView.range = Cesium.Math.clamp(pilotView.range - delta * 0.05, 30, 180);
+    return;
+  }
   if (cameraMode !== "orbit") return;
   orbitCamera.range = Cesium.Math.clamp(orbitCamera.range + delta * 0.22, 80, 4_000);
   applyOrbitCamera();
@@ -133,14 +152,15 @@ controlDroneButton.addEventListener("click", () => {
   viewer.scene.screenSpaceCameraController.enableInputs = false;
   controlDroneButton.textContent = "Release drone";
   controlDroneButton.setAttribute("aria-pressed", "true");
-  commandStatus.textContent = "You control the drone. W/S north/south, A/D west/east, R/F up/down. Previous mission canceled. Release keys to hover.";
+  commandStatus.textContent = "PILOT MODE · WASD moves relative to view · Drag to steer · Q/E turns · Space/Shift up/down (R/F also works) · Esc releases. Mission canceled.";
   viewer.canvas.focus();
 });
 
 window.addEventListener("keydown", (event) => {
   if (event.target instanceof HTMLElement && event.target.closest('textarea, input, select, [contenteditable="true"]')) return;
   if (event.ctrlKey || event.metaKey || event.altKey) return;
-  if (["KeyW", "KeyA", "KeyS", "KeyD", "KeyR", "KeyF"].includes(event.code)) {
+  if (controllingDrone && event.code === "Escape") { flyToFreeCameraOverview(); return; }
+  if (["KeyW", "KeyA", "KeyS", "KeyD", "KeyR", "KeyF"].includes(event.code) || (controllingDrone && ["Space", "ShiftLeft", "ShiftRight", "KeyQ", "KeyE"].includes(event.code))) {
     if (cameraMode !== "free") flyToFreeCameraOverview();
     viewer.camera.cancelFlight();
     activeCameraKeys.add(event.code);
@@ -148,18 +168,22 @@ window.addEventListener("keydown", (event) => {
   }
 });
 window.addEventListener("keyup", (event) => activeCameraKeys.delete(event.code));
-window.addEventListener("blur", () => activeCameraKeys.clear());
-document.addEventListener("visibilitychange", () => activeCameraKeys.clear());
-document.addEventListener("focusin", () => activeCameraKeys.clear());
+window.addEventListener("blur", clearInput);
+document.addEventListener("visibilitychange", clearInput);
+document.addEventListener("focusin", clearInput);
 viewer.canvas.tabIndex = 0;
 viewer.canvas.addEventListener("pointerdown", () => viewer.canvas.focus());
 
 function updateFreeCamera(deltaSeconds: number): void {
   if (controllingDrone) {
     const axis = (positive: string, negative: string) => Number(activeCameraKeys.has(positive)) - Number(activeCameraKeys.has(negative));
-    drone.moveManually(axis("KeyD", "KeyA"), axis("KeyW", "KeyS"), axis("KeyR", "KeyF"), deltaSeconds);
+    pilotView.heading += axis("KeyE", "KeyQ") * 1.8 * deltaSeconds;
+    const forward = axis("KeyW", "KeyS");
+    const right = axis("KeyD", "KeyA");
+    const up = Number(activeCameraKeys.has("Space") || activeCameraKeys.has("KeyR")) - Number(activeCameraKeys.has("ShiftLeft") || activeCameraKeys.has("ShiftRight") || activeCameraKeys.has("KeyF"));
+    drone.moveManually(forward * Math.sin(pilotView.heading) + right * Math.cos(pilotView.heading), forward * Math.cos(pilotView.heading) - right * Math.sin(pilotView.heading), up, deltaSeconds, pilotView.heading);
     const position = drone.snapshot();
-    viewer.camera.lookAt(Cesium.Cartesian3.fromDegrees(position.longitude, position.latitude, position.altitude), new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-25), 100));
+    viewer.camera.lookAt(Cesium.Cartesian3.fromDegrees(position.longitude, position.latitude, position.altitude), new Cesium.HeadingPitchRange(pilotView.heading, pilotView.pitch, pilotView.range));
     return;
   }
   if (cameraMode !== "free" || activeCameraKeys.size === 0) return;
