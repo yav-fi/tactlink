@@ -1,4 +1,9 @@
-# Verified with the versions below on Python 3.11 / Windows.
+huggingface_hub
+transformers
+uv
+chad-code
+
+# webcam gesture quadcopter control (verified with the versions below on Python 3.11 / Windows)
 opencv-python>=4.8
 mediapipe>=0.10
 numpy>=1.24
