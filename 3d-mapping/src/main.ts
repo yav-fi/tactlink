@@ -30,11 +30,15 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
   sceneModePicker: false,
   selectionIndicator: false,
   timeline: false,
-  baseLayer: false,
+  baseLayer: new Cesium.ImageryLayer(new Cesium.GridImageryProvider({
+    cells: 16,
+    color: Cesium.Color.fromCssColorString("#6b9c88"),
+    backgroundColor: Cesium.Color.fromCssColorString("#233d34"),
+  })),
 });
 if (runtimeMode) startRuntimeMode(viewer);
 
-viewer.scene.globe.enableLighting = true;
+viewer.scene.globe.enableLighting = false;
 const fleet = new Fleet(viewer);
 let drone: DroneController | undefined;
 const previewButton = document.querySelector<HTMLButtonElement>("#preview-flight")!;
@@ -299,10 +303,10 @@ if (token) {
     status.textContent = "Google Photorealistic 3D Tiles connected.";
   } catch (error) {
     console.error(error);
-    status.textContent = "Google tiles could not load; showing the fallback globe.";
+    status.textContent = "Google tiles could not load; showing the offline grid globe.";
   }
 } else {
-  status.textContent = "Fallback globe active — add a Cesium ion token for the 3D city.";
+  status.textContent = "Offline grid globe active. No token needed to simulate; an ion token enables the 3D city.";
 }
 }
 void loadWorld();
