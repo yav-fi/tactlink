@@ -39,6 +39,9 @@ export class DroneController {
   private manualHeading = 0;
   private manualVelocity = new Cesium.Cartesian3();
   private readonly entity: Cesium.Entity;
+  private readonly originEntity: Cesium.Entity;
+  private readonly trailEntity: Cesium.Entity;
+  private trailPoints: Cesium.Cartesian3[] = [];
 
   constructor(private readonly viewer: Cesium.Viewer, home: Coordinates) {
     this.home = { ...home };
@@ -56,6 +59,29 @@ export class DroneController {
       },
       label: { text: "DRONE 1", font: "600 13px system-ui", fillColor: Cesium.Color.WHITE, showBackground: true, backgroundColor: Cesium.Color.fromAlpha(Cesium.Color.BLACK, 0.7), pixelOffset: new Cesium.Cartesian2(0, -28) },
     });
+    this.originEntity = viewer.entities.add({
+      id: "drone_1_origin",
+      name: "Drone starting position",
+      show: false,
+      box: {
+        dimensions: new Cesium.Cartesian3(16, 10, 4),
+        material: Cesium.Color.ORANGE.withAlpha(0.3),
+        outline: true,
+        outlineColor: Cesium.Color.ORANGE,
+      },
+      label: { text: "START", font: "600 13px system-ui", fillColor: Cesium.Color.ORANGE, showBackground: true, pixelOffset: new Cesium.Cartesian2(0, 28) },
+    });
+    this.trailEntity = viewer.entities.add({
+      id: "drone_1_trail",
+      show: false,
+      polyline: {
+        positions: new Cesium.CallbackProperty(() => this.trailPoints, false),
+        width: 3,
+        material: Cesium.Color.fromCssColorString("#35e8ff"),
+        arcType: Cesium.ArcType.NONE,
+        clampToGround: false,
+      },
+    });
   }
 
   run(command: MissionCommand): void {
@@ -67,6 +93,14 @@ export class DroneController {
   }
 
   setManualControl(enabled: boolean): void {
+    if (enabled) {
+      const origin = Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude);
+      this.originEntity.position = new Cesium.ConstantPositionProperty(origin);
+      this.originEntity.orientation = new Cesium.ConstantProperty(this.orientationAt(this.position));
+      this.originEntity.show = true;
+      this.trailPoints = [origin, Cesium.Cartesian3.clone(origin)];
+      this.trailEntity.show = true;
+    }
     this.stopManualMotion();
     this.mission = null;
     this.stepIndex = 0;
@@ -92,6 +126,9 @@ export class DroneController {
   }
 
   reset(): void {
+    this.trailPoints = [];
+    this.originEntity.show = false;
+    this.trailEntity.show = false;
     this.position = { ...this.home };
     this.mission = null;
     this.stepIndex = 0;
@@ -144,7 +181,20 @@ export class DroneController {
   }
 
   private syncEntity(): void {
-    this.entity.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude));
+    const current = Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude);
+    this.entity.position = new Cesium.ConstantPositionProperty(current);
+    if (this.trailPoints.length >= 2) {
+      // Keep an exact live endpoint, sampling the route at two-meter intervals.
+      this.trailPoints[this.trailPoints.length - 1] = current;
+      if (Cesium.Cartesian3.distance(this.trailPoints[this.trailPoints.length - 2], current) >= 2) {
+        this.trailPoints.push(Cesium.Cartesian3.clone(current));
+      }
+      // Bound geometry while retaining the starting point and live endpoint.
+      if (this.trailPoints.length > 4096) {
+        const last = this.trailPoints.length - 1;
+        this.trailPoints = this.trailPoints.filter((_, index) => index % 2 === 0 || index === last);
+      }
+    }
     this.entity.orientation = new Cesium.ConstantProperty(this.orientationAt(this.position));
   }
 
