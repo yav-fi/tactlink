@@ -21,6 +21,7 @@
             <button id="reset-mission" type="button" class="secondary">Reset drone</button>
             <button id="orbit-monument" type="button" class="secondary">Orbit monument</button>
             <button id="free-camera" type="button" class="secondary">Free camera</button>
+            <button id="control-drone" type="button" aria-pressed="false">Control drone</button>
           </div>
           <p id="command-status" class="hint">Commands execute locally and deterministically.</p>
         </section>
@@ -28,7 +29,7 @@
           <h2>Drone state</h2>
           <dl id="drone-state" class="state"></dl>
         </section>
-        <p class="hint">Orbit monument: drag to rotate around it and scroll to zoom. Free camera: drag to look, scroll to zoom, and use W/A/S/D/R/F to move. Add a Cesium ion token in <code>.env</code> to stream Google Photorealistic 3D Tiles.</p>
+        <p class="hint">Click the map, then hold W/A/S/D to fly or R/F to move up/down. Movement keys automatically leave orbit mode. In free camera, Ctrl + drag rotates the view. Orbit monument: drag to circle it and scroll to zoom.</p>
       </aside>
     </main>
     <script type="module" src="/src/main.ts"></script>

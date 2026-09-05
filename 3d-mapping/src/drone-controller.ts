@@ -64,6 +64,22 @@ export class DroneController {
     this.state = "TAKING_OFF";
   }
 
+  setManualControl(enabled: boolean): void {
+    this.mission = null;
+    this.stepIndex = 0;
+    this.stepElapsed = 0;
+    this.orbitCenter = null;
+    this.state = enabled ? "MANUAL" : "HOVERING";
+  }
+
+  moveManually(east: number, north: number, up: number, seconds: number): void {
+    if (this.state !== "MANUAL") return;
+    const scale = 45 * seconds / Math.max(1, Math.hypot(east, north, up));
+    this.position = destinationPoint(this.position, east * scale, north * scale);
+    this.position.altitude = Math.max(2, this.position.altitude + up * scale);
+    this.syncEntity();
+  }
+
   reset(): void {
     this.position = { ...this.home };
     this.mission = null;
