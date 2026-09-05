@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Thermal-gated tok/s benchmark for this project's chat backend.
 
-This project only ships one configuration — mlx-community/Qwen3.8-27B-4bit
-target + w4:gs64 DFlash2 draft + LibraSpec, the best-performing setup found
-in dflash2-mlx's own matched comparisons — so this benchmarks whatever's
-currently running, not a sweep across configs.
+The shell wrapper resolves the requested target/draft pair and passes its
+identity here so every result remains attributable to the model that produced
+it. This is a single-configuration measurement, not a sweep.
 
 Reuses this machine family's one canonical thermal-gate implementation from
 https://github.com/kaarelkaarelson/mlx-bench (public, MIT) instead of
@@ -68,6 +67,9 @@ def main() -> None:
     ap.add_argument("--max-tokens", type=int, default=512)
     ap.add_argument("--base-url", default=os.environ.get("CHAT_SERVER_URL", "http://localhost:8081"))
     ap.add_argument("--out", default=str(PROJECT_ROOT / "benchmark_result.json"))
+    ap.add_argument("--model", default=os.environ.get("BENCHMARK_MODEL", "unknown"))
+    ap.add_argument("--target-repo", default=os.environ.get("BENCHMARK_TARGET_REPO", "unknown"))
+    ap.add_argument("--draft-repo", default=os.environ.get("BENCHMARK_DRAFT_REPO", "unknown"))
     args = ap.parse_args()
 
     _stage("load thermal gate module")
@@ -143,6 +145,9 @@ def main() -> None:
     _stage("write results file")
     summary = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "model": args.model,
+        "target_repo": args.target_repo,
+        "draft_repo": args.draft_repo,
         "base_url": args.base_url,
         "max_tokens": args.max_tokens,
         "prompt_file": str(PROMPT_FILE),

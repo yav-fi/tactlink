@@ -36,4 +36,6 @@ if ! curl -sf "$URL/health" >/dev/null 2>&1; then
 fi
 
 exec env CHAT_SERVER_URL="$URL" CHAT_MODEL_DIR="${CHAT_MODEL_DIR:-$PROJECT_ROOT/$TARGET_DIR}" \
+  BENCHMARK_MODEL="$MODEL" BENCHMARK_TARGET_REPO="$TARGET_REPO" \
+  BENCHMARK_DRAFT_REPO="$DRAFT_SRC_REPO" \
   python3 "$SCRIPT_DIR/benchmark.py" "$@"

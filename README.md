@@ -31,6 +31,8 @@ This repo hosts five hackathon workstreams:
 ```sh
 pip install -r requirements.txt
 git clone https://github.com/kaarelkaarelson/mlx-bench.git ~/mlx-bench
+brew install macmon ProducerGuy/tap/thermalforge
+sudo thermalforge install
 ./scripts/download_model.sh
 ./scripts/build_dflash_draft.sh
 ```
@@ -50,11 +52,13 @@ All five scripts above take `--model qwen3.5-9b|qwen3.8-27b` (default `qwen3.5-9
 
 | Hardware | Model | Draft Head | Plug-in Algorithms | Decode tok/s |
 | --- | --- | --- | --- | --- |
+| MacBook Pro, Apple M4, 16GB | [Qwen3.5-9B-4bit](https://huggingface.co/mlx-community/Qwen3.5-9B-4bit) | [DFlash](https://huggingface.co/z-lab/Qwen3.5-9B-DFlash) (w4:gs64) | — (no selector, LibraSpec auto-disabled) | **47.6** ([receipt](docs/Sep5-03-24-40-PM.md)) |
 | MacBook Pro, Apple M3 Max, 48GB | [Qwen3.5-9B-4bit](https://huggingface.co/mlx-community/Qwen3.5-9B-4bit) | [DFlash](https://huggingface.co/z-lab/Qwen3.5-9B-DFlash) (w4:gs64) | — (no selector, LibraSpec auto-disabled) | **125.9** |
 | MacBook Pro, Apple M3 Max, 48GB | [Qwen3.8-27B-4bit](https://huggingface.co/mlx-community/Qwen3.8-27B-4bit) | [DFlash2](https://huggingface.co/z-lab/Qwen3.8-27B-DFlash2) (w4:gs64) | [LibraSpec](https://arxiv.org/abs/2608.08721) | **72.3** |
 
-Measured with `./scripts/benchmark.sh`, thermally gated (GPU cooled to 37.4°C, fans
-verified at max RPM before/after) — see `benchmark_result.json` for the full receipt.
+Measured with `./scripts/benchmark.sh` using a 512-token generation after an untimed
+warmup. Runs are thermally gated, with fans verified at maximum RPM before and after;
+the latest local run is also written to the ignored `benchmark_result.json` file.
 
 ---
 
