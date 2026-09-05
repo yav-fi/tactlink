@@ -19,3 +19,7 @@ data/
 *.png
 flight.png
 benchmark_result.json
+.env
+.env.local
+3d-mapping/node_modules/
+3d-mapping/dist/
