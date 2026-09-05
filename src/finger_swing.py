@@ -38,24 +38,15 @@ def _two_fingers(hand) -> bool:
 
 def _three_fingers(hand) -> bool:
     # Index + middle + ring extended, pinky down. Thumb ignored - it sticks out
-    # naturally when the other three point sideways. Distinct from Victory (2),
-    # open palm (pinky up too), and pointing (1).
+    # naturally. Distinct from Victory (2), open palm (pinky up too), pointing (1).
+    # Orientation does not matter: the forward direction comes from the operator's
+    # facing, not the fingers. Just hold the sign where the camera can see it.
     f = hand.fingers
     return bool(f[1] and f[2] and f[3] and not f[4])
 
 
-_THREE_HOLD_SEC = 0.35     # steady hold before "forward" fires
-_THREE_RELEASE_SEC = 0.35  # pose must drop this long before it can fire again
-_THREE_MIN_H_DEG = 42.0    # fingers must lean at least this far off vertical
-_THREE_MAX_H_DEG = 138.0   # ... but not point straight down
-
-
-def _is_sideways(point_dir) -> bool:
-    dx, dy = point_dir
-    if dx == 0.0 and dy == 0.0:
-        return False
-    angle = abs(math.degrees(math.atan2(dx, -dy)))
-    return _THREE_MIN_H_DEG <= angle <= _THREE_MAX_H_DEG
+_THREE_HOLD_SEC = 0.45     # steady hold before "forward" fires
+_THREE_RELEASE_SEC = 0.4   # pose must drop this long before it can fire again
 
 
 class ThreeFingerForward:
@@ -69,7 +60,7 @@ class ThreeFingerForward:
 
     def update(self, hand, now: float) -> list[str]:
         ok = (ENABLED and hand is not None and getattr(hand, "present", False)
-              and _three_fingers(hand) and _is_sideways(hand.point_dir))
+              and _three_fingers(hand))
         if not ok:
             if self._away_since == 0.0:
                 self._away_since = now
