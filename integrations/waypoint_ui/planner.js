@@ -1,4 +1,5 @@
 import {worldCoordinates, geographicCoordinates} from './map-math.mjs';
+import {prepareAddition} from './command-entry.mjs';
 const $ = id => document.getElementById(id);
 const R = 6378137, rad = Math.PI / 180;
 let lines = [], preview = null, revision = 0, timer, zoom = 18;
@@ -7,7 +8,24 @@ const map = $('map'), svg = $('drawing');
 const number = id => $(id).value.trim() === '' ? NaN : Number($(id).value);
 const home = () => ({latitude_deg:number('latitude'), longitude_deg:number('longitude'), altitude_msl_m:number('home-altitude')});
 const validLocation = h => Number.isFinite(h.latitude_deg) && Math.abs(h.latitude_deg) <= 85 && Number.isFinite(h.longitude_deg) && Math.abs(h.longitude_deg) <= 180;
-function message(text, error=false) { $('status').textContent=text; $('status').classList.toggle('error', error); }
+function inputFeedback(text, error=false) {
+  $('input-feedback').textContent=text;
+  $('input-feedback').style.color=error?'#974d2f':'';
+}
+function message(text, error=false) {
+  $('status').textContent=text; $('status').classList.toggle('error', error);
+  const match=error && text.match(/Command (\d+):/i);
+  $('show-command-error').hidden=!match;
+  if(match){
+    const index=Number(match[1]);
+    $('show-command-error').textContent=`Show command ${index}`;
+    $('show-command-error').onclick=()=>{
+      const input=$('commands').children[index-1]?.querySelector('input');
+      input?.scrollIntoView({behavior:'smooth',block:'center'});input?.focus({preventScroll:true});
+    };
+  }
+  if(error)inputFeedback(text,true);
+}
 async function post(url, data) {
   const response = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
   const body = await response.json();
@@ -47,6 +65,10 @@ function changed() {
   },200);
 }
 function renderCommands() {
+  const selected=$('insert-position').value;
+  $('insert-position').replaceChildren(new Option('At the end of the mission','end'));
+  lines.forEach((line,index)=>$('insert-position').add(new Option(`Before ${index+1}: ${line}`,String(index))));
+  if([...$('insert-position').options].some(option=>option.value===selected))$('insert-position').value=selected;
   $('commands').replaceChildren(); $('count').textContent=lines.length; $('empty').hidden=lines.length>0;
   lines.forEach((line,index)=>{
     const li=document.createElement('li'), head=document.createElement('div'); head.className='row-head';
@@ -78,11 +100,24 @@ $('add-placement').onclick=()=>{
 };
 $('add-text').onclick=async()=>{
   $('add-text').disabled=true;
+  $('add-text').textContent='Checking…';
+  inputFeedback('Checking your commands against the mission…');
+  const current=revision;
   try {
     const text=$('instruction').value;
-    const result=await post('/api/planner/parse',{text});
-    lines.push(...result.lines); $('instruction').value=result.normalized_text; changed();
-  } catch(error) {message(error.message,true);} finally {$('add-text').disabled=false;}
+    const result=await prepareAddition([...lines],text,$('insert-position').value,post);
+    if(current!==revision)throw new Error('The draft changed while checking. Please add the instruction again.');
+    lines=result.lines;
+    if($('instruction').value===text)$('instruction').value='';
+    changed();
+    inputFeedback(`Added ${result.count} command${result.count===1?'':'s'} starting at position ${result.index+1}.`);
+  } catch(error) {
+    const explanation=error.message.includes('Take off before')
+      ? `${error.message} An airborne command cannot follow Land. Insert it before Land, or add an explicit takeoff to begin another flight.`
+      : error.message;
+    inputFeedback(`Nothing added. ${explanation}`,true);
+    message(`Nothing added. ${explanation}`,true);
+  } finally {$('add-text').disabled=false;$('add-text').textContent='Add to mission';}
 };
 $('clear').onclick=()=>{lines=[];changed();};
 for(const id of ['latitude','longitude','home-altitude']) $(id).oninput=()=>{

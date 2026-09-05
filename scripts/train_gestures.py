@@ -17,7 +17,7 @@ import numpy as np
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_ROOT, "src"))
 
-from gesture_model import DEFAULT_K, MODEL_PATH  # noqa: E402
+from gesture_model import DEFAULT_K, MODEL_PATH, PASSTHROUGH_LABELS  # noqa: E402
 from landmark_features import FEATURE_DIM, FEATURE_VERSION  # noqa: E402
 
 DATA_DIR = os.path.join(_ROOT, "data", "gestures")
@@ -86,15 +86,19 @@ def main() -> int:
 
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     # Absolute-distance gate: reject a live pose whose nearest training sample is
-    # much farther than samples typically sit from each other. Uses the 90th
-    # percentile of within-training nearest-neighbour distance, times a margin.
+    # much farther than samples typically sit from each other. Measured only over
+    # the real gesture classes (a broad passthrough class would inflate it).
+    real = np.array([labels[c].lower() not in PASSTHROUGH_LABELS for c in y])
+    xr = xn[real]
     nn_dist = []
-    for i in range(len(xn)):
-        dd = np.linalg.norm(xn - xn[i], axis=1)
+    for i in range(len(xr)):
+        dd = np.linalg.norm(xr - xr[i], axis=1)
         dd[i] = np.inf
         nn_dist.append(dd.min())
-    reject_radius = float(np.percentile(nn_dist, 90) * 3.0)
-    print(f"reject radius: {reject_radius:.3f}")
+    reject_radius = float(np.percentile(nn_dist, 90) * 3.0) if nn_dist else float("inf")
+    passthrough = sorted(l for l in labels if l.lower() in PASSTHROUGH_LABELS)
+    print(f"reject radius: {reject_radius:.3f}"
+          + (f"   passthrough classes: {', '.join(passthrough)}" if passthrough else ""))
 
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     np.savez(

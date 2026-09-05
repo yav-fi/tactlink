@@ -149,6 +149,13 @@ python scripts/train_gestures.py
 #    edit config/gesture_actions.json, e.g.  "point_left": "return_home"
 ```
 
+If a custom label shadows a built-in gesture it shouldn't (e.g. a two-finger
+pose overriding one-finger `Pointing_Up`), record a class named **`other`**
+holding every pose that is *not* a custom gesture (thumbs, one-finger point,
+fist, relaxed hand) and retrain. When the model lands on `other` the tracker
+keeps the MediaPipe gesture instead. (`none` / `neutral` / `background` /
+`ignore` work as label names too.)
+
 Actions available: `takeoff`, `land`, `cycle_mode`, `speed_up`, `speed_down`,
 `spin360`, `return_home`, `estop`, `orbit` (fly to a 10 m radius then circle the
 origin; fire again to stop), `fly_north` / `fly_south` / `fly_east` / `fly_west`

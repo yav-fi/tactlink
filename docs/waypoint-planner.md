@@ -40,6 +40,13 @@ invalidates the old preview and export until it is validated again. Drafts are
 saved in this browser's local storage; recordings are not saved. A draft always
 starts grounded at local home. Additive commands after Land need a new Takeoff.
 
+Use the **Add commands** selector to insert typed/spoken commands before an
+existing row (for example before Land). Add validates the entire proposed
+mission before changing the draft. Errors appear beside the input, and **Show
+command N** jumps to the invalid row. A successful addition clears the submitted
+transcript to avoid accidentally adding it again. An already-invalid draft must
+be corrected before further text/speech additions can pass validation.
+
 Example:
 
 ```text

@@ -22,6 +22,11 @@ MODEL_PATH = os.path.join(
 DEFAULT_K = 5
 DEFAULT_THRESHOLD = 0.6
 
+# Train a class with one of these names to hold "everything that is NOT a custom
+# gesture" (thumbs, one-finger point, fist, relaxed hand, ...). When the model
+# lands on it, the tracker keeps the built-in MediaPipe gesture instead.
+PASSTHROUGH_LABELS = {"other", "none", "neutral", "background", "ignore"}
+
 
 class CustomGestureClassifier:
     """Loads ``custom_gestures.npz`` if present; a no-op otherwise."""
@@ -69,4 +74,7 @@ class CustomGestureClassifier:
         confidence = float(scores[best] / scores.sum())
         if confidence < self._threshold:
             return None, confidence
-        return self.labels[best], confidence
+        label = self.labels[best]
+        if label.lower() in PASSTHROUGH_LABELS:
+            return None, confidence   # a "not a custom gesture" class -> use the canned result
+        return label, confidence
