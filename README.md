@@ -110,7 +110,7 @@ highlight a drone.
 `--drones N` flies a squad. Drone 0 is the **leader** — every gesture drives it
 exactly like the single-drone app — and the rest hold a fixed ring formation
 around it, so the whole squad takes off, climbs, orbits, dashes and returns home
-together. Return-home recentres the formation on the origin. The HUD shows
+together (all relative to the controlling operator). The HUD shows
 `ARMED xN` and `sel #k`; `1`-`9` highlight a drone (per-drone "single-out"
 commanding is the next step — the hook is there, `Swarm.selected`).
 
@@ -161,7 +161,7 @@ Hold a sign steady for ~0.4 s to fire it; relax before repeating.
 | 👎 Thumb down | **Land + disarm** |
 | ☝️ Pointing up | Orbit: circle the **controlling operator** at ~6 m, nose kept pointed inward — point again to stop |
 | 🤟 ILoveYou | Fly back to the **controlling operator** and hover |
-| **Three fingers held sideways** (index+middle+ring) | Dash ~5 m **forward** — along the bearing the gesturing operator faces (`ThreeFingerForward`) |
+| **Three fingers** (index+middle+ring, pinky curled), held ~0.45 s | Dash ~5 m **forward** — along the bearing the controlling operator faces (`ThreeFingerForward`). Any hand orientation. |
 | ✋ Open palm · ✊ Closed fist · ✌️ Victory | *no action* |
 
 Take off, land, orbit, return-home (and the `fly_*` dashes) run as autopilot
