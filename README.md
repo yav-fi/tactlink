@@ -82,3 +82,33 @@ for chunk in conv.send("what is my favorite color?"):
 
 Set `CHAT_SERVER_URL` if the server runs on a different host/port, or `CHAT_MODEL_DIR` if
 the chat template should be loaded from a model dir other than `models/qwen3.8-27b-4bit`.
+
+## Benchmark
+
+This project only ships one configuration (the pairing above), so the benchmark measures
+whatever's currently running rather than sweeping configs — it's "is this setup fast on
+this machine", not a comparison.
+
+It reuses this machine family's shared thermal-gating implementation from
+[mlx-bench](https://github.com/kaarelkaarelson/mlx-bench) (public, MIT license) instead of
+reimplementing GPU thermal gating again — clone it once:
+
+```sh
+git clone https://github.com/kaarelkaarelson/mlx-bench.git ~/mlx-bench
+```
+
+Then run:
+
+```sh
+./scripts/benchmark.sh
+```
+
+Starts the server if needed, runs 3 reps of a fixed prompt (`scripts/matched_prompt.txt`,
+so every run/machine gets byte-identical input) with 512 max tokens each, gates the GPU
+below 40°C individually before every rep (waiting and boosting fans if needed, printing a
+compliance receipt per rep), discards one untimed warmup call first, and reports the
+median decode tok/s. Writes full results (per-rep timings + thermal receipts) to
+`benchmark_result.json` (gitignored — a local artifact, not shared state).
+
+Set `MLX_BENCH_DIR` if you cloned `mlx-bench` somewhere other than `~/mlx-bench`, or
+`--reps`/`--max-tokens`/`--base-url`/`--out` to override the defaults.
