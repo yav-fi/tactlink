@@ -27,7 +27,7 @@ class GestureMissionAdapter:
     """Maps gesture labels or interpreted action events; analog axes stay local."""
 
     DEFAULT_ACTIONS = {
-        "Closed_Fist": "land",
+        "Thumb_Down": "land",
         "ILoveYou": "return_home",
     }
     ACTION_TYPES = {

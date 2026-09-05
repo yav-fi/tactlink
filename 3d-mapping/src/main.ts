@@ -6,7 +6,7 @@ import { Fleet, DRONE_COLORS } from "./fleet";
 import { formationSlots } from "./formation";
 import { collisionWarning } from "./collision";
 import { parseMission, sampleMission } from "./mission";
-import { startRuntimeMode } from "./runtime";
+import { startRuntimeMode } from "./runtime/index";
 import { previewCoordinate, previewMission, type FlightPreview } from "./flight-preview";
 
 const home = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };

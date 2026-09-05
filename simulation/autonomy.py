@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from planning import MissionPlanner, PlanningConfig, PlanningContext, TrackedEntity, adapters
+from planning.comms import GridCommunicationField, connectivity_priority_for
 from planning.environment import EnvironmentQuery
 from planning.models import Vector3 as PlanningVector3
 
@@ -22,13 +23,24 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 class PlanningAutonomy:
     """Factory + context builder shared by every node in one simulation."""
 
-    def __init__(self, environment: EnvironmentQuery, config: PlanningConfig | None = None) -> None:
+    def __init__(
+        self,
+        environment: EnvironmentQuery,
+        config: PlanningConfig | None = None,
+        communication_routing: bool = True,
+    ) -> None:
         self.environment = environment
         self.config = config or PlanningConfig(altitude_layer=4.0, base_clearance=5.0, grid_cell_size=8.0)
+        self.communication_routing = communication_routing
 
     @classmethod
-    def from_world_definition(cls, definition: "WorldDefinition") -> "PlanningAutonomy":
-        return cls(adapters.environment_from_world_definition(definition))
+    def from_world_definition(
+        cls, definition: "WorldDefinition", communication_routing: bool = True
+    ) -> "PlanningAutonomy":
+        return cls(
+            adapters.environment_from_world_definition(definition),
+            communication_routing=communication_routing,
+        )
 
     def new_planner(self) -> MissionPlanner:
         """One planner per node keeps behaviour state naturally per-drone."""
@@ -49,7 +61,7 @@ class PlanningAutonomy:
             )
             for entity_id, position in sorted(node.known_entities.items())
         ]
-        return adapters.context_from_node(
+        context = adapters.context_from_node(
             node,
             now,
             self.environment,
@@ -58,6 +70,16 @@ class PlanningAutonomy:
             config=config,
             cruise_speed=node.maximum_speed,
         )
+        # The planner sees only what this node *learned* about connectivity.
+        belief = getattr(node, "comm_belief", None)
+        if self.communication_routing and belief is not None and belief.cells:
+            context.communication = GridCommunicationField.from_records(
+                belief.snapshot(), belief.cell_size
+            )
+            context.connectivity_priority = (
+                connectivity_priority_for(str(task.type), task.priority, task.metadata) if task else 0.0
+            )
+        return context
 
     @staticmethod
     def _task_altitude(task, fallback: float) -> float:

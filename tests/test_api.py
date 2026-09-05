@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from server.main import create_app
+from server.main import _default_engine, create_app
 from simulation.models import InterferenceConfig
 
 from .test_simulation import engine_for_test
+
+
+def test_default_demo_engine_includes_a_relay_specialist(monkeypatch) -> None:
+    monkeypatch.delenv("SIMULATION_DRONE_COUNT", raising=False)
+    engine = _default_engine()
+    assert len(engine.drones) == 4
+    assert any("relay" in drone.identity.capabilities for drone in engine.drones.values())
 
 
 def test_api_creates_mission_and_serializes_state() -> None:
@@ -39,6 +46,33 @@ def test_websocket_emits_frontend_contract() -> None:
         assert "estimated" in payload["drones"][0]
         assert "links" in payload
         assert "mission_capability" in payload
+        assert "adaptive" in payload
+        assert "messaging" in payload["network"]
+
+
+def test_runtime_world_and_mission_intelligence_contracts() -> None:
+    app = create_app(engine_for_test(), start_runner=False, mission_backend="baseline")
+    with TestClient(app) as client:
+        world = client.get("/api/world")
+        assert world.status_code == 200
+        assert {region["id"] for region in world.json()["regions"]} >= {"ALPHA", "BRAVO"}
+
+        compiled = client.post(
+            "/api/mission-plans/compile",
+            json={"utterance": "search region ALPHA with two", "selected_region": "ALPHA"},
+        )
+        assert compiled.status_code == 200
+        payload = compiled.json()
+        assert payload["result"]["status"] == "READY"
+        plan = payload["result"]["plan"]
+
+        started = client.post(f"/api/mission-plans/{plan['id']}/start", json=plan)
+        assert started.status_code == 200
+        assert started.json()["actions"]
+
+        answer = client.post("/api/mission-intel/query", json={"question": "what is active?"})
+        assert answer.status_code == 200
+        assert answer.json()["read_only"] is True
 
 
 def test_controls_fail_recover_and_interference() -> None:

@@ -16,6 +16,15 @@ Typical use from the simulator::
 """
 
 from . import adapters
+from .comms import (
+    CommunicationField,
+    GridCommunicationField,
+    RouteChoice,
+    RouteOption,
+    choose_route,
+    connectivity_priority_for,
+    measure_route,
+)
 from .coordination import active_team, layered_altitude, ring_slot, split_contiguous
 from .deconfliction import deconflict
 from .energy import EnergyAssessment, assess_route
@@ -48,6 +57,13 @@ from .planner import MissionPlanner, default_planner
 
 __all__ = [
     "BehaviorPhase",
+    "CommunicationField",
+    "GridCommunicationField",
+    "RouteChoice",
+    "RouteOption",
+    "choose_route",
+    "connectivity_priority_for",
+    "measure_route",
     "BehaviorState",
     "BoxObstacle",
     "CircleObstacle",

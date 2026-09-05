@@ -9,13 +9,13 @@ to be *deliberate*. This interpreter:
 
 Default gesture map (override in config/gesture_actions.json)
 -----------------------------------------------------------
-Open_Palm    -> take off / arm
-Closed_Fist  -> land / disarm
-Victory      -> cycle flight mode (heading / position / hover)
-Thumb_Up     -> speed up   (slow -> normal -> sport)
-Thumb_Down   -> speed down
-Pointing_Up  -> do a 360 deg spin
+Thumb_Up     -> take off / arm, then step altitude up
+Thumb_Down   -> land / disarm
+Pointing_Up  -> orbit the origin
 ILoveYou     -> return to the start point and hover
+
+Open_Palm, Closed_Fist, and Victory are disabled by the default config because
+they were prone to false-positive actions. A custom config may remap them.
 
 Recognized actions: takeoff, land, cycle_mode, speed_up, speed_down, spin360,
 return_home, estop. Map any gesture name (canned or your own custom label) to one
