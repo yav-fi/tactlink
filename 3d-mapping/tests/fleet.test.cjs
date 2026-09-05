@@ -20,6 +20,27 @@ function loadSource(name) {
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
 
+test("four-rotor geometry follows body during flight and playback and shares color", () => {
+  const entities = new Cesium.EntityCollection();
+  const fleet = new Fleet({ entities });
+  const drone = fleet.deploy(home);
+  const parts = entities.values.filter(e => e.id.includes("_quad_"));
+  assert.equal(parts.filter(e => e.id.includes("_hub_")).length, 4);
+  assert.equal(parts.filter(e => e.id.includes("_prop_")).length, 8);
+  drone.setManualControl(true);
+  for (let i = 0; i < 120; i++) drone.moveManually(1, 0, 0, 1 / 60, 1);
+  const check = center => {
+    for (const part of parts) assert(Cesium.Cartesian3.distance(center, part.position.getValue()) < 0.5);
+  };
+  check(entities.getById(drone.id).position.getValue());
+  drone.setManualControl(false);
+  fleet.startReplay(0); fleet.updateReplay(0.5);
+  check(entities.getById(`${drone.id}_replay`).position.getValue());
+  drone.setColor("#ff6666");
+  assert(parts.every(p => p.box.material.color.getValue().toCssHexString() === "#ff6666"));
+  fleet.clear(); assert.equal(entities.values.length, 0);
+});
+
 test("Survey effect weakens beyond 100, 250 and 500 meters", () => {
   const { surveyStrength, surveyBand } = loadSource("survey-surface");
   assert.deepEqual([0, 100, 101, 250, 251, 500, 501, 10000].map(surveyStrength), [1, 1, 0.6, 0.6, 0.3, 0.3, 0.12, 0.12]);
@@ -480,10 +501,10 @@ test("empty startup, unique drone IDs and eight-color wraparound", () => {
     assert.equal(drone.id, `drone_${i + 1}`);
     const leader = entities.getById(drone.id);
     const expected = Cesium.Color.fromCssColorString(DRONE_COLORS[i % 8].hex);
-    assert(Cesium.Color.equals(leader.polyline.material.color.getValue(), expected));
+    assert(Cesium.Color.equals(leader.box.material.color.getValue(), expected));
     assert.equal(entities.getById(`${drone.id}_trail`).show, false);
-    const positions = leader.polyline.positions.getValue();
-    assert(Math.abs(Cesium.Cartesian3.distance(...positions) - 3) < 0.0001);
+    assert.equal(leader.polyline, undefined);
+    assert(Cesium.Cartesian3.equals(leader.box.dimensions.getValue(), new Cesium.Cartesian3(0.36, 0.24, 0.12)));
   }
   assert.equal(fleet.drones.size, 9);
 });

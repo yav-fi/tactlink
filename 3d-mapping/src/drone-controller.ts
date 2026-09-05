@@ -1,6 +1,7 @@
 import * as Cesium from "cesium";
 import type { Coordinates, MissionCommand, MissionStep } from "./mission";
 import { movementBlocked } from "./collision";
+import { addQuadcopterParts, DRONE_BODY_SIZE } from "./quadcopter";
 import { sampleSurvey, surfaceHit, SURVEY_RAYS, SURVEY_DISTANCE_BANDS, surveyStrength, surveyBand } from "./survey-surface";
 
 export type DroneSnapshot = Coordinates & { state: string; currentStep: number; totalSteps: number };
@@ -49,6 +50,7 @@ export class DroneController {
   private manualVelocity = new Cesium.Cartesian3();
   private configuredSpeedMph = 60;
   private readonly entity: Cesium.Entity;
+  private readonly quadParts: Cesium.Entity[];
   private readonly originEntity: Cesium.Entity;
   private readonly trailEntity: Cesium.Entity;
   private trailPoints: Cesium.Cartesian3[] = [];
@@ -128,16 +130,11 @@ export class DroneController {
       id: this.id,
       name: this.id.replace("_", " "),
       position: new Cesium.CallbackPositionProperty((_time, result) => Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude, undefined, result), false),
-      orientation: new Cesium.CallbackProperty(() => this.orientationAt(this.position), false),
-      polyline: {
-        positions: new Cesium.CallbackProperty(() => this.leaderPositions(), false),
-        width: 14,
-        material: new Cesium.PolylineArrowMaterialProperty(this.color),
-        arcType: Cesium.ArcType.NONE,
-        clampToGround: false,
-      },
+      orientation: new Cesium.CallbackProperty(() => this.visualOrientation(), false),
+      box: { dimensions: DRONE_BODY_SIZE, material: this.color },
       label: { text: this.id.replace("_", " ").toUpperCase(), font: "600 13px system-ui", fillColor: this.color, showBackground: true, backgroundColor: Cesium.Color.fromAlpha(Cesium.Color.BLACK, 0.7), pixelOffset: new Cesium.Cartesian2(0, -28) },
     });
+    this.quadParts = addQuadcopterParts(viewer, id, () => this.visualPosition(), () => this.visualOrientation(), () => this.color);
     this.originEntity = viewer.entities.add({
       id: `${this.id}_origin`,
       name: "Drone starting position",
@@ -192,6 +189,16 @@ export class DroneController {
 
   private visualPosition(): Cesium.Cartesian3 {
     return this.replayEntity ? this.replayPosition : Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude);
+  }
+
+  private visualOrientation(): Cesium.Quaternion {
+    const position = this.visualPosition();
+    let heading = this.manualHeading;
+    if ((this.state !== "MANUAL" || this.replayEntity) && this.travelDirection) {
+      const local = Cesium.Matrix4.multiplyByPointAsVector(Cesium.Matrix4.inverseTransformation(Cesium.Transforms.eastNorthUpToFixedFrame(position), new Cesium.Matrix4()), this.travelDirection, new Cesium.Cartesian3());
+      if (Math.hypot(local.x, local.y) > 0.0001) heading = Math.atan2(local.x, local.y);
+    }
+    return Cesium.Transforms.headingPitchRollQuaternion(position, new Cesium.HeadingPitchRoll(Math.PI / 2 + heading, 0, 0));
   }
 
   private viewDirection(): Cesium.Cartesian3 {
@@ -266,7 +273,7 @@ export class DroneController {
       const alpha = patch.polygon!.material!.getValue(Cesium.JulianDate.now()).color.alpha;
       patch.polygon!.material = new Cesium.ColorMaterialProperty(color.withAlpha(alpha));
     }
-    this.entity.polyline!.material = new Cesium.PolylineArrowMaterialProperty(color);
+    this.entity.box!.material = new Cesium.ColorMaterialProperty(color);
     this.trailEntity.polyline!.material = new Cesium.ColorMaterialProperty(color);
     for (const item of [this.entity, this.originEntity, ...this.releases, ...this.arrows, ...(this.replayEntity ? [this.replayEntity] : [])]) {
       if (item.label) item.label.fillColor = new Cesium.ConstantProperty(color);
@@ -303,6 +310,7 @@ export class DroneController {
   destroy(): void {
     this.reset();
     this.viewer.entities.remove(this.entity);
+    for (const part of this.quadParts) this.viewer.entities.remove(part);
     this.viewer.entities.remove(this.originEntity);
     this.viewer.entities.remove(this.trailEntity);
     this.viewer.entities.remove(this.crashIndicator);
@@ -392,7 +400,8 @@ export class DroneController {
     this.replayEntity = this.viewer.entities.add({
       id: `${this.id}_replay`,
       position: new Cesium.CallbackPositionProperty((_time, result) => Cesium.Cartesian3.clone(this.replayPosition, result), false),
-      box: { dimensions: new Cesium.Cartesian3(16, 10, 4), material: this.color, outline: true, outlineColor: this.color },
+      orientation: new Cesium.CallbackProperty(() => this.visualOrientation(), false),
+      box: { dimensions: DRONE_BODY_SIZE, material: this.color },
       label: { text: this.id.replace("_", " ").toUpperCase(), font: "600 13px system-ui", fillColor: this.color, showBackground: true, pixelOffset: new Cesium.Cartesian2(0, -28) },
     });
     return length / this.replaySpeed;

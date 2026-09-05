@@ -106,7 +106,7 @@ let pendingGroup = "";
 const activeCameraKeys = new Set<string>();
 const controlDroneButton = document.querySelector<HTMLButtonElement>("#control-drone")!;
 let controllingDrone = false;
-const pilotView = { heading: 0, pitch: Cesium.Math.toRadians(-18), range: 65 };
+const pilotView = { heading: 0, pitch: Cesium.Math.toRadians(-18), range: 8 };
 const pilotCameraSelect = document.querySelector<HTMLSelectElement>("#pilot-camera")!;
 let pilotCameraMode = "third";
 let freeOrbitHeading = 0;
@@ -192,7 +192,7 @@ cameraHandler.setInputAction((movement: { startPosition: Cesium.Cartesian2; endP
 }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 cameraHandler.setInputAction((delta: number) => {
   if (controllingDrone) {
-    if (pilotCameraMode === "free") pilotView.range = Cesium.Math.clamp(pilotView.range - delta * 0.05, 30, 180);
+    if (pilotCameraMode === "free") pilotView.range = Cesium.Math.clamp(pilotView.range - delta * 0.05, 3, 180);
     return;
   }
   if (cameraMode !== "orbit") return;
@@ -543,7 +543,7 @@ function updateFreeCamera(deltaSeconds: number): void {
     else drone.moveManually(east, north, up, deltaSeconds, pilotView.heading);
     const position = drone.snapshot();
     let center = Cesium.Cartesian3.fromDegrees(position.longitude, position.latitude, position.altitude);
-    let batchRange = 65;
+    let batchRange = 8;
     if (fleet.manualBatch.length > 1 && pilotCameraMode !== "first") {
       const bounds = Cesium.BoundingSphere.fromPoints(fleet.manualBatch.map(member => { const p = member.snapshot(); return Cesium.Cartesian3.fromDegrees(p.longitude, p.latitude, p.altitude); }));
       center = bounds.center; batchRange = Math.max(65, bounds.radius * 3 + 30);
