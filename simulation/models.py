@@ -48,6 +48,7 @@ class TaskType(StrEnum):
     HOLD = "HOLD"
     RETURN = "RETURN"
     REGROUP = "REGROUP"
+    RELAY = "RELAY"
 
 
 class TaskStatus(StrEnum):
@@ -70,6 +71,11 @@ class MessageType(StrEnum):
     POSITION_UPDATE = "POSITION_UPDATE"
     CAPABILITY_UPDATE = "CAPABILITY_UPDATE"
     TASK_COMPLETE = "TASK_COMPLETE"
+    MISSION_ANNOUNCE = "MISSION_ANNOUNCE"
+    TASK_BID = "TASK_BID"
+    TASK_AWARD = "TASK_AWARD"
+    TASK_RELEASE = "TASK_RELEASE"
+    MISSION_SYNC = "MISSION_SYNC"
 
 
 class EventCategory(StrEnum):
@@ -106,6 +112,19 @@ class EventType(StrEnum):
     REPLAN_REQUESTED = "REPLAN_REQUESTED"
     INTERFERENCE_CHANGED = "INTERFERENCE_CHANGED"
     RANDOM_EVENT = "RANDOM_EVENT"
+    CONTROL_LOST = "CONTROL_LOST"
+    CONTROL_RECOVERED = "CONTROL_RECOVERED"
+    MISSION_REPLICATED = "MISSION_REPLICATED"
+    TASK_AUCTION_STARTED = "TASK_AUCTION_STARTED"
+    TASK_BID = "TASK_BID"
+    TASK_AUCTION_WON = "TASK_AUCTION_WON"
+    TASK_RELEASED = "TASK_RELEASED"
+    NETWORK_PARTITION_RISK = "NETWORK_PARTITION_RISK"
+    NETWORK_HEALED = "NETWORK_HEALED"
+    RELAY_TASK_CREATED = "RELAY_TASK_CREATED"
+    RELAY_REPOSITIONING = "RELAY_REPOSITIONING"
+    RELAY_ESTABLISHED = "RELAY_ESTABLISHED"
+    LINK_QUALITY_CHANGED = "LINK_QUALITY_CHANGED"
 
 
 class TrustLevel(StrEnum):
@@ -232,6 +251,9 @@ class DronePublicState(BaseModel):
     task_queue: list[str]
     task_progress: float
     peers: dict[str, PeerKnowledge]
+    current_plan: list[Vector3] = Field(default_factory=list)
+    role: str = "MISSION"
+    local_mission_revision: int = 0
 
 
 class LinkState(BaseModel):
@@ -241,6 +263,21 @@ class LinkState(BaseModel):
     quality: float
     latency_seconds: float
     partitioned: bool = False
+    distance_m: float = 0.0
+    obstructed: bool = False
+    packet_loss: float = 0.0
+
+
+class NetworkMetrics(BaseModel):
+    network_health: float = Field(default=1.0, ge=0.0, le=1.0)
+    connected_components: list[list[str]] = Field(default_factory=list)
+    largest_component_fraction: float = Field(default=1.0, ge=0.0, le=1.0)
+    mean_link_quality: float = Field(default=1.0, ge=0.0, le=1.0)
+    packet_loss_recent: float = Field(default=0.0, ge=0.0, le=1.0)
+    active_nodes: int = 0
+    degraded_nodes: int = 0
+    relay_nodes: list[str] = Field(default_factory=list)
+    gps_degraded_count: int = 0
 
 
 class InterferenceConfig(BaseModel):
@@ -281,6 +318,11 @@ class SimulationSnapshot(BaseModel):
     links: list[LinkState]
     interference: InterferenceConfig
     mission_capability: float
+    network: NetworkMetrics = Field(default_factory=NetworkMetrics)
+    control_available: bool = True
+    origin_lat: float = 38.8895
+    origin_lon: float = -77.0353
+    origin_alt: float = 20.0
     events: list[SimulationEvent] = Field(default_factory=list)
 
 

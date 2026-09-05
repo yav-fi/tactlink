@@ -30,6 +30,7 @@ from .models import (
     Vector3,
 )
 from .network import NetworkSimulator
+from .resilience import NetworkResilienceManager
 from .scenarios import PRESET_INTERFERENCE, ScenarioEngine, ScenarioPreset
 from .world import BoxObstacle, MovingEntity, Region, World, WorldDefinition
 
@@ -57,6 +58,8 @@ class SimulationEngine:
             random.Random(self.config.seed + 101),
             self.interference,
             self.events,
+            position_provider=lambda node_id: self.world.truth(node_id).position if node_id in self.world.node_ids else None,
+            world_definition=definition,
         )
         self.scenario_engine = ScenarioEngine(self.scenario, random.Random(self.config.seed + 202))
         self._measurement_rng = random.Random(self.config.seed + 303)
@@ -65,6 +68,9 @@ class SimulationEngine:
         self._failure_counter = 0
         self.allocator = TaskAllocator(self.config.allocator)
         self.missions = MissionManager(self.allocator, self.events, self.config.peer_timeout)
+        self.resilience = NetworkResilienceManager(
+            self.events, self.config.relay_health_threshold, self.config.relay_evaluation_seconds
+        )
         self.drones: dict[str, DroneNode] = {}
         self._initial_drone_count = drone_count
         self._create_default_drones(drone_count)
@@ -142,6 +148,9 @@ class SimulationEngine:
                 self.config.status_interval,
                 self.config.peer_timeout,
                 autonomy=self.autonomy,
+                allocator=self.allocator,
+                auction_window=self.config.auction_window_seconds,
+                auction_rebroadcast=self.config.auction_rebroadcast_seconds,
             )
             self.events.emit(
                 self.time,
@@ -153,6 +162,8 @@ class SimulationEngine:
             )
 
     def submit_mission(self, command: MissionCommand) -> MissionTask:
+        if not self.missions.control_available:
+            raise RuntimeError("mission control is offline; existing replicated missions continue")
         if command.target.point is None and command.target.region_id:
             region = next(
                 (region for region in self.world.definition.regions if region.id == command.target.region_id),
@@ -169,7 +180,23 @@ class SimulationEngine:
                         Vector3(x=region.center.x + radius, y=region.center.y + radius, z=region.center.z),
                         Vector3(x=region.center.x - radius, y=region.center.y + radius, z=region.center.z),
                     ]
-        return self.missions.submit_mission(command, self.time)
+        task = self.missions.submit_mission(command, self.time)
+        self.network.send(self.missions.announcement(task, self.time), self.time)
+        return task
+
+    def _submit_relay_mission(self, command: MissionCommand) -> MissionTask | None:
+        online = self._online_node_ids()
+        if not online:
+            return None
+        task = self.missions.submit_mission(command, self.time)
+        if self.missions.control_available:
+            self.network.send(self.missions.announcement(task, self.time), self.time)
+        else:
+            initiator = min(online)
+            for message in self.drones[initiator].introduce_mission(task, self.time):
+                self.network.send(message, self.time)
+        self.resilience.task_created(task, self.time)
+        return task
 
     def tick(self, dt: float | None = None) -> SimulationSnapshot:
         if not self.running:
@@ -188,6 +215,11 @@ class SimulationEngine:
             if not self.world.is_online(node_id):
                 continue
             for message in self.network.receive(node_id):
+                if message.sender_id != NetworkSimulator.CONTROL_ID:
+                    message = message.model_copy(deep=True)
+                    message.payload["link_quality"] = self.network.link_state(
+                        message.sender_id, node_id, self.time
+                    ).quality
                 for reply in node.handle_message(message, self.time):
                     self.network.send(reply, self.time)
             old_mode = node.estimated.localization_mode
@@ -224,12 +256,19 @@ class SimulationEngine:
         for message in self.network.receive(NetworkSimulator.CONTROL_ID):
             self.missions.handle_message(message, self.time)
 
-        # Replans already pending run first. New timeout-triggered replans wait one tick,
-        # preserving an observable degraded-capability state.
-        for assignment in self.missions.allocate(self.time):
-            self.network.send(assignment, self.time)
         self.missions.detect_timeouts(self.time)
+        online_nodes = [self.drones[node_id] for node_id in self._online_node_ids()]
+        self.missions.observe_node_states(online_nodes, self.time)
         self.missions.update_capability(self.time)
+        relay_command = self.resilience.evaluate(
+            self.time,
+            self.network,
+            self.world,
+            list(self.missions.tasks.values()),
+            [node_id for node_id, node in self.drones.items() if "relay" in node.identity.capabilities],
+        )
+        if relay_command is not None:
+            self._submit_relay_mission(relay_command)
         return self.snapshot()
 
     def run_steps(self, count: int, dt: float | None = None) -> SimulationSnapshot:
@@ -335,6 +374,28 @@ class SimulationEngine:
             [node_id],
         )
 
+    def fail_control(self) -> None:
+        if not self.missions.control_available:
+            return
+        self.missions.control_available = False
+        self.network.set_online(NetworkSimulator.CONTROL_ID, False)
+        self.events.emit(
+            self.time, EventCategory.FAILURE, EventType.CONTROL_LOST, "operator",
+            "Simulated mission control is offline; nodes continue from replicated mission state",
+            list(self.drones),
+        )
+
+    def recover_control(self) -> None:
+        if self.missions.control_available:
+            return
+        self.missions.control_available = True
+        self.network.set_online(NetworkSimulator.CONTROL_ID, True)
+        self.events.emit(
+            self.time, EventCategory.SIMULATION, EventType.CONTROL_RECOVERED, "operator",
+            "Simulated mission control rejoined as an observer and mission ingress",
+            list(self.drones),
+        )
+
     def fail_random_drone(self) -> str:
         online = self._online_node_ids()
         if not online:
@@ -434,8 +495,20 @@ class SimulationEngine:
                     task_queue=[task.id for task in node.task_queue],
                     task_progress=node.task_progress,
                     peers={key: value.model_copy(deep=True) for key, value in node.peers.items()},
+                    current_plan=[
+                        Vector3(x=point.x, y=point.y, z=point.z)
+                        for point in (node.plan.waypoints if node.plan else [])
+                    ],
+                    role="RELAY" if node.current_task and node.current_task.type == TaskType.RELAY else "MISSION",
+                    local_mission_revision=node._mission_revision,
                 )
             )
+        network_metrics = self.network.metrics(self.time)
+        network_metrics.degraded_nodes = sum(1 for drone in drones if drone.state == "DEGRADED")
+        network_metrics.relay_nodes = [drone.identity.node_id for drone in drones if drone.role == "RELAY"]
+        network_metrics.gps_degraded_count = sum(
+            1 for drone in drones if drone.estimated.localization_mode != LocalizationMode.GPS
+        )
         return SimulationSnapshot(
             simulation_time=self.time,
             running=self.running,
@@ -445,6 +518,8 @@ class SimulationEngine:
             links=self.network.links(self.time),
             interference=self.interference.config.model_copy(deep=True),
             mission_capability=self.missions.overall_capability,
+            network=network_metrics,
+            control_available=self.missions.control_available,
             events=self.events.recent(event_limit),
         )
 

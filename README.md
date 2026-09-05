@@ -218,26 +218,30 @@ the required point, region, waypoints, or entity.
 
 # Cesium 3D mapping
 
-The Cesium frontend is a separate, browser-local geospatial drone simulator.
-Run it beside the distributed mission runtime on an explicit, non-conflicting
-port:
+Cesium has two explicit modes. **Backend runtime** renders the authoritative
+Python `SimulationSnapshot` and never advances drone physics in the browser.
+**Local sandbox** preserves the original browser-only fleet and mission tools.
+Run the UI beside the runtime on a non-conflicting port:
 
 ```sh
 # Terminal 1: distributed runtime + lightweight console
 .venv/bin/uvicorn server.main:app --reload --host 127.0.0.1 --port 8000
 
-# Terminal 2: Cesium mapping simulator
+# Terminal 2: Cesium operator UI
 npm --prefix 3d-mapping install
 npm --prefix 3d-mapping run dev
 ```
 
 - Runtime console and API: <http://127.0.0.1:8000>
-- Cesium mapping simulator: <http://127.0.0.1:5173>
+- Cesium connected mode: <http://127.0.0.1:5173/?mode=runtime>
+- Cesium local sandbox: <http://127.0.0.1:5173/?mode=local>
 
-The Cesium mission JSON (`goto`, `hover`, `orbit`, `return_home`) executes only
-inside that browser app. It is intentionally distinct from the canonical
-distributed-runtime `simulation.models.MissionCommand`; the two UIs do not
-claim to show the same authoritative drone state.
+Connected mode consumes `ws://127.0.0.1:8000/ws`, converts backend local
+coordinates as x=east, y=north, z=up metres from the snapshot origin, and shows
+truth/estimated positions, uncertainty, plans, missions, links, relay roles,
+node details, and topology metrics. Its interference, preset, failure, control,
+pause, and reset controls call the FastAPI runtime. Local mode's mission JSON
+(`goto`, `hover`, `orbit`, `return_home`) remains browser-only.
 
 See [`3d-mapping/README.md`](3d-mapping/README.md) for Cesium token setup,
 controls, and its local mission format.
@@ -262,13 +266,19 @@ uvicorn server.main:app --reload
 
 Open <http://127.0.0.1:8000> for the lightweight control console. API documentation is at <http://127.0.0.1:8000/docs>.
 
-Run the accelerated end-to-end scenario with:
+Run the accelerated end-to-end "killer" scenario with:
 
 ```sh
 ./scripts/demo
 ```
 
-Add `--realtime` to play it at wall-clock speed. The scenario allocates WATCH and SEARCH tasks across four drones, fails Drone 2 at 10 seconds, waits for heartbeat timeout and reassignment, removes GPS from Drone 3, and raises network packet loss.
+Add `--realtime` to play it at wall-clock speed. With seed `49281`, nodes
+auction WATCH and SEARCH tasks, network interference degrades the physical
+mesh, simulated mission control goes offline, an executing drone fails, peers
+detect it through missing heartbeats and re-auction its work, a relay-capable
+drone physically moves toward a topology-repair point, and GPS is removed from
+one survivor. The final summary distinguishes the simulator host from the
+simulated control authority.
 
 If `python3 -m simulation.demo` reports that `pydantic` is missing, it is using the system Python instead of the project environment. Either activate the environment with `source .venv/bin/activate` first, or invoke it directly:
 
@@ -288,6 +298,16 @@ Important endpoints:
 - `POST /api/simulation/scenario/{NORMAL|DEGRADED|CONTESTED|CHAOS}`
 - `POST /api/interference`, `/api/events/inject`
 - `POST /api/drones/{id}/fail`, `/api/drones/{id}/recover`
+- `POST /api/drones/fail-random`
+- `POST /api/control/fail`, `/api/control/recover`
 - WebSocket `/ws` sends JSON state snapshots at the configured publish rate.
 
-The in-process `DroneNode` intentionally has no reference to `World` or `SimulationEngine`. Its inputs are measurements, delivered messages, and typed task assignments; its outputs are messages and `MotionIntent`. Those ports are defined as protocols in `simulation/interfaces.py` so a later process or laptop transport can implement the same boundary.
+The `NetworkSimulator` alone receives a read-only ground-truth position
+provider so distance and obstacle line of sight affect real packet delivery,
+latency, and loss. `DroneNode` still has no `World` or `SimulationEngine`
+reference. Nodes replicate mission announcements, exchange explainable bids,
+deterministically select winners (cost then node ID), gossip awards and
+completion, and re-auction after local heartbeat timeouts. `MissionManager`
+accepts commands and maintains an operator projection; it no longer assigns
+tasks. The Python host remains a centralized simulation clock/world and is not
+claimed to be a physically distributed simulator.

@@ -1,4 +1,17 @@
 :root { color: #edf6ff; background: #07111f; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+.runtime-only { display: none; }
+.runtime-mode .runtime-only { display: block; }
+.runtime-mode .local-only { display: none; }
+.mode-switch { display: flex; gap: 8px; margin-top: 12px; }
+.mode-switch a { flex: 1; padding: 7px 9px; border: 1px solid #31516d; border-radius: 8px; color: #bfefff; text-align: center; text-decoration: none; font-size: .75rem; }
+.runtime-mode .mode-switch a:first-child, body:not(.runtime-mode) .mode-switch a:last-child { border-color: #52d8ff; background: #173b50; }
+.connected { color: #69f0ae; } .disconnected { color: #ff8a80; }
+.metrics { margin-top: 12px; grid-template-columns: 110px 1fr; }
+.sliders { display: grid; gap: 9px; margin-top: 12px; }
+.sliders label { display: grid; grid-template-columns: 125px 1fr; align-items: center; gap: 8px; color: #b6cadf; font-size: .74rem; }
+.sliders input { width: 100%; }
+#runtime-preset { width: 100%; padding: 8px; color: #edf6ff; background: #203c56; border: 1px solid #31516d; border-radius: 8px; }
+button.danger { color: white; background: #9b2f3f; }
 button:disabled { opacity: .45; cursor: default; }
 .mission-panel { max-height: calc(100vh - 36px); overflow-y: auto; }
 #deployment { padding: 10px; margin-top: 10px; background: #132b40; border-radius: 8px; }

@@ -51,6 +51,7 @@ class TaskType(StrEnum):
     HOLD = "HOLD"
     RETURN = "RETURN"
     REGROUP = "REGROUP"
+    RELAY = "RELAY"
 
 
 class PlanMode(StrEnum):

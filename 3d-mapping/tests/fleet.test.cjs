@@ -109,3 +109,12 @@ test("independent movement, release prisms, preserved routes and full cleanup", 
   assert.deepEqual(entities.values, [unrelated]);
   assert.equal(fleet.deploy(home).id, "drone_1");
 });
+
+test("backend ENU conversion preserves metre-scale east north and up offsets", () => {
+  const { localToFixed } = loadSource("coordinates");
+  const origin = { latitude: 38.8895, longitude: -77.0353, altitude: 20 };
+  const anchor = localToFixed(origin, { x: 0, y: 0, z: 0 });
+  for (const point of [{ x: 100, y: 0, z: 0 }, { x: 0, y: 100, z: 0 }, { x: 0, y: 0, z: 100 }]) {
+    assert(Math.abs(Cesium.Cartesian3.distance(anchor, localToFixed(origin, point)) - 100) < 0.001);
+  }
+});

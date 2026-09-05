@@ -30,6 +30,8 @@ class MissionManager:
         self._replan_not_before = 0.0
         self._sequence = 0
         self.overall_capability = 0.0
+        self.control_available = True
+        self._ever_assigned: set[str] = set()
 
     def submit_mission(self, command: MissionCommand, now: float) -> MissionTask:
         task = MissionTask(**command.model_dump(), created_at=now)
@@ -45,6 +47,16 @@ class MissionManager:
             {"task": task.model_dump(mode="json")},
         )
         return task
+
+    def announcement(self, task: MissionTask, now: float, sender_id: str = "mission-control") -> NetworkMessage:
+        self._sequence += 1
+        return NetworkMessage(
+            sender_id=sender_id,
+            timestamp_sent=now,
+            type=MessageType.MISSION_ANNOUNCE,
+            payload={"task": task.model_dump(mode="json")},
+            sequence_number=self._sequence,
+        )
 
     def handle_message(self, message: NetworkMessage, now: float) -> None:
         if message.type in {MessageType.HEARTBEAT, MessageType.STATUS}:
@@ -83,8 +95,31 @@ class MissionManager:
                     f"{message.sender_id} completed {task.id}",
                     [task.id, message.sender_id],
                 )
+        elif message.type == MessageType.TASK_AWARD:
+            task = self.tasks.get(str(message.payload.get("task_id")))
+            if task:
+                previous = list(task.assigned_nodes)
+                task.assigned_nodes = sorted({str(node) for node in message.payload.get("winners", [])})
+                task.status = TaskStatus.ASSIGNED if task.assigned_nodes else TaskStatus.PENDING
+                if task.assigned_nodes != previous:
+                    winning_bids = [
+                        bid for bid in message.payload.get("bids", [])
+                        if bid.get("node_id") in task.assigned_nodes
+                    ]
+                    self.events.emit(
+                        now,
+                        EventCategory.ALLOCATION,
+                        EventType.TASK_AUCTION_WON,
+                        message.sender_id,
+                        f"Auction round {message.payload.get('round', 0)} assigned {task.id} to {task.assigned_nodes}",
+                        [task.id, *task.assigned_nodes],
+                        {"round": message.payload.get("round", 0), "bids": message.payload.get("bids", []), "winning_bids": winning_bids},
+                    )
+                    self._ever_assigned.add(task.id)
 
     def detect_timeouts(self, now: float) -> list[str]:
+        if not self.control_available:
+            return []
         newly_lost: list[str] = []
         for node_id, last_seen in sorted(self.last_contact.items()):
             if node_id not in self.unavailable and now - last_seen > self.peer_timeout:
@@ -106,6 +141,53 @@ class MissionManager:
                         self.pending_replan = True
                         self._replan_not_before = now + 1e-6
         return newly_lost
+
+    def observe_node_states(self, nodes: list[object], now: float) -> None:
+        """Update the operator projection from node-owned replicated state.
+
+        This method never writes a node or chooses an assignment. It makes the
+        simulator-hosted API useful after the simulated control endpoint fails.
+        """
+        observed_unavailable: set[str] = set()
+        for node in nodes:
+            observed_unavailable.update(
+                peer_id for peer_id, peer in getattr(node, "peers", {}).items() if not peer.available
+            )
+        self.unavailable.update(observed_unavailable)
+        for task_id, task in self.tasks.items():
+            previous_assignment = list(task.assigned_nodes)
+            claims: dict[tuple[str, ...], int] = {}
+            completed = False
+            progress = task.progress
+            for node in nodes:
+                if task_id in getattr(node, "completed_tasks", set()):
+                    completed = True
+                winners = tuple(getattr(node, "task_assignments", {}).get(task_id, []))
+                if winners:
+                    claims[winners] = claims.get(winners, 0) + 1
+                current = getattr(node, "current_task", None)
+                if current is not None and current.id == task_id:
+                    progress = max(progress, float(getattr(node, "task_progress", 0.0)))
+            if completed:
+                task.status = TaskStatus.COMPLETED
+                task.progress = 1.0
+                task.assigned_nodes = []
+            elif claims:
+                task.assigned_nodes = list(sorted(claims, key=lambda value: (-claims[value], value))[0])
+                task.status = TaskStatus.IN_PROGRESS
+                task.progress = progress
+                if task.assigned_nodes != previous_assignment:
+                    event_type = EventType.TASK_REASSIGNED if task_id in self._ever_assigned else EventType.TASK_ASSIGNED
+                    self.events.emit(
+                        now, EventCategory.ALLOCATION, event_type, "peer-auction",
+                        f"Peer auction assigned {task_id} to {task.assigned_nodes}",
+                        [task_id, *task.assigned_nodes],
+                        {"previous": previous_assignment, "winners": task.assigned_nodes},
+                    )
+                    self._ever_assigned.add(task_id)
+            elif task.status not in {TaskStatus.COMPLETED, TaskStatus.CANCELLED}:
+                task.assigned_nodes = []
+                task.status = TaskStatus.PENDING
 
     def allocate(self, now: float) -> list[NetworkMessage]:
         if not self.pending_replan or now < self._replan_not_before:
