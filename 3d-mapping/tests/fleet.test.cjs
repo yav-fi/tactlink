@@ -82,7 +82,7 @@ test("wall and ground checks block manual motion, batches, missions and replay",
     globe: { getHeight: () => 0, pick: () => undefined },
     pickFromRay(ray, excluded, width) {
       assert.equal(excluded, entities.values);
-      assert.equal(width, 20);
+      assert.equal(width, 10);
       return obstacle ? { position: Cesium.Ray.getPoint(ray, 1) } : undefined;
     },
   } };
