@@ -32,13 +32,13 @@ import os
 import time
 
 from control_types import FlightMode, GestureState
+from finger_swing import FingerSwingDetector, resolve_pointed_direction
 from sequences import SequenceMatcher, load_config
 
 HOLD_SEC = 0.40           # steady-hold time before a gesture fires
 RELEASE_SEC = 0.15        # time at rest before the same gesture may fire again
 SEGMENT_SEC = 0.18        # hold time before a gesture counts as a combo token
 COMBO_GRACE_SEC = 0.9     # keep holding pending singles this long after a combo pose
-_POINT_HORIZONTAL = 0.55  # |image dx| above which a point counts as left/right
 
 _DEFAULT_ACTION = {
     "Thumb_Up": "takeoff",     # arm + climb
@@ -104,6 +104,7 @@ class GestureInterpreter:
         self._pending: list[dict] = []  # single-gesture actions waiting out single_delay
         self._combo_touch = -1e9   # last time a combo-member gesture was held
         self._point_dir = (0.0, 0.0)  # latest finger-pointing vector, for fly_pointed
+        self._swing = FingerSwingDetector()  # two-finger V<->H wiper -> fly_pointed
 
     @property
     def mode(self) -> FlightMode:
@@ -115,6 +116,7 @@ class GestureInterpreter:
         events: list[str] = []
         if hand is not None and getattr(hand, "present", False):
             self._point_dir = tuple(hand.point_dir)
+        events.extend(self._swing.update(hand, now))   # two-finger wiper
 
         if gesture != self._held:
             self._held = gesture
@@ -163,6 +165,8 @@ class GestureInterpreter:
         # Hold a pending single while a combo is plausibly still being formed:
         # either a live partial match, or a combo-member gesture touched recently.
         active, hint = self._matcher.prefix_active(now)
+        if not hint and self._swing.progress:
+            hint = "swing " + self._swing.progress
         mid_combo = active or (now - self._combo_touch) < COMBO_GRACE_SEC
         for p in list(self._pending):
             if now - p["at"] >= self._single_delay and not mid_combo:
@@ -182,16 +186,7 @@ class GestureInterpreter:
         )
 
     def _resolve_fly_pointed(self) -> str:
-        """Turn the finger-pointing vector into a compass fly command.
-
-        Only left/right is reliable from a (near-)horizontal two-finger pose;
-        anything else - vertical, angled, toward the camera - falls back north.
-        The webcam feed is mirrored, so image +x is the user's right = east.
-        """
-        dx, dy = self._point_dir
-        if abs(dx) >= _POINT_HORIZONTAL and abs(dx) >= abs(dy):
-            return "fly_east" if dx > 0 else "fly_west"
-        return "fly_north"
+        return resolve_pointed_direction(self._point_dir)
 
     def _apply(self, action: str) -> str:
         if action == "cycle_mode":

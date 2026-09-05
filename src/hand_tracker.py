@@ -46,6 +46,9 @@ _FINGER_PIPS = (2, 6, 10, 14, 18)
 # Ignore a canned gesture the model is not reasonably sure about - cuts the
 # flickery misreads that make single gestures feel unreliable.
 _GESTURE_MIN_SCORE = 0.55
+# A canned gesture at or above this score is trusted outright: the custom model
+# is not even consulted, so it can never shadow a confident built-in gesture.
+_CANNED_TRUST = 0.62
 
 
 def _ensure_model() -> str:
@@ -118,8 +121,10 @@ class HandTracker:
             if top.category_name != "None" and float(top.score) >= _GESTURE_MIN_SCORE:
                 gesture, score, source = top.category_name, float(top.score), "canned"
 
-        # Custom model wins when it is confident; canned gesture is the fallback.
-        if self._custom and self._custom.loaded:
+        # Custom model may override, but never a gesture the built-in recognizer
+        # is already sure about - a grabby custom model must not shadow the
+        # reliable canned gestures.
+        if self._custom and self._custom.loaded and score < _CANNED_TRUST:
             label, conf = self._custom.predict(self.raw_landmarks, self.handedness)
             if label is not None:
                 gesture, score, source = label, conf, "custom"
@@ -142,13 +147,16 @@ class HandTracker:
         pnorm = float(np.linalg.norm(point))
         point_dir = (float(point[0] / pnorm), float(point[1] / pnorm)) if pnorm > 1e-6 else (0.0, 0.0)
 
+        fingers = self._finger_states(pts)
+
         return HandState(
             present=True,
             palm_x=float(np.clip(palm[0], 0.0, 1.0)),
             palm_y=float(np.clip(palm[1], 0.0, 1.0)),
             roll_angle=roll_angle,
             pinch=pinch,
-            fingers_up=self._count_fingers(pts),
+            fingers_up=sum(fingers),
+            fingers=fingers,
             point_dir=point_dir,
             gesture=gesture,
             gesture_score=score,
@@ -171,15 +179,13 @@ class HandTracker:
         self._recognizer.close()
 
     @staticmethod
-    def _count_fingers(pts: np.ndarray) -> int:
-        """Count extended fingers from landmark geometry (orientation agnostic)."""
+    def _finger_states(pts: np.ndarray) -> tuple:
+        """(thumb, index, middle, ring, pinky) extended? - orientation agnostic."""
         wrist = pts[0]
         d = lambda i: float(np.linalg.norm(pts[i] - wrist))
-        count = 0
-        if d(4) > d(2) * 1.05 and np.linalg.norm(pts[4] - pts[5]) > \
-                np.linalg.norm(pts[3] - pts[5]) * 1.1:
-            count += 1
-        for tip, pip, mcp in zip(_FINGER_TIPS[1:], _FINGER_PIPS[1:], (5, 9, 13, 17)):
-            if d(tip) > d(pip) * 1.08 and d(tip) > d(mcp) * 1.15:
-                count += 1
-        return count
+        thumb = (d(4) > d(2) * 1.05 and np.linalg.norm(pts[4] - pts[5]) >
+                 np.linalg.norm(pts[3] - pts[5]) * 1.1)
+        rest = tuple(d(tip) > d(pip) * 1.08 and d(tip) > d(mcp) * 1.15
+                     for tip, pip, mcp in zip(_FINGER_TIPS[1:], _FINGER_PIPS[1:],
+                                              (5, 9, 13, 17)))
+        return (thumb,) + rest

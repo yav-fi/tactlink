@@ -1,6 +1,6 @@
 {
-  "__doc__": "Ordered gesture combos. A combo fires when its 'pattern' gestures happen in order within 'window' seconds. 'action' is takeoff, land, cycle_mode, speed_up, speed_down, spin360, return_home, estop, orbit, fly_north/south/east/west, or fly_pointed (dash toward where the fingers point at completion; left/right -> east/west, anything else -> north). While combos are configured, single-gesture commands that appear in a pattern are held back 'single_delay' seconds and cancelled if the combo lands. Combos are OFF right now.",
-  "__example__": "{ \"pattern\": [\"Victory\", \"v_flat\", \"Victory\", \"v_flat\"], \"window\": 5.0, \"action\": \"fly_pointed\" }  (needs a trained 'v_flat' label)",
+  "__doc__": "Ordered gesture combos. A combo fires when its 'pattern' gestures happen in order within 'window' seconds. 'action' is takeoff, land, cycle_mode, speed_up, speed_down, spin360, return_home, estop, orbit, or fly_north/south/east/west. While combos are configured, single-gesture commands that appear in a pattern are held back 'single_delay' seconds and cancelled if the combo lands. Combos are OFF right now. (The two-finger vertical<->horizontal wiper is a separate built-in detector - src/finger_swing.py - not a combo.)",
+  "__example__": "{ \"pattern\": [\"Thumb_Up\", \"Thumb_Down\", \"Thumb_Up\"], \"window\": 2.5, \"action\": \"estop\" }",
 
   "single_delay": 0.6,
   "sequences": []

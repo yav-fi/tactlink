@@ -31,6 +31,7 @@ class _Hand:
     def __init__(self, point_dir=(0.0, 0.0)):
         self.present = True
         self.point_dir = point_dir
+        self.fingers = (False, False, False, False, False)
 
 
 class Clock:

@@ -51,35 +51,38 @@ def _load_mission_integration():
 _DEMO_GESTURES = [
     (1.5, 2.7, "Thumb_Up"),       # arm + takeoff
     (6.0, 7.3, "Pointing_Up"),    # orbit the origin (until the next command)
-    (13.0, 14.0, "ILoveYou"),     # return home + hover
-    (18.0, 19.5, "Thumb_Down"),   # disarm + land
+    (17.5, 18.5, "ILoveYou"),     # return home + hover
+    (22.0, 23.5, "Thumb_Down"),   # disarm + land
 ]
+_DEMO_SWING = (10.5, 14.0)        # two-finger wiper V-H-V-H -> fly east
 
 
 def _demo_hand(t: float) -> HandState:
     """A scripted hand path + gesture stream so the pipeline runs without a camera."""
     if t < 0.8:
         return HandState(present=False)
+
+    if _DEMO_SWING[0] <= t < _DEMO_SWING[1]:
+        vertical = int((t - _DEMO_SWING[0]) / 0.6) % 2 == 0
+        pd = (0.03, -0.99) if vertical else (0.98, 0.05)   # up / horizontal-right
+        return HandState(present=True, fingers=(False, True, True, False, False),
+                         fingers_up=2, point_dir=pd, gesture="None")
+
     gesture = "None"
     for a, b, g in _DEMO_GESTURES:
         if a <= t < b:
             gesture = g
-    # v_flat points horizontally (-> fly_east); Victory points up.
-    point_dir = (0.9, 0.1) if gesture == "v_flat" else (0.1, -0.9)
-    source = "custom" if gesture == "v_flat" else (
-        "canned" if gesture != "None" else "none")
     return HandState(
         present=True,
         palm_x=0.5 + 0.26 * math.sin(t * 0.7),
         palm_y=0.5 - 0.28 * math.sin(t * 0.5),
         roll_angle=0.5 * math.sin(t * 0.9),
         pinch=max(0.0, 0.6 * math.sin(t * 0.4)),
-        fingers_up=2 if gesture in ("Victory", "v_flat") else
-        (5 if gesture in ("None", "Open_Palm") else 1),
-        point_dir=point_dir,
+        fingers_up=1 if gesture != "None" else 5,
+        point_dir=(0.1, -0.9),
         gesture=gesture,
         gesture_score=0.9,
-        gesture_source=source,
+        gesture_source="canned" if gesture != "None" else "none",
     )
 
 

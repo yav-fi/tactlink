@@ -127,8 +127,16 @@ runs until you point again, or any other command interrupts it.
 
 A gesture the model isn't ~55% sure of is ignored, which cuts flickery misreads.
 `Open_Palm` / `Closed_Fist` / `Victory` are set to `null` in
-`config/gesture_actions.json` so a misread of those does nothing on its own; they
-still work as combo steps.
+`config/gesture_actions.json` so a misread of those does nothing.
+
+## Fly where you point (two-finger wiper)
+
+Hold your **index + middle fingers** out and swing them **vertical → horizontal
+→ vertical → horizontal** within ~4 s. The drone then dashes in the direction the
+fingers point on the last horizontal — pointing right → fly east, left → fly
+west. This is a built-in geometric detector (`src/finger_swing.py`), no training
+and it can't shadow the other gestures; toggle `ENABLED` in that file to turn it
+off. The HUD shows the swing so far as `swing V>H>…`.
 
 ## Custom gestures (train your own)
 
@@ -207,6 +215,7 @@ any pattern are unaffected. Delete the file or set `"sequences": []` to disable
 | `src/gesture_model.py` | Dependency-free k-NN custom gesture classifier (`custom_gestures.npz`) |
 | `src/gestures.py` | Debounces the gesture stream → mode, speed, discrete events |
 | `src/sequences.py` | Matches ordered gesture combos against the token stream |
+| `src/finger_swing.py` | Geometric two-finger vertical↔horizontal wiper → `fly_*` |
 | `src/controls.py` | Hand pose + gesture state → `ControlInput`; runs autopilot routines |
 | `src/simulator.py` | Arcade quadcopter physics (world frame: x right, y forward, z up) |
 | `src/visualizer.py` | Look-at pinhole camera, 3D drone render, control HUD |
