@@ -9,7 +9,7 @@ git clone https://github.com/yav-fi/dnhacks26.git
 Yavin added `AGENTS.md` and `CLAUDE.md` to keep coding-agent instructions
 consistent across tools.
 
-This repo hosts four hackathon workstreams:
+This repo hosts five hackathon workstreams:
 
 - **[Local LLM chat + benchmark](#local-llm-chat--benchmark)** — fast on-device
   chat inference (`chat_client.py`, `scripts/`).
@@ -19,6 +19,8 @@ This repo hosts four hackathon workstreams:
   autonomy under degraded communications (`simulation/`, `server/`).
 - **[Autonomous planning engine](planning/README.md)** — local mission and
   motion planning with obstacle routing, deconfliction, and energy checks (`planning/`).
+- **[Cesium 3D mapping](#cesium-3d-mapping)** — browser-based fleet deployment,
+  piloting, and deterministic local missions (`3d-mapping/`).
 
 ---
 
@@ -196,13 +198,49 @@ Start the local chat server and mission runtime in separate terminals, then tran
 
 The LLM output is treated as untrusted: it must be one JSON object, pass the canonical `simulation.models.MissionCommand` schema, and satisfy target semantics before submission. Invalid output is printed as a rejection and is never sent.
 
-The existing gesture demo can submit deliberate discrete gesture events to the same endpoint while retaining its local analog controls:
+The gesture app can submit deliberate discrete gesture events to the same
+endpoint while keeping the webcam and recognizer visible. In runtime-connected
+mode it replaces the local quad view with connection/submission status and does
+not advance the standalone simulator:
 
 ```sh
 .venv/bin/python src/main.py --mission-url http://127.0.0.1:8000
 ```
 
-`Closed_Fist`/`land` submits HOLD and `ILoveYou`/`return_home` submits RETURN. Other analog hand axes remain local. Custom entries in `config/gesture_actions.json` may map to values such as `mission:HOLD`, `mission:RETURN`, or another mission type; target-requiring types are submitted only when their adapter context supplies the required point, region, waypoints, or entity.
+`Closed_Fist`/`land` submits HOLD and `ILoveYou`/`return_home` submits RETURN.
+Analog hand axes are not submitted to the runtime; they control motion only in
+standalone mode. Custom entries in `config/gesture_actions.json` may map to
+values such as `mission:HOLD`, `mission:RETURN`, or another mission type;
+target-requiring types are submitted only when their adapter context supplies
+the required point, region, waypoints, or entity.
+
+---
+
+# Cesium 3D mapping
+
+The Cesium frontend is a separate, browser-local geospatial drone simulator.
+Run it beside the distributed mission runtime on an explicit, non-conflicting
+port:
+
+```sh
+# Terminal 1: distributed runtime + lightweight console
+.venv/bin/uvicorn server.main:app --reload --host 127.0.0.1 --port 8000
+
+# Terminal 2: Cesium mapping simulator
+npm --prefix 3d-mapping install
+npm --prefix 3d-mapping run dev
+```
+
+- Runtime console and API: <http://127.0.0.1:8000>
+- Cesium mapping simulator: <http://127.0.0.1:5173>
+
+The Cesium mission JSON (`goto`, `hover`, `orbit`, `return_home`) executes only
+inside that browser app. It is intentionally distinct from the canonical
+distributed-runtime `simulation.models.MissionCommand`; the two UIs do not
+claim to show the same authoritative drone state.
+
+See [`3d-mapping/README.md`](3d-mapping/README.md) for Cesium token setup,
+controls, and its local mission format.
 
 ---
 

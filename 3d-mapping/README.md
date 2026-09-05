@@ -11,6 +11,10 @@ npm install
 npm run dev
 ```
 
+Open <http://127.0.0.1:5173>. The Vite development server is pinned to port
+5173 so it can run alongside the distributed runtime and its control console on
+port 8000.
+
 To load Google Photorealistic 3D Tiles, create a Cesium ion token with that dataset enabled and assign it to `VITE_CESIUM_ION_ACCESS_TOKEN` in `.env`. Without a token, the app still runs on Cesium's fallback globe.
 
 ## Mission contract
@@ -32,4 +36,7 @@ Run `npm test` to verify fleet isolation, colors, cleanup and physical speed at 
 }
 ```
 
-Supported actions are `goto`, `hover`, `orbit`, and `return_home`. This is the renderer-facing contract for the future backend/LLM; movement remains deterministic in the browser.
+Supported actions are `goto`, `hover`, `orbit`, and `return_home`. This is a
+local browser-simulator contract, not the canonical distributed-runtime
+`simulation.models.MissionCommand` contract; movement remains deterministic in
+the browser.
