@@ -91,7 +91,7 @@ export class DroneController {
     for (const entity of data.releases) this.releases.push(this.viewer.entities.add(entity));
     for (const entity of data.coverage) this.coverage.push(this.viewer.entities.add(entity));
     this.coverageNumber = data.coverageNumber;
-    this.originEntity.position = new Cesium.ConstantPositionProperty(this.trailPoints[0]);
+    this.originEntity.position = new Cesium.ConstantPositionProperty(this.trailPoints[0] ?? Cesium.Cartesian3.fromDegrees(this.home.longitude, this.home.latitude, this.home.altitude));
     this.originEntity.show = this.trailEntity.show = this.trailPoints.length > 0;
     this.lastRenderedPosition = this.visualPosition(); this.lastCoveragePosition = this.visualPosition();
     this.state = "HOVERING"; this.preserveTrailEndpoint = true;
@@ -126,6 +126,7 @@ export class DroneController {
   constructor(private readonly viewer: Cesium.Viewer, home: Coordinates, private color = Cesium.Color.fromCssColorString("#35e8ff"), readonly id = "drone_1", readonly droneType: DroneType = "normal") {
     this.home = { ...home };
     this.position = { ...home };
+    this.crashPosition = Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, home.altitude);
     this.entity = viewer.entities.add({
       id: this.id,
       name: this.id.replace("_", " "),
@@ -137,6 +138,7 @@ export class DroneController {
     this.quadParts = addQuadcopterParts(viewer, id, () => this.visualPosition(), () => this.visualOrientation(), () => this.color);
     this.originEntity = viewer.entities.add({
       id: `${this.id}_origin`,
+      position: Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, home.altitude),
       name: "Drone starting position",
       show: false,
       box: {
@@ -151,7 +153,7 @@ export class DroneController {
       id: `${this.id}_trail`,
       show: false,
       polyline: {
-        positions: new Cesium.CallbackProperty(() => this.trailPoints, false),
+        positions: new Cesium.CallbackProperty(() => this.trailPoints.length >= 2 ? this.trailPoints : [this.visualPosition(), this.visualPosition()], false),
         width: 3,
         material: this.color,
         arcType: Cesium.ArcType.NONE,

@@ -20,6 +20,35 @@ function loadSource(name) {
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
 
+test("first manual-flight undo keeps hidden render geometry at valid geographic positions", () => {
+  for (const type of ["normal", "survey"]) {
+    const entities = new Cesium.EntityCollection();
+    const fleet = new Fleet({ entities });
+    let drone = fleet.deploy(home, type);
+    for (let cycle = 0; cycle < 3; cycle++) {
+      fleet.checkpoint("manual flight");
+      drone.setManualControl(true);
+      for (let i = 0; i < 90; i++) drone.moveManually(1, 0, 0, 1 / 60);
+      drone.setManualControl(false);
+      fleet.undo(); drone = fleet.drones.get(drone.id);
+      assert.deepEqual(drone.capture().points, []);
+      for (const suffix of ["", "_origin", "_crash"]) {
+        const position = entities.getById(`${drone.id}${suffix}`).position.getValue();
+        assert(position, `${suffix} has a defined position`);
+        assert(Cesium.Cartographic.fromCartesian(position), `${suffix} must not be centered at Earth's origin`);
+      }
+      const trail = entities.getById(`${drone.id}_trail`);
+      assert.equal(trail.show, false);
+      assert(trail.polyline.positions.getValue().every(point => Cesium.Cartographic.fromCartesian(point)));
+      assert.equal(drone.snapshot().longitude, home.longitude);
+    }
+    drone.setManualControl(true);
+    drone.moveManually(1, 0, 0, 0.1);
+    assert(drone.snapshot().longitude > home.longitude);
+    fleet.clear(); assert.equal(entities.values.length, 0);
+  }
+});
+
 test("propeller blades rotate over time while hubs stay fixed", () => {
   const { addQuadcopterParts } = loadSource("quadcopter");
   let time = 0;
