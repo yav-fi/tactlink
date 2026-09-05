@@ -23,6 +23,13 @@
             <button id="free-camera" type="button" class="secondary">Free camera</button>
             <button id="control-drone" type="button" aria-pressed="false">Control drone</button>
           </div>
+          <label for="pilot-camera">Drone camera</label>
+          <select id="pilot-camera">
+            <option value="third">Third-person · fixed</option>
+            <option value="first">First-person · fixed</option>
+            <option value="free">Free orbit · while piloting</option>
+          </select>
+          <p class="hint">Fixed views stay attached to the drone. Free orbit: drag to move the view, scroll to zoom. Q/E turns the drone in every view. The trail persists until Reset.</p>
           <p id="command-status" class="hint">Commands execute locally and deterministically.</p>
         </section>
         <section>

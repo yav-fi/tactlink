@@ -93,7 +93,7 @@ export class DroneController {
   }
 
   setManualControl(enabled: boolean): void {
-    if (enabled) {
+    if (enabled && this.trailPoints.length === 0) {
       const origin = Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude);
       this.originEntity.position = new Cesium.ConstantPositionProperty(origin);
       this.originEntity.orientation = new Cesium.ConstantProperty(this.orientationAt(this.position));

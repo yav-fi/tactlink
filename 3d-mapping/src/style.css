@@ -1,4 +1,6 @@
 :root { color: #edf6ff; background: #07111f; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+label[for="pilot-camera"] { display: block; margin: 14px 0 6px; font-size: .82rem; }
+#pilot-camera { width: 100%; padding: 9px; color: #edf6ff; background: #203c56; border: 1px solid #31516d; border-radius: 8px; }
 * { box-sizing: border-box; }
 body { margin: 0; overflow: hidden; }
 #app, #cesiumContainer { width: 100vw; height: 100vh; }

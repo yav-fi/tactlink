@@ -33,6 +33,14 @@ const activeCameraKeys = new Set<string>();
 const controlDroneButton = document.querySelector<HTMLButtonElement>("#control-drone")!;
 let controllingDrone = false;
 const pilotView = { heading: 0, pitch: Cesium.Math.toRadians(-18), range: 65 };
+const pilotCameraSelect = document.querySelector<HTMLSelectElement>("#pilot-camera")!;
+let pilotCameraMode = "third";
+let freeOrbitHeading = 0;
+pilotCameraSelect.addEventListener("change", () => {
+  pilotCameraMode = pilotCameraSelect.value;
+  clearInput();
+  if (controllingDrone) viewer.canvas.focus();
+});
 let steering = false;
 
 function clearInput(): void {
@@ -86,8 +94,12 @@ cameraHandler.setInputAction(() => { isOrbitDragging = false; steering = false; 
 window.addEventListener("pointerup", () => { steering = false; isOrbitDragging = false; });
 cameraHandler.setInputAction((movement: { startPosition: Cesium.Cartesian2; endPosition: Cesium.Cartesian2 }) => {
   if (controllingDrone && steering) {
-    pilotView.heading += (movement.endPosition.x - movement.startPosition.x) * 0.005;
-    pilotView.pitch = Cesium.Math.clamp(pilotView.pitch + (movement.endPosition.y - movement.startPosition.y) * 0.004, -1.2, -0.05);
+    if (pilotCameraMode === "free") {
+      freeOrbitHeading += (movement.endPosition.x - movement.startPosition.x) * 0.005;
+      pilotView.pitch = Cesium.Math.clamp(pilotView.pitch + (movement.endPosition.y - movement.startPosition.y) * 0.004, -1.2, -0.05);
+    } else {
+      pilotView.heading += (movement.endPosition.x - movement.startPosition.x) * 0.005;
+    }
     return;
   }
   if (!isOrbitDragging || cameraMode !== "orbit") return;
@@ -97,7 +109,7 @@ cameraHandler.setInputAction((movement: { startPosition: Cesium.Cartesian2; endP
 }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 cameraHandler.setInputAction((delta: number) => {
   if (controllingDrone) {
-    pilotView.range = Cesium.Math.clamp(pilotView.range - delta * 0.05, 30, 180);
+    if (pilotCameraMode === "free") pilotView.range = Cesium.Math.clamp(pilotView.range - delta * 0.05, 30, 180);
     return;
   }
   if (cameraMode !== "orbit") return;
@@ -152,7 +164,7 @@ controlDroneButton.addEventListener("click", () => {
   viewer.scene.screenSpaceCameraController.enableInputs = false;
   controlDroneButton.textContent = "Release drone";
   controlDroneButton.setAttribute("aria-pressed", "true");
-  commandStatus.textContent = "PILOT MODE · WASD moves relative to view · Drag to steer · Q/E turns · Space/Shift up/down (R/F also works) · Esc releases. Mission canceled.";
+  commandStatus.textContent = "PILOT MODE · WASD relative to drone heading · Q/E turns · Space/Shift up/down (R/F also works) · Esc releases. Mission canceled; trail preserved.";
   viewer.canvas.focus();
 });
 
@@ -183,7 +195,16 @@ function updateFreeCamera(deltaSeconds: number): void {
     const up = Number(activeCameraKeys.has("Space") || activeCameraKeys.has("KeyR")) - Number(activeCameraKeys.has("ShiftLeft") || activeCameraKeys.has("ShiftRight") || activeCameraKeys.has("KeyF"));
     drone.moveManually(forward * Math.sin(pilotView.heading) + right * Math.cos(pilotView.heading), forward * Math.cos(pilotView.heading) - right * Math.sin(pilotView.heading), up, deltaSeconds, pilotView.heading);
     const position = drone.snapshot();
-    viewer.camera.lookAt(Cesium.Cartesian3.fromDegrees(position.longitude, position.latitude, position.altitude), new Cesium.HeadingPitchRange(pilotView.heading, pilotView.pitch, pilotView.range));
+    const center = Cesium.Cartesian3.fromDegrees(position.longitude, position.latitude, position.altitude);
+    if (pilotCameraMode === "first") {
+      // Fixed mount just above the prism, looking forward along its heading.
+      const mount = Cesium.Matrix4.multiplyByPoint(Cesium.Transforms.eastNorthUpToFixedFrame(center), new Cesium.Cartesian3(0, 0, 3), new Cesium.Cartesian3());
+      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+      viewer.camera.setView({ destination: mount, orientation: { heading: pilotView.heading, pitch: 0, roll: 0 } });
+    } else {
+      const free = pilotCameraMode === "free";
+      viewer.camera.lookAt(center, new Cesium.HeadingPitchRange(pilotView.heading + (free ? freeOrbitHeading : 0), free ? pilotView.pitch : Cesium.Math.toRadians(-18), free ? pilotView.range : 65));
+    }
     return;
   }
   if (cameraMode !== "free" || activeCameraKeys.size === 0) return;
