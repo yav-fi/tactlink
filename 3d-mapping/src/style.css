@@ -1,4 +1,12 @@
 :root { color: #edf6ff; background: #07111f; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+button:disabled { opacity: .45; cursor: default; }
+.mission-panel { max-height: calc(100vh - 36px); overflow-y: auto; }
+#deployment { padding: 10px; margin-top: 10px; background: #132b40; border-radius: 8px; }
+label[for="selected-drone"], label[for="deployment-height"] { display: block; margin: 10px 0 6px; font-size: .82rem; }
+#selected-drone, #deployment-height { width: 100%; padding: 8px; color: #edf6ff; background: #203c56; border: 1px solid #31516d; border-radius: 8px; }
+label[for="drone-speed"] { display: block; margin: 10px 0 6px; font-size: .82rem; }
+#drone-speed { width: 100%; padding: 8px; color: #edf6ff; background: #203c56; border: 1px solid #31516d; border-radius: 8px; }
+#drone-speed[aria-invalid="true"] { border-color: #ff6666; }
 label[for="pilot-camera"] { display: block; margin: 14px 0 6px; font-size: .82rem; }
 #pilot-camera { width: 100%; padding: 9px; color: #edf6ff; background: #203c56; border: 1px solid #31516d; border-radius: 8px; }
 * { box-sizing: border-box; }

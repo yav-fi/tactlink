@@ -2,6 +2,7 @@ import "cesium/Build/Cesium/Widgets/widgets.css";
 import "./style.css";
 import * as Cesium from "cesium";
 import { DroneController } from "./drone-controller";
+import { Fleet, DRONE_COLORS } from "./fleet";
 import { parseMission, sampleMission } from "./mission";
 
 const home = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
@@ -16,6 +17,7 @@ if (token) Cesium.Ion.defaultAccessToken = token;
 
 const viewer = new Cesium.Viewer("cesiumContainer", {
   animation: false,
+  shouldAnimate: true,
   baseLayerPicker: false,
   geocoder: false,
   homeButton: false,
@@ -24,11 +26,34 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
   sceneModePicker: false,
   selectionIndicator: false,
   timeline: false,
-  terrainProvider: token ? await Cesium.createWorldTerrainAsync() : undefined,
+  baseLayer: false,
 });
 
 viewer.scene.globe.enableLighting = true;
-const drone = new DroneController(viewer, home);
+const fleet = new Fleet(viewer);
+let drone: DroneController | undefined;
+const droneSelect = document.querySelector<HTMLSelectElement>("#selected-drone")!;
+const speedInput = document.querySelector<HTMLInputElement>("#drone-speed")!;
+const speedStatus = document.querySelector<HTMLParagraphElement>("#speed-status")!;
+speedInput.addEventListener("input", () => {
+  if (!drone) return;
+  const value = speedInput.valueAsNumber;
+  if (!Number.isFinite(value) || value <= 0) {
+    speedInput.setAttribute("aria-invalid", "true");
+    speedStatus.textContent = "Enter a speed greater than zero in mph. Previous speed remains active.";
+    return;
+  }
+  speedInput.removeAttribute("aria-invalid");
+  drone.speedMph = value;
+  speedStatus.textContent = `${value} mph · ${(value * 0.44704).toFixed(2)} m/s`;
+});
+const deploymentPanel = document.querySelector<HTMLDivElement>("#deployment")!;
+const deploymentStatus = document.querySelector<HTMLParagraphElement>("#deployment-status")!;
+const heightInput = document.querySelector<HTMLInputElement>("#deployment-height")!;
+const confirmDeployment = document.querySelector<HTMLButtonElement>("#confirm-deployment")!;
+let deploying = false;
+let pickedSurface: Cesium.Cartographic | undefined;
+let preview: Cesium.Entity | undefined;
 const activeCameraKeys = new Set<string>();
 const controlDroneButton = document.querySelector<HTMLButtonElement>("#control-drone")!;
 let controllingDrone = false;
@@ -46,12 +71,12 @@ let steering = false;
 function clearInput(): void {
   activeCameraKeys.clear();
   steering = false;
-  drone.stopManualMotion();
+  drone?.stopManualMotion();
 }
 
 function releaseDrone(): void {
   clearInput();
-  if (controllingDrone) drone.setManualControl(false);
+  if (controllingDrone) drone?.setManualControl(false);
   controllingDrone = false;
   activeCameraKeys.clear();
   controlDroneButton.textContent = "Control drone";
@@ -68,6 +93,7 @@ function applyOrbitCamera(): void {
 }
 
 function activateOrbitCamera(): void {
+  cancelDeployment();
   releaseDrone();
   activeCameraKeys.clear();
   viewer.camera.cancelFlight();
@@ -116,7 +142,110 @@ cameraHandler.setInputAction((delta: number) => {
   orbitCamera.range = Cesium.Math.clamp(orbitCamera.range + delta * 0.22, 80, 4_000);
   applyOrbitCamera();
 }, Cesium.ScreenSpaceEventType.WHEEL);
-activateOrbitCamera();
+viewer.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude - 0.008, 900), orientation: { heading: 0, pitch: Cesium.Math.toRadians(-35), roll: 0 } });
+flyToFreeCameraOverview();
+commandStatus.textContent = "No drones deployed. Choose Deploy a new drone to begin.";
+
+function refreshFleet(): void {
+  droneSelect.replaceChildren();
+  if (!fleet.drones.size) droneSelect.add(new Option("No drones deployed", ""));
+  let index = 0;
+  for (const item of fleet.drones.values()) {
+    const color = DRONE_COLORS[index++ % DRONE_COLORS.length];
+    droneSelect.add(new Option(`${item.id.replace("_", " ")} · ${color.name}`, item.id));
+  }
+  droneSelect.value = drone?.id ?? "";
+  droneSelect.disabled = deploying || !drone;
+  speedInput.disabled = deploying || !drone;
+  speedInput.value = String(drone?.speedMph ?? 60);
+  speedInput.removeAttribute("aria-invalid");
+  speedStatus.textContent = `${drone?.speedMph ?? 60} mph · ${((drone?.speedMph ?? 60) * 0.44704).toFixed(2)} m/s`;
+  for (const id of ["run-mission", "reset-mission", "control-drone"]) {
+    document.querySelector<HTMLButtonElement>(`#${id}`)!.disabled = deploying || !drone;
+  }
+}
+
+function cancelDeployment(): void {
+  deploying = false;
+  pickedSurface = undefined;
+  if (preview) viewer.entities.remove(preview);
+  preview = undefined;
+  deploymentPanel.hidden = true;
+  confirmDeployment.disabled = true;
+  refreshFleet();
+}
+
+function updatePreview(): void {
+  const height = heightInput.valueAsNumber;
+  confirmDeployment.disabled = !pickedSurface || !heightInput.checkValidity() || !Number.isFinite(height);
+  if (confirmDeployment.disabled || !pickedSurface) return;
+  const position = Cesium.Cartesian3.fromRadians(pickedSurface.longitude, pickedSurface.latitude, pickedSurface.height + height);
+  if (!preview) {
+    preview = viewer.entities.add({ id: "deployment-preview", position, point: { pixelSize: 12, color: Cesium.Color.fromCssColorString(fleet.nextColor.hex) }, label: { text: "START HERE", pixelOffset: new Cesium.Cartesian2(0, -22), font: "14px system-ui", showBackground: true } });
+  } else preview.position = new Cesium.ConstantPositionProperty(position);
+  deploymentStatus.textContent = `Starting point: ${Cesium.Math.toDegrees(pickedSurface.latitude).toFixed(5)}, ${Cesium.Math.toDegrees(pickedSurface.longitude).toFixed(5)}. Click elsewhere to adjust, then Deploy here.`;
+}
+
+document.querySelector<HTMLButtonElement>("#deploy-drone")!.addEventListener("click", () => {
+  cancelDeployment();
+  flyToFreeCameraOverview();
+  deploying = true;
+  deploymentPanel.hidden = false;
+  deploymentStatus.textContent = `Next drone: ${fleet.nextColor.name}. Fly the camera, then click a starting point on the map. No route is recorded during placement.`;
+  commandStatus.textContent = "Choose a starting point, then confirm deployment.";
+  refreshFleet();
+});
+heightInput.addEventListener("input", updatePreview);
+document.querySelector<HTMLButtonElement>("#cancel-deployment")!.addEventListener("click", cancelDeployment);
+cameraHandler.setInputAction((event: { position: Cesium.Cartesian2 }) => {
+  if (!deploying) return;
+  let picked: Cesium.Cartesian3 | undefined;
+  if (viewer.scene.pickPositionSupported) picked = viewer.scene.pickPosition(event.position);
+  if (!picked) {
+    const ray = viewer.camera.getPickRay(event.position);
+    if (ray) picked = viewer.scene.globe.pick(ray, viewer.scene);
+  }
+  if (!picked) {
+    deploymentStatus.textContent = "Click a visible map surface; sky cannot be used as a starting point.";
+    return;
+  }
+  pickedSurface = Cesium.Cartographic.fromCartesian(picked);
+  updatePreview();
+}, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+confirmDeployment.addEventListener("click", () => {
+  if (!deploying || !pickedSurface || !heightInput.checkValidity()) return;
+  const selected = fleet.deploy({ latitude: Cesium.Math.toDegrees(pickedSurface.latitude), longitude: Cesium.Math.toDegrees(pickedSurface.longitude), altitude: pickedSurface.height + heightInput.valueAsNumber });
+  drone = selected;
+  cancelDeployment();
+  selectDrone(selected.id);
+  commandStatus.textContent = `${selected.id.replace("_", " ")} deployed. Choose Control drone to fly it, or deploy another.`;
+});
+
+function selectDrone(id: string): void {
+  flyToFreeCameraOverview();
+  drone = fleet.drones.get(id);
+  if (drone) {
+    pilotView.heading = drone.heading;
+    // Keep the mission editor's target consistent when changing selection.
+    try {
+      const edited = JSON.parse(missionInput.value);
+      if (edited && typeof edited === "object" && !Array.isArray(edited)) {
+        edited.drone_id = drone.id;
+        missionInput.value = JSON.stringify(edited, null, 2);
+      }
+    } catch { /* Preserve unfinished edits. */ }
+  }
+  refreshFleet();
+}
+droneSelect.addEventListener("change", () => selectDrone(droneSelect.value));
+document.querySelector<HTMLButtonElement>("#reset-all")!.addEventListener("click", () => {
+  flyToFreeCameraOverview();
+  cancelDeployment();
+  fleet.clear();
+  drone = undefined;
+  refreshFleet();
+  commandStatus.textContent = "All drones and routes cleared. Deploy a new drone to begin.";
+});
 
 async function loadWorld(): Promise<void> {
 if (token) {
@@ -138,8 +267,10 @@ void loadWorld();
 document.querySelector<HTMLButtonElement>("#run-mission")!.addEventListener("click", () => {
   try {
     const mission = parseMission(missionInput.value);
+    const target = fleet.drones.get(mission.drone_id);
+    if (!target) throw new Error(`Deploy ${mission.drone_id} before sending it a mission.`);
     if (controllingDrone) flyToFreeCameraOverview();
-    drone.run(mission);
+    target.run(mission);
     commandStatus.textContent = "Mission accepted.";
   } catch (error) {
     commandStatus.textContent = error instanceof Error ? error.message : "Mission could not be parsed.";
@@ -147,12 +278,13 @@ document.querySelector<HTMLButtonElement>("#run-mission")!.addEventListener("cli
 });
 document.querySelector<HTMLButtonElement>("#reset-mission")!.addEventListener("click", () => {
   if (controllingDrone) flyToFreeCameraOverview();
-  drone.reset();
+  drone?.reset();
   commandStatus.textContent = "Drone reset to its home coordinate.";
 });
 document.querySelector<HTMLButtonElement>("#orbit-monument")!.addEventListener("click", activateOrbitCamera);
 document.querySelector<HTMLButtonElement>("#free-camera")!.addEventListener("click", flyToFreeCameraOverview);
 controlDroneButton.addEventListener("click", () => {
+  if (!drone || deploying) return;
   if (controllingDrone) {
     flyToFreeCameraOverview();
     commandStatus.textContent = "Drone hovering. Free camera active.";
@@ -171,6 +303,7 @@ controlDroneButton.addEventListener("click", () => {
 window.addEventListener("keydown", (event) => {
   if (event.target instanceof HTMLElement && event.target.closest('textarea, input, select, [contenteditable="true"]')) return;
   if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (deploying && event.code === "Escape") { cancelDeployment(); return; }
   if (controllingDrone && event.code === "Escape") { flyToFreeCameraOverview(); return; }
   if (["KeyW", "KeyA", "KeyS", "KeyD", "KeyR", "KeyF"].includes(event.code) || (controllingDrone && ["Space", "ShiftLeft", "ShiftRight", "KeyQ", "KeyE"].includes(event.code))) {
     if (cameraMode !== "free") flyToFreeCameraOverview();
@@ -187,7 +320,7 @@ viewer.canvas.tabIndex = 0;
 viewer.canvas.addEventListener("pointerdown", () => viewer.canvas.focus());
 
 function updateFreeCamera(deltaSeconds: number): void {
-  if (controllingDrone) {
+  if (controllingDrone && drone) {
     const axis = (positive: string, negative: string) => Number(activeCameraKeys.has(positive)) - Number(activeCameraKeys.has(negative));
     pilotView.heading += axis("KeyE", "KeyQ") * 1.8 * deltaSeconds;
     const forward = axis("KeyW", "KeyS");
@@ -222,11 +355,12 @@ let previousCameraTime = performance.now();
 viewer.clock.onTick.addEventListener((clock) => {
   const deltaSeconds = Math.max(0, Math.min(0.1, Cesium.JulianDate.secondsDifference(clock.currentTime, previousTime)));
   previousTime = Cesium.JulianDate.clone(clock.currentTime, previousTime);
-  drone.update(deltaSeconds);
+  for (const item of fleet.drones.values()) item.update(deltaSeconds);
   const cameraTime = performance.now();
   updateFreeCamera(Math.min(0.1, Math.max(0, (cameraTime - previousCameraTime) / 1000)));
   previousCameraTime = cameraTime;
-  const snapshot = drone.snapshot();
+  const snapshot = drone?.snapshot();
+  if (!snapshot) { stateElement.innerHTML = "<dt>Fleet</dt><dd>No drones deployed</dd>"; return; }
   stateElement.innerHTML = [
     ["State", snapshot.state], ["Position", `${snapshot.latitude.toFixed(5)}, ${snapshot.longitude.toFixed(5)}`], ["Altitude", `${snapshot.altitude.toFixed(0)} m`], ["Step", snapshot.totalSteps ? `${snapshot.currentStep} / ${snapshot.totalSteps}` : "—"],
   ].map(([label, value]) => `<dt>${label}</dt><dd>${value}</dd>`).join("");

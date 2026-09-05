@@ -18,9 +18,9 @@ export type MissionCommand = {
 export const sampleMission: MissionCommand = {
   drone_id: "drone_1",
   mission: [
-    { action: "goto", latitude: 38.8895, longitude: -77.0353, altitude: 120, speed_mps: 35 },
+    { action: "goto", latitude: 38.8895, longitude: -77.0353, altitude: 120 },
     { action: "orbit", radius_m: 70, duration_s: 18 },
-    { action: "return_home", speed_mps: 35 },
+    { action: "return_home" },
   ],
 };
 
@@ -48,9 +48,14 @@ export function parseMission(value: string): MissionCommand {
     if (!rawStep || typeof rawStep !== "object" || Array.isArray(rawStep)) throw new Error("Each mission step must be an object.");
     const step = rawStep as Record<string, unknown>;
     if (step.action === "goto") assertCoordinates(step);
-    else if (step.action === "hover" && (!isFiniteNumber(step.duration_s) || step.duration_s <= 0)) throw new Error("hover requires a positive duration_s.");
-    else if (step.action === "orbit" && (!isFiniteNumber(step.radius_m) || step.radius_m <= 0 || !isFiniteNumber(step.duration_s) || step.duration_s <= 0)) throw new Error("orbit requires positive radius_m and duration_s.");
+    else if (step.action === "hover") {
+      if (!isFiniteNumber(step.duration_s) || step.duration_s <= 0) throw new Error("hover requires a positive duration_s.");
+    }
+    else if (step.action === "orbit") {
+      if (!isFiniteNumber(step.radius_m) || step.radius_m <= 0 || !isFiniteNumber(step.duration_s) || step.duration_s <= 0) throw new Error("orbit requires positive radius_m and duration_s.");
+    }
     else if (step.action !== "return_home") throw new Error(`Unsupported action: ${String(step.action)}.`);
+    if (step.speed_mps !== undefined && (!isFiniteNumber(step.speed_mps) || step.speed_mps <= 0)) throw new Error("speed_mps must be positive.");
   });
   return mission as MissionCommand;
 }

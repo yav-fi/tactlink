@@ -3,12 +3,15 @@ import type { Coordinates, MissionCommand, MissionStep } from "./mission";
 
 export type DroneSnapshot = Coordinates & { state: string; currentStep: number; totalSteps: number };
 
-const METERS_PER_DEGREE_LATITUDE = 111_320;
+export const METERS_PER_SECOND_PER_MPH = 0.44704;
 
 function destinationPoint(origin: Coordinates, eastMeters: number, northMeters: number): Coordinates {
+  const center = Cesium.Cartesian3.fromDegrees(origin.longitude, origin.latitude, origin.altitude);
+  const moved = Cesium.Matrix4.multiplyByPoint(Cesium.Transforms.eastNorthUpToFixedFrame(center), new Cesium.Cartesian3(eastMeters, northMeters, 0), new Cesium.Cartesian3());
+  const geographic = Cesium.Cartographic.fromCartesian(moved);
   return {
-    latitude: origin.latitude + northMeters / METERS_PER_DEGREE_LATITUDE,
-    longitude: origin.longitude + eastMeters / (METERS_PER_DEGREE_LATITUDE * Math.cos(Cesium.Math.toRadians(origin.latitude))),
+    latitude: Cesium.Math.toDegrees(geographic.latitude),
+    longitude: Cesium.Math.toDegrees(geographic.longitude),
     altitude: origin.altitude,
   };
 }
@@ -38,6 +41,7 @@ export class DroneController {
   private state = "IDLE";
   private manualHeading = 0;
   private manualVelocity = new Cesium.Cartesian3();
+  private configuredSpeedMph = 60;
   private readonly entity: Cesium.Entity;
   private readonly originEntity: Cesium.Entity;
   private readonly trailEntity: Cesium.Entity;
@@ -48,25 +52,25 @@ export class DroneController {
   private lastRenderedPosition: Cesium.Cartesian3 | undefined;
   private travelDirection: Cesium.Cartesian3 | undefined;
 
-  constructor(private readonly viewer: Cesium.Viewer, home: Coordinates, private readonly color = Cesium.Color.fromCssColorString("#35e8ff")) {
+  constructor(private readonly viewer: Cesium.Viewer, home: Coordinates, private readonly color = Cesium.Color.fromCssColorString("#35e8ff"), readonly id = "drone_1") {
     this.home = { ...home };
     this.position = { ...home };
     this.entity = viewer.entities.add({
-      id: "drone_1",
-      name: "Drone 1",
+      id: this.id,
+      name: this.id.replace("_", " "),
       position: new Cesium.CallbackPositionProperty((_time, result) => Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude, undefined, result), false),
       orientation: new Cesium.CallbackProperty(() => this.orientationAt(this.position), false),
       polyline: {
         positions: new Cesium.CallbackProperty(() => this.leaderPositions(), false),
-        width: 28,
+        width: 14,
         material: new Cesium.PolylineArrowMaterialProperty(this.color),
         arcType: Cesium.ArcType.NONE,
         clampToGround: false,
       },
-      label: { text: "DRONE 1", font: "600 13px system-ui", fillColor: this.color, showBackground: true, backgroundColor: Cesium.Color.fromAlpha(Cesium.Color.BLACK, 0.7), pixelOffset: new Cesium.Cartesian2(0, -28) },
+      label: { text: this.id.replace("_", " ").toUpperCase(), font: "600 13px system-ui", fillColor: this.color, showBackground: true, backgroundColor: Cesium.Color.fromAlpha(Cesium.Color.BLACK, 0.7), pixelOffset: new Cesium.Cartesian2(0, -28) },
     });
     this.originEntity = viewer.entities.add({
-      id: "drone_1_origin",
+      id: `${this.id}_origin`,
       name: "Drone starting position",
       show: false,
       box: {
@@ -78,7 +82,7 @@ export class DroneController {
       label: { text: "START", font: "600 13px system-ui", fillColor: this.color, showBackground: true, pixelOffset: new Cesium.Cartesian2(0, 28) },
     });
     this.trailEntity = viewer.entities.add({
-      id: "drone_1_trail",
+      id: `${this.id}_trail`,
       show: false,
       polyline: {
         positions: new Cesium.CallbackProperty(() => this.trailPoints, false),
@@ -103,9 +107,10 @@ export class DroneController {
     if (!enabled && this.state === "MANUAL") {
       const number = this.releases.length + 1;
       this.releases.push(this.viewer.entities.add({
-        id: `drone_1_release_${number}`,
+        id: `${this.id}_release_${number}`,
         position: Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude),
-        ellipsoid: { radii: new Cesium.Cartesian3(6, 6, 6), material: this.color.withAlpha(0.8), outline: true, outlineColor: this.color },
+        box: { dimensions: new Cesium.Cartesian3(16, 10, 4), material: this.color.withAlpha(0.8), outline: true, outlineColor: this.color },
+        orientation: this.orientationAt(this.position),
         label: { text: `RELEASE ${number}`, font: "600 12px system-ui", fillColor: this.color, showBackground: true, pixelOffset: new Cesium.Cartesian2(0, 22) },
       }));
     }
@@ -129,15 +134,29 @@ export class DroneController {
     this.manualVelocity = new Cesium.Cartesian3();
   }
 
+  get heading(): number { return this.manualHeading; }
+  get speedMph(): number { return this.configuredSpeedMph; }
+  set speedMph(value: number) {
+    if (!Number.isFinite(value) || value <= 0) throw new Error("Enter a speed greater than zero in mph.");
+    this.configuredSpeedMph = value;
+  }
+
+  destroy(): void {
+    this.reset();
+    this.viewer.entities.remove(this.entity);
+    this.viewer.entities.remove(this.originEntity);
+    this.viewer.entities.remove(this.trailEntity);
+  }
+
   moveManually(east: number, north: number, up: number, seconds: number, heading = 0): void {
     if (this.state !== "MANUAL") return;
     this.manualHeading = heading;
-    const scale = 45 / Math.max(1, Math.hypot(east, north, up));
+    const scale = this.configuredSpeedMph * METERS_PER_SECOND_PER_MPH / Math.max(1, Math.hypot(east, north, up));
     const target = new Cesium.Cartesian3(east * scale, north * scale, up * scale);
     const damping = target.equals(Cesium.Cartesian3.ZERO) ? 16 : 10;
     Cesium.Cartesian3.lerp(this.manualVelocity, target, 1 - Math.exp(-damping * seconds), this.manualVelocity);
     this.position = destinationPoint(this.position, this.manualVelocity.x * seconds, this.manualVelocity.y * seconds);
-    this.position.altitude = Math.max(2, this.position.altitude + this.manualVelocity.z * seconds);
+    this.position.altitude += this.manualVelocity.z * seconds;
     this.syncEntity();
   }
 
@@ -173,7 +192,7 @@ export class DroneController {
   private updateStep(step: MissionStep, deltaSeconds: number): void {
     if (step.action === "goto" || step.action === "return_home") {
       const target = step.action === "goto" ? step : this.home;
-      const speed = step.speed_mps ?? 25;
+      const speed = step.speed_mps ?? this.configuredSpeedMph * METERS_PER_SECOND_PER_MPH;
       const distance = distanceMeters(this.position, target);
       const fraction = distance === 0 ? 1 : Math.min(1, (speed * deltaSeconds) / distance);
       this.position = interpolate(this.position, target, fraction);
@@ -233,7 +252,7 @@ export class DroneController {
     while (this.arrows.length < count) {
       const index = this.arrows.length;
       this.arrows.push(this.viewer.entities.add({
-        id: `drone_1_arrow_${index}`,
+        id: `${this.id}_arrow_${index}`,
         polyline: {
           positions: new Cesium.CallbackProperty(() => this.arrowPositions(index), false),
           width: 12,
@@ -259,7 +278,7 @@ export class DroneController {
   private leaderPositions(): Cesium.Cartesian3[] {
     const head = Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude);
     const direction = this.travelDirection ?? Cesium.Matrix4.multiplyByPointAsVector(Cesium.Transforms.eastNorthUpToFixedFrame(head), new Cesium.Cartesian3(Math.sin(this.manualHeading), Math.cos(this.manualHeading), 0), new Cesium.Cartesian3());
-    const tail = Cesium.Cartesian3.subtract(head, Cesium.Cartesian3.multiplyByScalar(direction, 22, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+    const tail = Cesium.Cartesian3.subtract(head, Cesium.Cartesian3.multiplyByScalar(direction, 3, new Cesium.Cartesian3()), new Cesium.Cartesian3());
     return [tail, head];
   }
 

@@ -14,14 +14,35 @@
         <h1>Drone mission control</h1>
         <p id="world-status" class="status">Starting map…</p>
         <section>
+          <h2>Drone fleet</h2>
+          <div class="actions">
+            <button id="deploy-drone" type="button">Deploy a new drone</button>
+            <button id="reset-all" type="button" class="secondary">Reset all drones</button>
+          </div>
+          <div id="deployment" hidden>
+            <p id="deployment-status" class="hint" role="status">Click a starting point on the map.</p>
+            <label for="deployment-height">Height above picked surface (m)</label>
+            <input id="deployment-height" type="number" min="5" max="1000" value="20" step="5" />
+            <div class="actions">
+              <button id="confirm-deployment" type="button" disabled>Deploy here</button>
+              <button id="cancel-deployment" type="button" class="secondary">Cancel</button>
+            </div>
+          </div>
+          <label for="selected-drone">Selected drone</label>
+          <select id="selected-drone" disabled><option>No drones deployed</option></select>
+          <label for="drone-speed">Selected drone speed (mph)</label>
+          <input id="drone-speed" type="number" min="0.1" step="any" value="60" disabled />
+          <p id="speed-status" class="hint" role="status">Default: 60 mph · 26.82 m/s</p>
+        </section>
+        <section>
           <h2>Mission command</h2>
           <textarea id="mission-json" spellcheck="false" aria-label="Mission command JSON"></textarea>
           <div class="actions">
-            <button id="run-mission" type="button">Run mission</button>
-            <button id="reset-mission" type="button" class="secondary">Reset drone</button>
+            <button id="run-mission" type="button" disabled>Run mission</button>
+            <button id="reset-mission" type="button" class="secondary" disabled>Reset selected drone</button>
             <button id="orbit-monument" type="button" class="secondary">Orbit monument</button>
             <button id="free-camera" type="button" class="secondary">Free camera</button>
-            <button id="control-drone" type="button" aria-pressed="false">Control drone</button>
+            <button id="control-drone" type="button" aria-pressed="false" disabled>Control drone</button>
           </div>
           <label for="pilot-camera">Drone camera</label>
           <select id="pilot-camera">
