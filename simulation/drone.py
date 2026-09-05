@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import replace
 from typing import Any
 
 from planning import PlannerResult
 
 from .allocator import AllocationScore, TaskAllocator
 from .autonomy import PlanningAutonomy
+from .comms_belief import CommunicationBelief
 from .config import AllocatorWeights
-from .config import LocalizationConfig
+from .config import CommunicationBeliefConfig, LocalizationConfig, PredictionConfig
+from .explain import DecisionExplanation, DecisionFactor, ExplanationLog
+from .messaging import stamped
+from .prediction import Prediction, PredictiveMonitor
 from .models import (
     DroneState,
     DroneStatusReport,
@@ -38,6 +43,8 @@ from .policy import LocalPolicyEngine
 
 WAYPOINT_CAPTURE_RADIUS = 6.0
 ARRIVAL_RADIUS = 2.5
+# Added to a bid for a task this node predicted it cannot finish.
+HANDOFF_BID_PENALTY = 5_000.0
 
 
 class DroneNode:
@@ -60,6 +67,8 @@ class DroneNode:
         distributed_coordination: bool = True,
         lease_seconds: float = 4.0,
         authenticator: MessageAuthenticator | None = None,
+        communication: CommunicationBeliefConfig | None = None,
+        prediction: PredictionConfig | None = None,
     ) -> None:
         self.identity = identity
         self.estimated = LocalEstimatedState(position=initial_estimate.model_copy(deep=True))
@@ -109,9 +118,37 @@ class DroneNode:
         self.rejected_signature_count = 0
         self._policy = LocalPolicyEngine()
         self.last_policy_result = PolicyResult()
+        self._communication_config = communication or CommunicationBeliefConfig()
+        self._prediction_config = prediction or PredictionConfig()
+        # Learned from delivered packets only; never from simulator RF truth.
+        self.comm_belief = CommunicationBelief(
+            identity.node_id,
+            cell_size=self._communication_config.cell_size_m,
+            half_life=self._communication_config.half_life_seconds,
+            minimum_samples=self._communication_config.minimum_samples,
+        )
+        self.predictions = PredictiveMonitor(
+            window_seconds=self._prediction_config.window_seconds,
+            minimum_samples=self._prediction_config.minimum_samples,
+            minimum_confidence=self._prediction_config.minimum_confidence,
+            cooldown_seconds=self._prediction_config.alert_cooldown_seconds,
+        )
+        self.explanations = ExplanationLog(limit=20)
+        self.active_predictions: list[Prediction] = []
+        self.handoff_requests: list[dict[str, Any]] = []
+        self._handed_off: set[str] = set()
+        self._battery_seeded = False
+        self._last_comm_sample = -self._communication_config.sample_interval_seconds
+        self._last_comm_share = -self._communication_config.share_interval_seconds
 
     def update_battery_measurement(self, battery: float) -> None:
-        self.estimated.battery_estimate += (battery - self.estimated.battery_estimate) * 0.25
+        if self._battery_seeded:
+            self.estimated.battery_estimate += (battery - self.estimated.battery_estimate) * 0.25
+        else:
+            # Seeding avoids a filter-convergence transient that a trend
+            # estimator would otherwise read as a steep, fictitious discharge.
+            self.estimated.battery_estimate = battery
+            self._battery_seeded = True
 
     @property
     def home(self) -> Vector3:
@@ -201,6 +238,19 @@ class DroneNode:
         replies: list[NetworkMessage] = []
         if self._authenticator is not None and not self._authenticator.verify(message):
             self.rejected_signature_count += 1
+            return replies
+        # Every packet that actually arrived is evidence about the link that
+        # carried it: which sequence numbers made it, and how long they took.
+        if self._communication_config.enabled:
+            self.comm_belief.observe_reception(
+                message.sender_id, message.sequence_number, message.timestamp_sent, now
+            )
+        if message.type == MessageType.COMM_OBSERVATION:
+            if self._communication_config.enabled:
+                self.comm_belief.merge(message.payload.get("cells", []), now)
+            return replies
+        if message.type == MessageType.PREDICTIVE_ALERT:
+            self._record_peer_prediction(message, now)
             return replies
         if message.type in {MessageType.HEARTBEAT, MessageType.STATUS, MessageType.POSITION_UPDATE}:
             payload = message.payload
@@ -382,6 +432,10 @@ class DroneNode:
             bids = self.known_bids.setdefault(task_id, {}).setdefault(round_number, {})
             if task.required_capabilities <= self.identity.capabilities:
                 score = self._allocator.score(self.status_report(now), task, self._local_communication_profile())
+                if task_id in self._handed_off:
+                    # Still eligible (so the task is never orphaned), but a peer
+                    # that is not about to hit reserve should win instead.
+                    score = replace(score, cost=score.cost + HANDOFF_BID_PENALTY)
                 bids[self.identity.node_id] = score
                 if now - self._last_bid_sent.get(task_id, -99.0) >= self._auction_rebroadcast - 1e-9:
                     messages.append(self._message(now, MessageType.TASK_BID, self._bid_payload(task_id, round_number, score)))
@@ -592,6 +646,8 @@ class DroneNode:
                 self._world_update_dirty = False
             self._last_status = now
         messages.extend(self._auction_messages(now))
+        messages.extend(self._communication_belief_messages(now))
+        messages.extend(self._predictive_messages(now))
         if self.estimated.position_uncertainty > 25.0:
             self.state = DroneState.DEGRADED
         elif self.current_task:
@@ -612,6 +668,182 @@ class DroneNode:
         self._recently_completed.clear()
         return intent, messages, timed_out
 
+
+    # -- learned communication terrain --------------------------------------
+
+    def _communication_belief_messages(self, now: float) -> list[NetworkMessage]:
+        """Close the observation window, then gossip what we learned."""
+
+        if not self._communication_config.enabled:
+            return []
+        messages: list[NetworkMessage] = []
+        if now - self._last_comm_sample >= self._communication_config.sample_interval_seconds - 1e-9:
+            self._last_comm_sample = now
+            self.comm_belief.sample(self.estimated.position, now)
+        if (
+            self.comm_belief.cells
+            and now - self._last_comm_share >= self._communication_config.share_interval_seconds - 1e-9
+        ):
+            self._last_comm_share = now
+            messages.append(
+                self._message(
+                    now,
+                    MessageType.COMM_OBSERVATION,
+                    {"cells": self.comm_belief.export(self._communication_config.maximum_shared_cells)},
+                )
+            )
+        return messages
+
+    def communication_cells(self) -> list[dict[str, Any]]:
+        return self.comm_belief.snapshot()
+
+    def predicted_link_quality(self, point: Vector3) -> float | None:
+        return self.comm_belief.predicted_quality(point)
+
+    # -- prediction ----------------------------------------------------------
+
+    def _predictive_messages(self, now: float) -> list[NetworkMessage]:
+        """Extrapolate local trends and act *before* the threshold is crossed."""
+
+        if not self._prediction_config.enabled:
+            return []
+        self.predictions.observe("battery", now, self.estimated.battery_estimate)
+        self.predictions.observe("link_quality", now, self.comm_belief.mean_peer_quality())
+        self.predictions.observe("uncertainty", now, self.estimated.position_uncertainty)
+        alerts: list[Prediction] = []
+        messages: list[NetworkMessage] = []
+
+        battery = self.predictions.predict(
+            "battery",
+            kind="BATTERY_RESERVE",
+            subject=self.identity.node_id,
+            metric="battery",
+            threshold=self._prediction_config.battery_reserve,
+            horizon=self._prediction_config.battery_horizon_seconds,
+            metadata={"task_id": self.current_task.id if self.current_task else None},
+        )
+        if battery is not None:
+            alerts.append(battery)
+            messages.extend(self._preemptive_handoff(battery, now))
+
+        link = self.predictions.predict(
+            "link_quality",
+            kind="LINK_DEGRADATION",
+            subject=self.identity.node_id,
+            metric="observed link quality",
+            threshold=self._prediction_config.link_failure_threshold,
+            horizon=self._prediction_config.link_horizon_seconds,
+            metadata={"weakest_peer": (self.comm_belief.weakest_peer() or ("", 0.0))[0]},
+        )
+        if link is not None:
+            alerts.append(link)
+
+        uncertainty = self.predictions.predict(
+            "uncertainty",
+            kind="LOCALIZATION_DRIFT",
+            subject=self.identity.node_id,
+            metric="position uncertainty",
+            threshold=35.0,
+            horizon=self._prediction_config.link_horizon_seconds,
+            falling=False,
+        )
+        if uncertainty is not None:
+            alerts.append(uncertainty)
+
+        self.active_predictions = alerts
+        for prediction in alerts:
+            name = f"share:{prediction.kind}"
+            if self.predictions.should_alert(name, now):
+                messages.append(
+                    self._message(
+                        now,
+                        MessageType.PREDICTIVE_ALERT,
+                        {"prediction": prediction.model_dump(mode="json"), "safety_critical": prediction.kind == "BATTERY_RESERVE"},
+                    )
+                )
+        return messages
+
+    def _preemptive_handoff(self, prediction: Prediction, now: float) -> list[NetworkMessage]:
+        """Release a task early so a peer can take over before we hit reserve."""
+
+        task = self.current_task
+        if not self._prediction_config.preemptive_handoff or task is None:
+            return []
+        if not self._distributed_coordination or task.id in self._handed_off:
+            return []
+        if task.type == TaskType.RETURN:
+            return []
+        if not any(peer.available for peer in self.peers.values()):
+            return []  # nobody could take it; keep flying the mission
+        self._handed_off.add(task.id)
+        explanation = DecisionExplanation(
+            decision_id=self.explanations.next_id(f"handoff-{self.identity.node_id}"),
+            timestamp=now,
+            kind="PREEMPTIVE_HANDOFF",
+            subject=self.identity.node_id,
+            headline="WHY HANDOFF? battery reserve projected before task completion",
+            rationale=[
+                prediction.explanation,
+                f"{len([peer for peer in self.peers.values() if peer.available])} reachable peer(s) can bid",
+            ],
+            factors=[
+                DecisionFactor(
+                    name="battery",
+                    value=round(self.estimated.battery_estimate, 4),
+                    baseline=self._prediction_config.battery_reserve,
+                    delta=round(self.estimated.battery_estimate - self._prediction_config.battery_reserve, 4),
+                    unit="fraction",
+                ),
+                DecisionFactor(
+                    name="seconds_to_reserve",
+                    value=float(prediction.seconds_to_threshold or 0.0),
+                    unit="s",
+                ),
+            ],
+            confidence=prediction.confidence,
+            metadata={"task_id": task.id},
+        )
+        self.explanations.add(explanation)
+        self.handoff_requests.append(
+            {
+                "task_id": task.id,
+                "node_id": self.identity.node_id,
+                "prediction": prediction.model_dump(mode="json"),
+                "explanation": explanation.model_dump(mode="json"),
+            }
+        )
+        task_id = task.id
+        self._release_task(task_id)
+        self.task_assignments[task_id] = [
+            node for node in self.task_assignments.get(task_id, []) if node != self.identity.node_id
+        ]
+        self._start_auction(task_id, now, fast=True)
+        return [
+            self._message(
+                now,
+                MessageType.TASK_RELEASE,
+                {
+                    "task_id": task_id,
+                    "node_id": self.identity.node_id,
+                    "round": self._auction_rounds.get(task_id, 0),
+                    "reason": "predictive_handoff",
+                    "safety_critical": True,
+                    "prediction": prediction.model_dump(mode="json"),
+                    "explanation": explanation.model_dump(mode="json"),
+                },
+            )
+        ]
+
+    def _record_peer_prediction(self, message: NetworkMessage, now: float) -> None:
+        """Keep a peer's shared forecast so local bidding can account for it."""
+
+        payload = message.payload.get("prediction")
+        if not isinstance(payload, dict):
+            return
+        knowledge = self.peers.get(message.sender_id)
+        if knowledge is not None:
+            knowledge.last_seen = now
+
     def detect_peer_loss(self, now: float) -> list[str]:
         lost: list[str] = []
         for peer in self.peers.values():
@@ -619,6 +851,8 @@ class DroneNode:
                 peer.available = False
                 peer.state = DroneState.LOST
                 lost.append(peer.node_id)
+                if self._communication_config.enabled:
+                    self.comm_belief.observe_silence(peer.node_id, now)
         return lost
 
     def choose_action(self, now: float, dt: float) -> MotionIntent:
@@ -799,13 +1033,15 @@ class DroneNode:
         recipient_id: str | None = None,
     ) -> NetworkMessage:
         self._sequence += 1
-        message = NetworkMessage(
-            sender_id=self.identity.node_id,
-            recipient_id=recipient_id,
-            timestamp_sent=now,
-            type=message_type,
-            payload=payload,
-            sequence_number=self._sequence,
+        message = stamped(
+            NetworkMessage(
+                sender_id=self.identity.node_id,
+                recipient_id=recipient_id,
+                timestamp_sent=now,
+                type=message_type,
+                payload=payload,
+                sequence_number=self._sequence,
+            )
         )
         return self._authenticator.sign(message) if self._authenticator is not None else message
 

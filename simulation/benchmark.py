@@ -7,21 +7,36 @@ import json
 from pathlib import Path
 from time import strftime
 
-from .config import AllocatorWeights, SimulationConfig
-from .models import MissionCommand, MissionTarget, ScenarioEvent, TaskType
+from .config import (
+    AdaptiveConfig,
+    AllocatorWeights,
+    CounterfactualConfig,
+    NetworkConfig,
+    PredictionConfig,
+    SimulationConfig,
+)
+from .models import MessagePriority, MissionCommand, MissionTarget, ScenarioEvent, TaskType
 from .replay import RunRecorder
 from .scenarios import ScenarioPreset
 from .simulation import SimulationEngine
 
 
-def run_mode(mode: str, seed: int, duration: float, run_dir: Path) -> dict[str, object]:
+def run_mode(
+    mode: str,
+    seed: int,
+    duration: float,
+    run_dir: Path,
+    config: SimulationConfig | None = None,
+    label: str | None = None,
+) -> dict[str, object]:
     engine = SimulationEngine(
-        SimulationConfig(seed=seed, tick_rate_hz=10, allocator=AllocatorWeights(workload=100)),
+        config
+        or SimulationConfig(seed=seed, tick_rate_hz=10, allocator=AllocatorWeights(workload=100)),
         scenario=ScenarioPreset.NORMAL,
         drone_count=4,
         mode=mode,
     )
-    recorder_path = run_dir / f"{mode}.jsonl"
+    recorder_path = run_dir / f"{label or mode}.jsonl"
     recorder = RunRecorder(recorder_path)
     engine.attach_recorder(recorder)
     search = engine.submit_mission(
@@ -71,8 +86,13 @@ def run_mode(mode: str, seed: int, duration: float, run_dir: Path) -> dict[str, 
     recorder.record_snapshot(final)
     recorder.close()
     region = next((item for item in final.world_knowledge.regions if item.region_id == "ALPHA"), None)
+    messaging = final.network.messaging
+    lease_conflicts = sum(
+        1 for event in final.events if str(event.event_type) in {"LEASE_EXPIRED", "LEASE_CONFLICT_RESOLVED"}
+    )
     return {
         "mode": mode,
+        "label": label or mode,
         "mission_effectiveness": final.mission_effectiveness,
         "mission_capability": final.mission_capability,
         "search_coverage": region.coverage if region else 0.0,
@@ -84,6 +104,25 @@ def run_mode(mode: str, seed: int, duration: float, run_dir: Path) -> dict[str, 
         "recovery_after_node_loss_seconds": recovery_after_loss,
         "network_recovery_seconds": network_recovery,
         "control_result": "continued" if any(drone.truth.online and drone.current_task_id for drone in final.drones) else "halted",
+        "world_model_sync_lag": final.world_knowledge.world_model_sync_lag,
+        "duplicate_task_execution": final.world_knowledge.duplicate_task_execution_count,
+        "lease_conflicts": lease_conflicts,
+        "messages_attempted": messaging.messages_attempted,
+        "messages_delivered": messaging.messages_delivered,
+        "bytes_attempted": messaging.bytes_attempted,
+        "bytes_delivered": messaging.bytes_delivered,
+        "critical_delivery_ratio": messaging.critical_delivery_ratio,
+        "low_delivery_ratio": messaging.low_delivery_ratio,
+        "messages_expired": messaging.expired,
+        "messages_coalesced": messaging.coalesced,
+        "messages_deduplicated": messaging.deduplicated,
+        "bandwidth_deferred": messaging.bandwidth_deferred,
+        "saturated_ticks": messaging.saturated_ticks,
+        "preemptive_handoffs": final.adaptive.preemptive_handoffs,
+        "preemptive_relay_triggers": final.adaptive.preemptive_relay_triggers,
+        "counterfactual_runs": final.adaptive.counterfactual_runs,
+        "communication_route_changes": final.adaptive.communication_route_changes,
+        "learned_comm_cells": len(final.adaptive.communication_map),
         "replay": str(recorder_path),
     }
 
@@ -110,12 +149,142 @@ def _fmt(value: object, percent: bool = False) -> str:
     return str(value)
 
 
+# ---------------------------------------------------------------------------
+# Adaptive-feature ablation
+# ---------------------------------------------------------------------------
+
+CONSTRAINED_BANDWIDTH_MESSAGES = 10
+"""Per-tick delivery budget that makes the four-drone run genuinely congested."""
+
+
+def constrained_config(
+    seed: int,
+    *,
+    adaptive_messaging: bool = True,
+    communication_belief: bool = True,
+    prediction: bool = True,
+    routing: bool = True,
+    counterfactual: bool = True,
+    multi_relay: bool = True,
+    bandwidth_messages_per_tick: int = CONSTRAINED_BANDWIDTH_MESSAGES,
+) -> SimulationConfig:
+    """One toggle set, otherwise byte-identical to the standard benchmark run."""
+
+    adaptive = AdaptiveConfig()
+    adaptive.communication.enabled = communication_belief
+    adaptive.communication_aware_routing = routing and communication_belief
+    adaptive.prediction = PredictionConfig(enabled=prediction)
+    adaptive.counterfactual = CounterfactualConfig(enabled=counterfactual)
+    adaptive.multi_relay_coordination = multi_relay
+    return SimulationConfig(
+        seed=seed,
+        tick_rate_hz=10,
+        allocator=AllocatorWeights(workload=100),
+        network=NetworkConfig(
+            adaptive_messaging=adaptive_messaging,
+            bandwidth_messages_per_tick=bandwidth_messages_per_tick,
+        ),
+        adaptive=adaptive,
+    )
+
+
+ABLATIONS: list[tuple[str, dict[str, bool]]] = [
+    ("baseline-fifo", {"adaptive_messaging": False, "communication_belief": False, "prediction": False,
+                       "routing": False, "counterfactual": False, "multi_relay": False}),
+    ("messaging-only", {"communication_belief": False, "prediction": False, "routing": False,
+                        "counterfactual": False, "multi_relay": False}),
+    ("messaging+prediction", {"communication_belief": False, "routing": False, "counterfactual": False,
+                              "multi_relay": False}),
+    ("messaging+comms-route", {"prediction": False, "counterfactual": False, "multi_relay": False}),
+    ("no-counterfactual", {"counterfactual": False}),
+    ("all-adaptive", {}),
+]
+
+
+def ablation(
+    seed: int = 49281,
+    duration: float = 55.0,
+    output: str | Path | None = None,
+    bandwidth: int = CONSTRAINED_BANDWIDTH_MESSAGES,
+) -> dict[str, object]:
+    """Run every toggle set against the same seed and disturbance schedule."""
+
+    run_dir = Path("runs") / f"ablation-{seed}-{strftime('%Y%m%d-%H%M%S')}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    results: list[dict[str, object]] = []
+    for label, toggles in ABLATIONS:
+        config = constrained_config(seed, bandwidth_messages_per_tick=bandwidth, **toggles)
+        results.append(run_mode("fabric", seed, duration, run_dir, config=config, label=label))
+    payload: dict[str, object] = {
+        "seed": seed,
+        "duration_seconds": duration,
+        "bandwidth_messages_per_tick": bandwidth,
+        "runs": results,
+    }
+    output_path = Path(output) if output else run_dir / "ablation.json"
+    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    payload["artifact"] = str(output_path)
+    return payload
+
+
+ABLATION_COLUMNS: list[tuple[str, str, str]] = [
+    ("Effectiveness", "mission_effectiveness", "pct"),
+    ("Capability", "mission_capability", "pct"),
+    ("Coverage", "search_coverage", "pct"),
+    ("Network", "network_health", "pct"),
+    ("CriticalDeliv", "critical_delivery_ratio", "pct"),
+    ("LowDeliv", "low_delivery_ratio", "pct"),
+    ("SyncLag", "world_model_sync_lag", "sec"),
+    ("Leases", "lease_conflicts", "int"),
+    ("Msgs", "messages_attempted", "int"),
+    ("Delivered", "messages_delivered", "int"),
+    ("Bytes", "bytes_attempted", "int"),
+    ("Coalesced", "messages_coalesced", "int"),
+    ("Expired", "messages_expired", "int"),
+    ("Deferred", "bandwidth_deferred", "int"),
+]
+
+
+def _cell(value: object, style: str) -> str:
+    if value is None:
+        return "-"
+    if style == "pct":
+        return f"{float(value):.1%}"
+    if style == "sec":
+        return f"{float(value):.2f}"
+    return str(value)
+
+
+def print_ablation(payload: dict[str, object]) -> None:
+    runs = payload["runs"]  # type: ignore[index]
+    print(
+        f"seed={payload['seed']} duration={payload['duration_seconds']}s "
+        f"bandwidth={payload['bandwidth_messages_per_tick']} msgs/tick"
+    )
+    header = f"{'RUN':22}" + "".join(f"{name:>14}" for name, _, _ in ABLATION_COLUMNS)
+    print(header)
+    for run in runs:  # type: ignore[union-attr]
+        row = f"{str(run['label']):22}"
+        row += "".join(f"{_cell(run.get(key), style):>14}" for _, key, style in ABLATION_COLUMNS)
+        print(row)
+    print(f"artifact={payload.get('artifact')}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=int, default=49281)
     parser.add_argument("--duration", type=float, default=55.0)
     parser.add_argument("--output")
+    parser.add_argument(
+        "--ablation",
+        action="store_true",
+        help="compare adaptive-feature toggles under one constrained-bandwidth scenario",
+    )
+    parser.add_argument("--bandwidth", type=int, default=CONSTRAINED_BANDWIDTH_MESSAGES)
     args = parser.parse_args()
+    if args.ablation:
+        print_ablation(ablation(args.seed, args.duration, args.output, args.bandwidth))
+        return
     result = benchmark(args.seed, args.duration, args.output)
     baseline, fabric = result["baseline"], result["fabric"]
     print(f"seed={args.seed} duration={args.duration:.1f}s")

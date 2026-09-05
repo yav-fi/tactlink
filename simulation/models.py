@@ -77,6 +77,18 @@ class MessageType(StrEnum):
     TASK_RELEASE = "TASK_RELEASE"
     MISSION_SYNC = "MISSION_SYNC"
     WORLD_UPDATE = "WORLD_UPDATE"
+    COMM_OBSERVATION = "COMM_OBSERVATION"
+    PREDICTIVE_ALERT = "PREDICTIVE_ALERT"
+    WORK_UNIT_RESULT = "WORK_UNIT_RESULT"
+
+
+class MessagePriority(StrEnum):
+    """Deterministic scheduling tier assigned by :mod:`simulation.messaging`."""
+
+    CRITICAL = "CRITICAL"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
 
 
 class ObservationType(StrEnum):
@@ -154,6 +166,22 @@ class EventType(StrEnum):
     SIGNATURE_REJECTED = "SIGNATURE_REJECTED"
     REPLAY_STARTED = "REPLAY_STARTED"
     REPLAY_FINISHED = "REPLAY_FINISHED"
+    MESSAGE_EXPIRED = "MESSAGE_EXPIRED"
+    MESSAGE_COALESCED = "MESSAGE_COALESCED"
+    BANDWIDTH_SATURATED = "BANDWIDTH_SATURATED"
+    COMMUNICATION_BELIEF_UPDATED = "COMMUNICATION_BELIEF_UPDATED"
+    COMMUNICATION_AWARE_ROUTE = "COMMUNICATION_AWARE_ROUTE"
+    PREDICTION_EMITTED = "PREDICTION_EMITTED"
+    PREEMPTIVE_HANDOFF = "PREEMPTIVE_HANDOFF"
+    PREEMPTIVE_RELAY = "PREEMPTIVE_RELAY"
+    COUNTERFACTUAL_EVALUATED = "COUNTERFACTUAL_EVALUATED"
+    RELAY_PLAN_UPDATED = "RELAY_PLAN_UPDATED"
+    WORK_UNIT_CREATED = "WORK_UNIT_CREATED"
+    WORK_UNIT_ASSIGNED = "WORK_UNIT_ASSIGNED"
+    WORK_UNIT_COMPLETED = "WORK_UNIT_COMPLETED"
+    WORK_UNIT_REASSIGNED = "WORK_UNIT_REASSIGNED"
+    EDGE_NODE_JOINED = "EDGE_NODE_JOINED"
+    EDGE_NODE_LEFT = "EDGE_NODE_LEFT"
 
 
 class TrustLevel(StrEnum):
@@ -276,6 +304,12 @@ class NetworkMessage(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     sequence_number: int = 0
     signature: str | None = None
+    priority: MessagePriority = MessagePriority.MEDIUM
+    criticality: float = Field(default=0.5, ge=0.0, le=1.0)
+    ttl_seconds: float = Field(default=0.0, ge=0.0)
+    payload_bytes: int = Field(default=0, ge=0)
+    replaceable: bool = False
+    coalesce_key: str | None = None
 
 
 class Observation(BaseModel):
@@ -343,6 +377,68 @@ class DroneTruthState(BaseModel):
     online: bool
 
 
+class CommunicationCellState(BaseModel):
+    """One learned connectivity cell, as exposed to the frontend."""
+
+    cell: str
+    quality: float = Field(default=0.0, ge=0.0, le=1.0)
+    latency: float = 0.0
+    success_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    weight: float = 0.0
+    samples: int = 0
+    updated_at: float = 0.0
+    sources: list[str] = Field(default_factory=list)
+
+
+class NodeAdaptiveState(BaseModel):
+    """Per-node adaptive runtime state, derived only from node-local belief."""
+
+    learned_cells: int = 0
+    learned_mean_quality: float = Field(default=1.0, ge=0.0, le=1.0)
+    observed_samples: int = 0
+    merged_samples: int = 0
+    peer_link_quality: dict[str, float] = Field(default_factory=dict)
+    predictions: list[dict[str, Any]] = Field(default_factory=list)
+    route_choice: dict[str, Any] | None = None
+    handoffs: list[dict[str, Any]] = Field(default_factory=list)
+    explanations: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class EdgeComputeState(BaseModel):
+    """What the optional edge tier is contributing right now."""
+
+    enabled: bool = False
+    edge_nodes: list[str] = Field(default_factory=list)
+    profiles: list[dict[str, Any]] = Field(default_factory=list)
+    units_completed: int = 0
+    executed_remotely: int = 0
+    executed_locally: int = 0
+    reassigned: int = 0
+    orphaned: list[str] = Field(default_factory=list)
+    failures: int = 0
+    recent_units: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AdaptiveRuntimeState(BaseModel):
+    """Everything the adaptive fabric wants a UI to be able to render."""
+
+    adaptive_messaging: bool = True
+    communication_belief: bool = True
+    communication_aware_routing: bool = True
+    predictive_recovery: bool = True
+    counterfactual_selection: bool = True
+    multi_relay_coordination: bool = True
+    communication_map: list[CommunicationCellState] = Field(default_factory=list)
+    predictions: list[dict[str, Any]] = Field(default_factory=list)
+    decisions: list[dict[str, Any]] = Field(default_factory=list)
+    relay_stations: list[dict[str, Any]] = Field(default_factory=list)
+    counterfactual_runs: int = 0
+    preemptive_relay_triggers: int = 0
+    preemptive_handoffs: int = 0
+    communication_route_changes: int = 0
+    edge_compute: EdgeComputeState = Field(default_factory=EdgeComputeState)
+
+
 class DronePublicState(BaseModel):
     identity: NodeIdentity
     state: DroneState
@@ -359,6 +455,7 @@ class DronePublicState(BaseModel):
     known_cells: dict[str, int] = Field(default_factory=dict)
     last_world_reconciliation: float | None = None
     policy: PolicyResult = Field(default_factory=PolicyResult)
+    adaptive: NodeAdaptiveState = Field(default_factory=NodeAdaptiveState)
 
 
 class LinkState(BaseModel):
@@ -373,6 +470,28 @@ class LinkState(BaseModel):
     packet_loss: float = 0.0
 
 
+class MessagingMetrics(BaseModel):
+    """Transport accounting for FIFO-versus-adaptive scheduling comparisons."""
+
+    adaptive: bool = False
+    messages_attempted: int = 0
+    messages_transmitted: int = 0
+    messages_delivered: int = 0
+    bytes_attempted: int = 0
+    bytes_delivered: int = 0
+    expired: int = 0
+    coalesced: int = 0
+    deduplicated: int = 0
+    bandwidth_deferred: int = 0
+    saturated_ticks: int = 0
+    queue_depth: int = 0
+    attempted_by_priority: dict[str, int] = Field(default_factory=dict)
+    delivered_by_priority: dict[str, int] = Field(default_factory=dict)
+    dropped_by_reason: dict[str, int] = Field(default_factory=dict)
+    critical_delivery_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
+    low_delivery_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
 class NetworkMetrics(BaseModel):
     network_health: float = Field(default=1.0, ge=0.0, le=1.0)
     connected_components: list[list[str]] = Field(default_factory=list)
@@ -383,6 +502,7 @@ class NetworkMetrics(BaseModel):
     degraded_nodes: int = 0
     relay_nodes: list[str] = Field(default_factory=list)
     gps_degraded_count: int = 0
+    messaging: MessagingMetrics = Field(default_factory=MessagingMetrics)
 
 
 class InterferenceConfig(BaseModel):
@@ -427,6 +547,7 @@ class SimulationSnapshot(BaseModel):
     world_knowledge: WorldKnowledgeMetrics = Field(default_factory=WorldKnowledgeMetrics)
     network: NetworkMetrics = Field(default_factory=NetworkMetrics)
     control_available: bool = True
+    adaptive: AdaptiveRuntimeState = Field(default_factory=AdaptiveRuntimeState)
     origin_lat: float = 38.8895
     origin_lon: float = -77.0353
     origin_alt: float = 20.0

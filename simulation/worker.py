@@ -22,6 +22,7 @@ from .allocator import TaskAllocator
 from .autonomy import PlanningAutonomy
 from .config import SimulationConfig
 from .drone import DroneNode
+from .prediction import Prediction
 from .models import (
     DroneState,
     GPSMeasurement,
@@ -35,6 +36,13 @@ from .models import (
     PolicyResult,
     TaskLease,
     Vector3,
+)
+from .workunits import (
+    EdgeResourceProfile,
+    WorkUnit,
+    WorkUnitKind,
+    execute_work_unit,
+    result_digest,
 )
 from .world import WorldDefinition
 from .world_model import CoverageGrid
@@ -51,6 +59,8 @@ class WorkerRuntime:
         if kind == "initialize":
             self._initialize(request)
             return {"kind": "initialized", "node_id": self.node.identity.node_id}
+        if kind == "work_unit":
+            return run_work_unit_request(request)
         if kind != "tick" or self.node is None:
             raise ValueError("worker must be initialized before tick")
         return self._tick(request)
@@ -88,6 +98,8 @@ class WorkerRuntime:
                 )
                 if config.security.enabled else None
             ),
+            communication=config.adaptive.communication,
+            prediction=config.adaptive.prediction,
         )
 
     def _tick(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -134,6 +146,10 @@ def dump_node_state(node: DroneNode) -> dict[str, Any]:
         "observations": [item.model_dump(mode="json") for item in node.world_belief.observations.values()],
         "plan": node.plan.model_dump(mode="json") if node.plan else None,
         "policy": node.last_policy_result.model_dump(mode="json"),
+        "communication_cells": node.comm_belief.snapshot(),
+        "peer_link_quality": dict(sorted(node.comm_belief.peer_quality.items())),
+        "predictions": [item.model_dump(mode="json") for item in node.active_predictions],
+        "handoff_requests": [dict(item) for item in node.handoff_requests],
     }
 
 
@@ -157,6 +173,12 @@ def apply_node_state(node: DroneNode, state: dict[str, Any], now: float) -> None
         node._sync_legacy_belief_views(observation)
     node.plan = PlannerResult.model_validate(state["plan"]) if state.get("plan") else None
     node.last_policy_result = PolicyResult.model_validate(state.get("policy", {}))
+    node.comm_belief.merge(state.get("communication_cells", []), now)
+    node.comm_belief.peer_quality = {
+        str(key): float(value) for key, value in state.get("peer_link_quality", {}).items()
+    }
+    node.active_predictions = [Prediction.model_validate(item) for item in state.get("predictions", [])]
+    node.handoff_requests = [dict(item) for item in state.get("handoff_requests", [])]
 
 
 class WebSocketWorkerClient:
@@ -213,6 +235,94 @@ class WebSocketWorkerClient:
 
     def close(self) -> None:
         self.connection.close()
+
+
+# ---------------------------------------------------------------------------
+# Edge compute transport
+# ---------------------------------------------------------------------------
+
+
+def run_work_unit_request(request: dict[str, Any]) -> dict[str, Any]:
+    """Execute one work unit for a remote host. Pure function of the request."""
+
+    unit = WorkUnit.model_validate(request["unit"])
+    result = execute_work_unit(unit)
+    return {
+        "kind": "work_unit_result",
+        "unit_id": unit.unit_id,
+        "work_kind": unit.kind.value,
+        "result": result,
+        "digest": result_digest(result),
+    }
+
+
+class EdgeRuntime:
+    """A non-mobile compute contributor: advertises resources, runs work units."""
+
+    def __init__(self, profile: EdgeResourceProfile) -> None:
+        self.profile = profile
+        self.completed = 0
+
+    def handle(self, request: dict[str, Any]) -> dict[str, Any]:
+        kind = request.get("kind")
+        if kind == "hello":
+            return {"kind": "edge_profile", "profile": self.profile.model_dump(mode="json")}
+        if kind == "work_unit":
+            response = run_work_unit_request(request)
+            self.completed += 1
+            return response
+        raise ValueError(f"unsupported edge request: {kind}")
+
+
+class WebSocketEdgeClient:
+    """Host-side handle to a remote edge node; satisfies ``WorkExecutor``."""
+
+    def __init__(self, uri: str, expected_node_id: str | None = None, timeout: float = 5.0) -> None:
+        self.uri = uri
+        self.timeout = timeout
+        self.connection: ClientConnection = connect(uri, open_timeout=3)
+        self.connection.send(json.dumps({"kind": "hello"}))
+        response = json.loads(self.connection.recv(timeout=timeout))
+        if response.get("kind") != "edge_profile":
+            raise RuntimeError(f"edge handshake failed: {response}")
+        self.profile = EdgeResourceProfile.model_validate(response["profile"])
+        if expected_node_id and self.profile.node_id != expected_node_id:
+            raise RuntimeError(f"expected edge node {expected_node_id}, got {self.profile.node_id}")
+
+    @property
+    def node_id(self) -> str:
+        return self.profile.node_id
+
+    def execute(self, unit: WorkUnit) -> dict[str, Any]:
+        self.connection.send(json.dumps({"kind": "work_unit", "unit": unit.model_dump(mode="json")}))
+        response = json.loads(self.connection.recv(timeout=self.timeout))
+        if response.get("kind") != "work_unit_result":
+            raise RuntimeError(f"edge worker error: {response}")
+        return dict(response["result"])
+
+    def close(self) -> None:
+        self.connection.close()
+
+
+class InProcessEdgeClient:
+    """Same contract as the WebSocket client, for tests and single-process demos."""
+
+    def __init__(self, profile: EdgeResourceProfile) -> None:
+        self.runtime = EdgeRuntime(profile)
+        self.profile = profile
+        self.available = True
+
+    @property
+    def node_id(self) -> str:
+        return self.profile.node_id
+
+    def execute(self, unit: WorkUnit) -> dict[str, Any]:
+        if not self.available:
+            raise ConnectionError(f"{self.profile.node_id} is disconnected")
+        return dict(self.runtime.handle({"kind": "work_unit", "unit": unit.model_dump(mode="json")})["result"])
+
+    def disconnect(self) -> None:
+        self.available = False
 
 
 def main() -> None:

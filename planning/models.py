@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .comms import CommunicationField
     from .environment import EnvironmentQuery
 
 
@@ -313,6 +314,13 @@ class PlanningConfig(BaseModel):
     # regroup
     regroup_radius: float = 45.0
 
+    # communication-aware routing
+    communication_routing: bool = True
+    communication_route_margin: float = 0.02
+    communication_detour_radius: float = 160.0
+    communication_detour_candidates: int = 3
+    communication_maximum_detour_ratio: float = 1.45
+
     # replanning
     replan_position_drift: float = 40.0
     replan_uncertainty_delta: float = 10.0
@@ -342,6 +350,9 @@ class PlanningContext:
     now: float = 0.0
     cruise_speed: float | None = None
     config: PlanningConfig = field(default_factory=PlanningConfig)
+    # Learned connectivity terrain; ``None`` disables communication-aware routing.
+    communication: "CommunicationField | None" = None
+    connectivity_priority: float | None = None
 
     def peer(self, drone_id: str) -> PeerState | None:
         for state in self.peers:
