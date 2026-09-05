@@ -55,10 +55,12 @@ def main() -> int:
 
     if args.list or not args.label:
         counts = _counts()
-        if not counts:
-            print("no samples yet in data/gestures/")
+        print("samples in data/gestures/:" if counts else "no samples recorded yet")
         for k, v in counts.items():
             print(f"  {k:20s} {v:5d}")
+        if not args.label:
+            print("\nto record a gesture, pass --label, e.g.:")
+            print("  python scripts/collect_gestures.py --label two_up")
         return 0 if args.list else 2
 
     import cv2
