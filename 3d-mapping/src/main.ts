@@ -476,6 +476,11 @@ document.querySelector<HTMLButtonElement>("#reset-mission")!.addEventListener("c
   commandStatus.textContent = "Drone reset to its home coordinate.";
 });
 document.querySelector<HTMLButtonElement>("#orbit-monument")!.addEventListener("click", activateOrbitCamera);
+document.querySelector<HTMLButtonElement>("#free-camera")!.addEventListener("click", () => {
+  cancelDeployment();
+  flyToFreeCameraOverview();
+  viewer.canvas.focus();
+});
 controlDroneButton.addEventListener("click", () => {
   if (!drone || deploying) return;
   if (controllingDrone) {

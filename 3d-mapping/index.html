@@ -19,7 +19,7 @@
         </div>
         <div id="panel-drone" role="tabpanel" aria-labelledby="tab-drone">
         <section>
-          <h2>Drone fleet</h2>
+          <h2>Deploy &amp; select</h2>
           <div class="actions">
             <button id="deploy-drone" type="button">Deploy a new drone</button>
           </div>
@@ -28,27 +28,22 @@
           <label for="drone-speed">Selected drone speed (mph)</label>
           <input id="drone-speed" type="number" min="0.1" step="any" value="60" disabled />
           <p id="speed-status" class="hint" role="status">Default: 60 mph · 26.82 m/s</p>
+          <div class="actions">            <button id="control-drone" type="button" aria-pressed="false" disabled>Control drone</button>            <button id="reset-mission" type="button" class="secondary" disabled>Reset selected drone</button></div>
         </section>
-        <section>
-          <h2>Mission command</h2>
+        <details class="advanced-controls">
+          <summary>Advanced · mission JSON</summary>
           <textarea id="mission-json" spellcheck="false" aria-label="Mission command JSON"></textarea>
           <div class="actions">
             <button id="run-mission" type="button" disabled>Run mission</button>
-            <button id="reset-mission" type="button" class="secondary" disabled>Reset selected drone</button>
-            <button id="orbit-monument" type="button" class="secondary">Orbit monument</button>
-            <button id="control-drone" type="button" aria-pressed="false" disabled>Control drone</button>
           </div>
-        </section>
+        </details>
       </div>
       <div id="panel-batches" role="tabpanel" aria-labelledby="tab-batches" hidden>
         <button id="bulk-deploy" type="button">Deploy a batch</button>
         <section>
-          <h2>Group commands</h2>
-          <label for="batch-speed">Batch speed (mph)</label>
-          <input id="batch-speed" type="number" min="0.01" step="any" value="60" />
-          <button id="apply-batch-speed" type="button" disabled>Apply speed to selection</button>
-          <button id="control-batch" type="button" aria-pressed="false" disabled>Control selected batch</button>
-          <p id="batch-status" class="hint" role="status">WASD moves the batch; R/F or Space/Shift changes height. Release leaves pickup markers and preserves every route.</p>
+          <h2>Select a batch</h2>
+          <label for="saved-groups">Saved groups</label>
+          <select id="saved-groups"><option value="">Custom selection</option></select>
           <div class="actions">
             <button id="select-all" type="button" class="secondary">Select all</button>
             <button id="select-none" type="button" class="secondary">Clear selection</button>
@@ -57,11 +52,16 @@
           <label for="group-name">Group name</label>
           <input id="group-name" placeholder="Group A" maxlength="60" />
           <button id="save-group" type="button">Save group</button>
-          <label for="saved-groups">Saved groups</label>
-          <select id="saved-groups"><option value="">Custom selection</option></select>
+
+          <h2>Batch controls</h2>
+          <label for="batch-speed">Batch speed (mph)</label>
+          <input id="batch-speed" type="number" min="0.01" step="any" value="60" />
+          <button id="apply-batch-speed" type="button" disabled>Apply speed to selection</button>
+          <button id="control-batch" type="button" aria-pressed="false" disabled>Control selected batch</button>
+          <p id="batch-status" class="hint" role="status">WASD moves the batch; R/F or Space/Shift changes height. Release leaves pickup markers and preserves every route.</p>
           <button id="choose-destination" type="button" disabled>Choose destination</button>
           <p id="group-status" class="hint" role="status">Select drones above or click their markers on the map.</p>
-          <p class="hint">Selected drones get spaced destination slots and launch together at their own speeds. Sending a new destination replaces their previous route. Routes do not avoid obstacles or guarantee separation during flight.</p>
+          <details class="advanced-controls"><summary>Destination behavior</summary><p class="hint">Sending a destination replaces selected routes. Drones use spaced arrival slots and stop at detected obstacles; routes do not automatically reroute.</p></details>
         </section>
       </div>
           <div id="deployment" hidden>
@@ -78,6 +78,21 @@
             </div>
           </div>
         <section>
+          <h2>Camera</h2>
+          <div class="actions">
+            <button id="free-camera" type="button" class="secondary">Free camera</button>
+            <button id="orbit-monument" type="button" class="secondary">Orbit monument</button>
+          </div>
+          <label for="pilot-camera">Drone camera</label>
+          <select id="pilot-camera">
+            <option value="third">Third-person · fixed</option>
+            <option value="first">First-person · fixed</option>
+            <option value="free">Free orbit · while piloting</option>
+          </select>
+          <p class="hint">Free camera releases pilot control. Attached views follow the controlled drone or batch.</p>
+          <p id="command-status" class="hint">Commands execute locally and deterministically.</p>
+        </section>
+        <section>
           <h2>Fleet playback</h2>
           <div class="actions">
             <button id="run-all-paths" type="button">Run all paths</button>
@@ -88,21 +103,10 @@
           <button id="reset-all" type="button" class="secondary">Reset all drones</button>
         </section>
         <section>
-          <h2>Camera</h2>
-          <label for="pilot-camera">Drone camera</label>
-          <select id="pilot-camera">
-            <option value="third">Third-person · fixed</option>
-            <option value="first">First-person · fixed</option>
-            <option value="free">Free orbit · while piloting</option>
-          </select>
-          <p class="hint">Fixed views stay attached to the drone. Free orbit: drag to move the view, scroll to zoom. Q/E turns the drone in every view. The trail persists until Reset.</p>
-          <p id="command-status" class="hint">Commands execute locally and deterministically.</p>
-        </section>
-        <section>
           <h2>Drone state</h2>
           <dl id="drone-state" class="state"></dl>
         </section>
-        <p class="hint">Click the map, then hold W/A/S/D to fly or R/F to move up/down. Movement keys automatically leave orbit mode. In free camera, Ctrl + drag rotates the view. Orbit monument: drag to circle it and scroll to zoom.</p>
+        <details class="advanced-controls"><summary>Keyboard &amp; mouse controls</summary><p class="hint">WASD moves; R/F changes height. When piloting, Q/E turns and Esc releases. In free camera, Ctrl + drag rotates. Orbit monument: drag to circle, scroll to zoom.</p></details>
       </aside>
     </main>
     <script type="module" src="/src/main.ts"></script>
