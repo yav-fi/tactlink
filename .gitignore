@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Downloaded model bundles (fetched on first run)
+models/
+
+# Rendered output
+*.png
+flight.png
