@@ -22,6 +22,7 @@ _SHADOW = (18, 17, 16)
 _TRAIL = (200, 160, 90)
 _HUD = (235, 235, 235)
 _HUD_DIM = (150, 150, 150)
+_SELECTED = (90, 220, 255)
 _WARN = (90, 90, 240)
 _OK = (90, 220, 130)
 
@@ -71,19 +72,28 @@ class Visualizer:
                           target=self._look)
         self._arm_len = 0.55
 
-    def render(self, state: QuadState, cmd: ControlInput, fps: float = 0.0,
-              trail=None, gstate=None) -> np.ndarray:
+    def render(self, states, cmd: ControlInput, fps: float = 0.0,
+              trails=None, gstate=None, selected=None) -> np.ndarray:
+        if isinstance(states, QuadState):        # single-drone convenience
+            states = [states]
+        trails = trails or [[] for _ in states]
         img = np.full((self.h, self.w, 3), _BG, dtype=np.uint8)
-        # Ease the camera toward the drone so it stays framed while it flies.
-        goal = np.array([state.pos[0], state.pos[1], max(1.0, state.pos[2]) * 0.5 + 1.0])
+
+        centre = np.mean([s.pos for s in states], axis=0)
+        goal = np.array([centre[0], centre[1], max(1.0, centre[2]) * 0.5 + 1.0])
         self._look += (goal - self._look) * 0.08
         self.cam = Camera((self.w, self.h), position=self._look + _CAM_OFFSET,
                           target=self._look)
+
         self._draw_grid(img)
-        self._draw_trail(img, trail or [])
-        self._draw_shadow(img, state)
-        self._draw_drone(img, state)
-        self._draw_hud(img, state, cmd, fps, gstate)
+        # Far drones first so nearer ones draw on top.
+        order = sorted(range(len(states)), key=lambda i: -float(
+            np.linalg.norm(np.asarray(states[i].pos) - self.cam.pos)))
+        for i in order:
+            self._draw_trail(img, trails[i])
+            self._draw_shadow(img, states[i])
+            self._draw_drone(img, states[i], highlighted=(i == selected and len(states) > 1))
+        self._draw_hud(img, states, cmd, fps, gstate, selected)
         return img
 
     # -- world -----------------------------------------------------------
@@ -128,16 +138,22 @@ class Visualizer:
         cv2.fillConvexPoly(overlay, np.array(ground, dtype=np.int32), _SHADOW)
         cv2.addWeighted(overlay, 0.35, img, 0.65, 0, img)
 
-    def _draw_drone(self, img, state: QuadState):
+    def _draw_drone(self, img, state: QuadState, highlighted: bool = False):
         r = _rot(state.yaw, state.roll, state.pitch)
         center = state.pos
         motors = [center + r @ off for off in self._motor_offsets()]
 
+        arm_color = _SELECTED if highlighted else _ARM
         for m in motors:
-            self._line(img, center, m, _ARM, 3)
+            self._line(img, center, m, arm_color, 3)
 
         nose = center + r @ np.array([0.0, self._arm_len * 1.4, 0.0])
         self._line(img, center, nose, _DRONE, 2)
+
+        if highlighted:
+            pc = self.cam.project(center)
+            if pc:
+                cv2.circle(img, pc, 22, _SELECTED, 2, cv2.LINE_AA)
 
         armed = state.armed or not state.on_ground
         rotor_color = _ROTOR_ARMED if state.armed else _ROTOR_IDLE
@@ -164,18 +180,23 @@ class Visualizer:
             cv2.circle(img, pc, 4, _DRONE, -1, cv2.LINE_AA)
 
     # -- hud -----------------------------------------------------------
-    def _draw_hud(self, img, state: QuadState, cmd: ControlInput, fps: float,
-                  gstate=None):
+    def _draw_hud(self, img, states, cmd: ControlInput, fps: float,
+                  gstate=None, selected=None):
         font = cv2.FONT_HERSHEY_SIMPLEX
         pad = 14
+        state = states[0]
+        centre = np.mean([s.pos for s in states], axis=0)
 
         status = "ARMED" if state.armed else "DISARMED"
         color = _OK if state.armed else _WARN
-        cv2.putText(img, status, (pad, 30), font, 0.8, color, 2, cv2.LINE_AA)
+        suffix = f"  x{len(states)}" if len(states) > 1 else ""
+        cv2.putText(img, status + suffix, (pad, 30), font, 0.8, color, 2, cv2.LINE_AA)
+        if len(states) > 1 and selected is not None:
+            cv2.putText(img, f"sel #{selected + 1}", (pad, self.h - 172), font, 0.5,
+                        _SELECTED, 1, cv2.LINE_AA)
 
-        alt = state.pos[2]
         speed = float(np.linalg.norm(state.vel[:2]))
-        cv2.putText(img, f"alt {alt:4.1f} m   spd {speed:4.1f} m/s   yaw {math.degrees(state.yaw):+4.0f}",
+        cv2.putText(img, f"alt {centre[2]:4.1f} m   spd {speed:4.1f} m/s   yaw {math.degrees(state.yaw):+4.0f}",
                     (pad, 54), font, 0.5, _HUD, 1, cv2.LINE_AA)
         if fps:
             cv2.putText(img, f"{fps:4.1f} fps", (self.w - 90, 30), font, 0.5,

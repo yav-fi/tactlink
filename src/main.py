@@ -27,9 +27,8 @@ import cv2
 import numpy as np
 
 from control_types import HandState
-from controls import GestureController
 from gestures import GestureInterpreter
-from simulator import QuadSimulator
+from swarm import Swarm
 from visualizer import Visualizer
 
 
@@ -144,11 +143,10 @@ def _gesture_check_panel(hand, gstate, log, width: int = 640, height: int = 720)
 
 
 def run(args: argparse.Namespace) -> int:
-    controller = GestureController()
     interp = GestureInterpreter()
     check_mode = args.check_gestures
     runtime_mode = bool(args.mission_url) and not check_mode
-    sim = None if (runtime_mode or check_mode) else QuadSimulator()
+    swarm = None if (runtime_mode or check_mode) else Swarm(args.drones)
     viz = None if (runtime_mode or check_mode) else Visualizer()
     event_log: list[str] = []
     mission_adapter = mission_client = mission_error_cls = None
@@ -238,9 +236,9 @@ def run(args: argparse.Namespace) -> int:
                 gesture = hand.gesture if hand.present else "None"
                 side_frame = _runtime_panel(gesture, runtime_status)
             else:
-                cmd = controller.update(hand, gstate, sim.state)
-                state = sim.step(cmd, dt if dt > 0 else 1 / 60)
-                side_frame = viz.render(state, cmd, fps, sim.trail, gstate)
+                _, cmd = swarm.step(hand, gstate, dt if dt > 0 else 1 / 60)
+                side_frame = viz.render(swarm.states(), cmd, fps, swarm.trails(),
+                                        gstate, swarm.selected)
             composite = _compose(cam_frame, side_frame)
 
             frame_count += 1
@@ -257,13 +255,14 @@ def run(args: argparse.Namespace) -> int:
             if key in (ord("q"), 27):
                 break
             if key == ord("r"):
-                if sim is not None:
-                    sim.reset()
-                controller = GestureController()
+                if swarm is not None:
+                    swarm.reset()
                 interp = GestureInterpreter()
             if key == ord(" "):
-                armed = sim is not None and sim.state.armed
+                armed = swarm is not None and swarm.drones[0].state.armed
                 kbd_event = "land" if (runtime_mode or armed) else "takeoff"
+            if swarm is not None and ord("1") <= key <= ord("9"):
+                swarm.selected = min(key - ord("1"), swarm.n - 1)
     finally:
         if cap is not None:
             cap.release()
@@ -278,6 +277,8 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--camera", type=int, default=0, help="webcam index (default 0)")
+    p.add_argument("--drones", type=int, default=5,
+                   help="squad size flown in formation (1 = single drone)")
     p.add_argument("--demo", action="store_true",
                    help="run without a camera using a scripted hand path")
     p.add_argument("--headless", action="store_true",

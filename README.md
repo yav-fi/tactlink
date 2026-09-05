@@ -78,18 +78,28 @@ pip install -r requirements.txt
 ## Run
 
 ```sh
-python src/main.py                    # live webcam, camera 0
+python src/main.py                    # live webcam, 5-drone squad (default)
+python src/main.py --drones 1         # single drone
 python src/main.py --camera 1         # a different camera
 python src/main.py --demo             # no camera: scripted flight, good for a first check
-python src/main.py --check-gestures   # live webcam, recognition + HUD only - the drone
-                                      #   does not move and nothing is submitted
+python src/main.py --check-gestures   # live webcam, recognition + HUD only - nothing moves
 python src/main.py --demo --headless --out flight.png   # render one sample frame
 ```
 
 On first live run the MediaPipe model (`gesture_recognizer.task`, ~8 MB) is
 downloaded into `models/` automatically. `--demo` needs no camera and no model.
 
-Keys while running: `q` quit · `r` reset · `space` take off / land.
+Keys while running: `q` quit · `r` reset · `space` take off / land · `1`-`9`
+highlight a drone.
+
+## Swarm
+
+`--drones N` flies a squad. Drone 0 is the **leader** — every gesture drives it
+exactly like the single-drone app — and the rest hold a fixed ring formation
+around it, so the whole squad takes off, climbs, orbits, dashes and returns home
+together. Return-home recentres the formation on the origin. The HUD shows
+`ARMED xN` and `sel #k`; `1`-`9` highlight a drone (per-drone "single-out"
+commanding is the next step — the hook is there, `Swarm.selected`).
 
 **Testing gestures safely.** `--check-gestures` is the safe way to rehearse hand
 poses and combos: it shows the recognized gesture, hold bar, partial-combo hint,
@@ -218,7 +228,8 @@ any pattern are unaffected. Delete the file or set `"sequences": []` to disable
 | `src/finger_swing.py` | Geometric two-finger vertical↔horizontal wiper → `fly_*` |
 | `src/controls.py` | Hand pose + gesture state → `ControlInput`; runs autopilot routines |
 | `src/simulator.py` | Arcade quadcopter physics (world frame: x right, y forward, z up) |
-| `src/visualizer.py` | Look-at pinhole camera, 3D drone render, control HUD |
+| `src/swarm.py` | Leader + ring-formation followers flown as one squad |
+| `src/visualizer.py` | Look-at pinhole camera, multi-drone 3D render, control HUD |
 | `src/control_types.py` | Shared dataclasses and the `FlightMode` enum |
 | `scripts/collect_gestures.py` · `scripts/train_gestures.py` | Record samples · fit the custom model |
 | `config/gesture_actions.json` · `config/gesture_sequences.json` | Single-gesture → action map · ordered combos |
