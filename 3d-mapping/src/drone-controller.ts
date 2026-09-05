@@ -135,6 +135,7 @@ export class DroneController {
   }
 
   get heading(): number { return this.manualHeading; }
+  get homeCoordinates(): Coordinates { return { ...this.home }; }
   get speedMph(): number { return this.configuredSpeedMph; }
   set speedMph(value: number) {
     if (!Number.isFinite(value) || value <= 0) throw new Error("Enter a speed greater than zero in mph.");

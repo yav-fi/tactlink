@@ -37,6 +37,7 @@ from sequences import SequenceMatcher, load_config
 HOLD_SEC = 0.40           # steady-hold time before a gesture fires
 RELEASE_SEC = 0.15        # time at rest before the same gesture may fire again
 SEGMENT_SEC = 0.18        # hold time before a gesture counts as a combo token
+COMBO_GRACE_SEC = 0.9     # keep holding pending singles this long after a combo pose
 
 _DEFAULT_ACTION = {
     "Open_Palm": "takeoff",
@@ -95,6 +96,7 @@ class GestureInterpreter:
         self._combo_gestures = matcher.member_gestures
         self._token_gesture = ""   # last gesture emitted as a combo token
         self._pending: list[dict] = []  # single-gesture actions waiting out single_delay
+        self._combo_touch = -1e9   # last time a combo-member gesture was held
 
     @property
     def mode(self) -> FlightMode:
@@ -120,6 +122,8 @@ class GestureInterpreter:
             self._rest_since = 0.0
 
         held_for = now - self._held_since
+        if gesture in self._combo_gestures:
+            self._combo_touch = now
 
         # --- combo tokens -------------------------------------------------
         if gesture in ("None", ""):
@@ -145,9 +149,12 @@ class GestureInterpreter:
             self._rest_since = 0.0
             progress = 1.0
 
+        # Hold a pending single while a combo is plausibly still being formed:
+        # either a live partial match, or a combo-member gesture touched recently.
         active, hint = self._matcher.prefix_active(now)
+        mid_combo = active or (now - self._combo_touch) < COMBO_GRACE_SEC
         for p in list(self._pending):
-            if now - p["at"] >= self._single_delay and not active:
+            if now - p["at"] >= self._single_delay and not mid_combo:
                 events.append(self._apply(p["action"]))
                 self._pending.remove(p)
 

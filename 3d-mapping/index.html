@@ -62,6 +62,10 @@
         </section>
         <section class="local-only">
           <h2>Mission command</h2>
+          <label for="flight-text">Flight instruction</label>
+          <textarea id="flight-text" aria-label="Flight instruction">take off to 10 meters, orbit home at a radius of 20 meters clockwise once, then land</textarea>
+          <button id="preview-flight" type="button">Preview text path</button>
+          <p id="preview-status" class="hint" role="status">Deploy a drone first. Preview height is relative to its deployment point.</p>
           <textarea id="mission-json" spellcheck="false" aria-label="Mission command JSON"></textarea>
           <div class="actions">
             <button id="run-mission" type="button" disabled>Run mission</button>
