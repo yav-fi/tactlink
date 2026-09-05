@@ -134,6 +134,31 @@ Actions available: `takeoff`, `land`, `cycle_mode`, `speed_up`, `speed_down`,
 trained set of gestures travels with the repo; raw recordings under `data/` stay
 local.
 
+## Gesture combos (sequences)
+
+Several gestures in order, inside a time window, can mean one command - like a
+gesture password. Configured in `config/gesture_sequences.json`:
+
+```json
+{
+  "single_delay": 0.6,
+  "sequences": [
+    { "pattern": ["Open_Palm", "Closed_Fist", "Open_Palm"], "window": 3.0, "action": "return_home" }
+  ]
+}
+```
+
+So flashing **open → fist → open within 3 s** triggers return-home. `pattern`
+entries are gesture names (canned or your own trained labels); `action` is any of
+the actions above.
+
+Because a combo's gestures could also fire on their own (open palm = take off),
+any gesture used in a pattern has its single-gesture command **held back
+`single_delay` seconds** and cancelled if the combo completes. Gestures not in
+any pattern are unaffected. Delete the file or set `"sequences": []` to disable
+(then there is no delay at all). The HUD shows a partial combo as
+`combo: Open_Palm>Closed_Fist>…`.
+
 ## Layout
 
 | File | Role |
@@ -143,12 +168,13 @@ local.
 | `src/landmark_features.py` | 21 landmarks → normalized 63-d pose vector (shared by collect/train/infer) |
 | `src/gesture_model.py` | Dependency-free k-NN custom gesture classifier (`custom_gestures.npz`) |
 | `src/gestures.py` | Debounces the gesture stream → mode, speed, discrete events |
+| `src/sequences.py` | Matches ordered gesture combos against the token stream |
 | `src/controls.py` | Hand pose + gesture state → `ControlInput`; runs autopilot routines |
 | `src/simulator.py` | Arcade quadcopter physics (world frame: x right, y forward, z up) |
 | `src/visualizer.py` | Look-at pinhole camera, 3D drone render, control HUD |
 | `src/control_types.py` | Shared dataclasses and the `FlightMode` enum |
 | `scripts/collect_gestures.py` · `scripts/train_gestures.py` | Record samples · fit the custom model |
-| `config/gesture_actions.json` | Gesture-name → action map (merged over defaults) |
+| `config/gesture_actions.json` · `config/gesture_sequences.json` | Single-gesture → action map · ordered combos |
 
 The simulator takes a normalized `ControlInput` (throttle, yaw_rate, roll,
 pitch, armed), so swapping the simulator for a real link (Tello, MAVLink RC

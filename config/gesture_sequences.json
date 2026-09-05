@@ -1,0 +1,8 @@
+{
+  "__doc__": "Ordered gesture combos. A combo fires when its 'pattern' gestures happen in order within 'window' seconds. 'action' is any action from gesture_actions.json (takeoff, land, cycle_mode, speed_up, speed_down, spin360, return_home, estop). While combos are configured, single-gesture commands that appear in a pattern are held back 'single_delay' seconds and cancelled if the combo lands. Set 'sequences' to [] to disable.",
+
+  "single_delay": 0.6,
+  "sequences": [
+    { "pattern": ["Open_Palm", "Closed_Fist", "Open_Palm"], "window": 3.0, "action": "return_home" }
+  ]
+}

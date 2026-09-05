@@ -196,6 +196,9 @@ class Visualizer:
                     cv2.rectangle(img, (x0, 114), (x0 + 90, 124), (60, 58, 55), -1)
                     cv2.rectangle(img, (x0, 114),
                                   (x0 + int(90 * gstate.hold_progress), 124), _OK, -1)
+            if gstate.sequence_hint:
+                cv2.putText(img, f"combo: {gstate.sequence_hint}", (pad, 146),
+                            font, 0.5, _WARN, 1, cv2.LINE_AA)
 
         hint = "palm x/y + tilt = fly   Victory=mode  thumbs=speed  point=spin  ILY=home"
         cv2.putText(img, hint, (pad, self.h - 150), font, 0.42, _HUD_DIM, 1, cv2.LINE_AA)

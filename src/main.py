@@ -32,11 +32,13 @@ from visualizer import Visualizer
 
 # (start, end) seconds -> gesture held during the demo timeline.
 _DEMO_GESTURES = [
-    (1.5, 3.0, "Open_Palm"),
-    (7.0, 8.5, "Victory"),
-    (13.0, 14.5, "Pointing_Up"),
-    (18.0, 19.5, "ILoveYou"),
-    (24.0, 26.0, "Closed_Fist"),
+    (1.5, 3.0, "Open_Palm"),      # takeoff
+    (7.0, 8.5, "Victory"),        # cycle flight mode
+    (12.0, 13.3, "Pointing_Up"),  # 360 spin
+    (16.5, 17.4, "Open_Palm"),    # combo: open ->
+    (17.9, 18.8, "Closed_Fist"),  #        fist ->
+    (20.3, 21.2, "Open_Palm"),    #        open  => return home
+    (26.0, 28.0, "Closed_Fist"),  # land
 ]
 
 

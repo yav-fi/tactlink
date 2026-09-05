@@ -42,6 +42,7 @@ class GestureState:
     active_gesture: str = "None"   # gesture currently being held (may not have fired yet)
     gesture_source: str = "none"   # "custom", "canned", or "none"
     hold_progress: float = 0.0     # 0..1 toward firing the held gesture
+    sequence_hint: str = ""        # partial combo in progress, e.g. "Open_Palm>Closed_Fist>…"
     events: list = field(default_factory=list)  # command strings fired this frame
     maneuver: str = ""             # autopilot routine currently running, if any
 
