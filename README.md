@@ -115,11 +115,11 @@ Hold a sign steady for ~0.4 s to fire it; relax before repeating.
 
 | Sign | Action |
 | --- | --- |
-| 👍 Thumb up | **Arm + take off** |
+| 👍 Thumb up | **Arm + take off**; each one after that **steps the altitude up ~1.5 m** (to 9 m) |
 | 👎 Thumb down | **Land + disarm** |
 | ☝️ Pointing up | Orbit: fly out to a 10 m radius and circle the origin — point again to stop |
 | 🤟 ILoveYou | Return to the start point and hover |
-| ✋ Open palm · ✊ Closed fist · ✌️ Victory | *no standalone action — combo ingredients only* |
+| ✋ Open palm · ✊ Closed fist · ✌️ Victory | *no action* |
 
 Take off, land, orbit, return-home (and the `fly_*` dashes) run as autopilot
 routines that take over until they finish (`MODE` turns red in the HUD). Orbit

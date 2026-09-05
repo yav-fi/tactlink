@@ -49,8 +49,9 @@ def _load_mission_integration():
 
 # (start, end) seconds -> gesture held during the demo timeline.
 _DEMO_GESTURES = [
-    (1.5, 2.7, "Thumb_Up"),       # arm + takeoff
-    (6.0, 7.3, "Pointing_Up"),    # orbit the origin (until the next command)
+    (1.5, 2.5, "Thumb_Up"),       # arm + takeoff
+    (4.0, 5.0, "Thumb_Up"),       # airborne: step altitude up
+    (7.0, 8.3, "Pointing_Up"),    # orbit the origin (until the next command)
     (17.5, 18.5, "ILoveYou"),     # return home + hover
     (22.0, 23.5, "Thumb_Down"),   # disarm + land
 ]

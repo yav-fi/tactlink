@@ -12,16 +12,34 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 import numpy as np  # noqa: E402
 
 from control_types import GestureState, HandState  # noqa: E402
-from controls import _DASH_DISTANCE, _ORBIT_RADIUS, GestureController  # noqa: E402
+from controls import (  # noqa: E402
+    _CLIMB_STEP, _DASH_DISTANCE, _ORBIT_RADIUS, _TAKEOFF_ALT, GestureController,
+)
 from simulator import QuadSimulator  # noqa: E402
+
+
+def _drive(events_by_step, steps):
+    ctl = GestureController()
+    sim = QuadSimulator()
+    for i in range(steps):
+        cmd = ctl.update(HandState(present=False),
+                         GestureState(events=list(events_by_step.get(i, []))), sim.state)
+        sim.step(cmd, 1 / 60)
+    return sim.state, ctl
+
+
+def _armed_at(ctl, sim, alt=2.0):
+    """Put the drone in the air the way a `takeoff` event would."""
+    ctl._armed = True
+    ctl._alt_target = alt
+    sim.state.armed = True
+    sim.state.pos[2] = alt
 
 
 def _fly(direction: str, seconds: float = 6.0):
     ctl = GestureController()
     sim = QuadSimulator()
-    ctl._armed = True
-    sim.state.armed = True
-    sim.state.pos[2] = 2.0
+    _armed_at(ctl, sim)
     steps = int(seconds / (1 / 60))
     for i in range(steps):
         events = [direction] if i == 0 else []
@@ -53,9 +71,8 @@ def test_fly_west_holds_altitude():
 def test_orbit_converges_to_ring_and_keeps_circling():
     ctl = GestureController()
     sim = QuadSimulator()
-    ctl._armed = True
-    sim.state.armed = True
-    sim.state.pos[:] = [1.0, 0.0, 2.0]
+    _armed_at(ctl, sim)
+    sim.state.pos[:2] = [1.0, 0.0]
     angles = []
     for i in range(int(30 / (1 / 60))):
         events = ["orbit"] if i == 0 else []
@@ -73,15 +90,25 @@ def test_orbit_converges_to_ring_and_keeps_circling():
 def test_orbit_repeat_gesture_stops():
     ctl = GestureController()
     sim = QuadSimulator()
-    ctl._armed = True
-    sim.state.armed = True
-    sim.state.pos[:] = [1.0, 0.0, 2.0]
+    _armed_at(ctl, sim)
+    sim.state.pos[:2] = [1.0, 0.0]
     for i in range(600):
         cmd = ctl.update(HandState(present=False), GestureState(events=["orbit"] if i == 0 else []), sim.state)
         sim.step(cmd, 1 / 60)
     assert ctl.maneuver == "orbit"
     ctl.update(HandState(present=False), GestureState(events=["orbit"]), sim.state)
     assert ctl.maneuver == ""
+
+
+def test_takeoff_then_thumbs_up_steps_altitude():
+    # takeoff, let it settle, then two more "takeoff" events 3 s apart
+    state, _ = _drive({0: ["takeoff"], 240: ["takeoff"], 540: ["takeoff"]}, 900)
+    assert abs(state.pos[2] - (_TAKEOFF_ALT + 2 * _CLIMB_STEP)) < 0.4, state.pos[2]
+
+
+def test_takeoff_holds_base_altitude():
+    state, _ = _drive({0: ["takeoff"]}, 600)
+    assert abs(state.pos[2] - _TAKEOFF_ALT) < 0.3, state.pos[2]
 
 
 def test_fly_dash_ignored_when_disarmed():

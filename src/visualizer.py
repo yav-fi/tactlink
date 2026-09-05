@@ -206,7 +206,7 @@ class Visualizer:
                 cv2.putText(img, f"combo: {gstate.sequence_hint}", (pad, 146),
                             font, 0.5, _WARN, 1, cv2.LINE_AA)
 
-        hint = ("thumb up=takeoff  thumb down=land  point=orbit  ILY=home"
+        hint = ("thumb up=takeoff/rise  thumb down=land  point=orbit  ILY=home"
                 + ("  V=mode" if HAND_FLIGHT_ENABLED else "  (gestures only)"))
         cv2.putText(img, hint, (pad, self.h - 150), font, 0.42, _HUD_DIM, 1, cv2.LINE_AA)
 

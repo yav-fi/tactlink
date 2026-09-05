@@ -3,7 +3,8 @@
 The drone is flown entirely by discrete gesture commands and the autopilot
 routines they trigger (takeoff, land, spin360, return_home,
 fly_north/south/east/west, orbit). When no routine is running an armed drone
-simply hovers.
+holds its position and its target altitude. A `takeoff` while already airborne
+steps the target altitude up by ``_CLIMB_STEP``.
 
 Set ``HAND_FLIGHT_ENABLED = True`` to also fly continuously from the hand pose
 (palm position -> yaw/throttle, hand tilt -> roll, pinch -> forward pitch,
@@ -23,7 +24,9 @@ _ROLL_DEAD_ZONE = 0.18
 _ROLL_FULL_SCALE = 0.7
 _SMOOTHING = 0.35
 
-_TAKEOFF_ALT = 1.3
+_TAKEOFF_ALT = 1.3     # altitude the first takeoff climbs to
+_CLIMB_STEP = 1.5      # extra metres per thumbs-up once airborne
+_MAX_ALT = 9.0
 _SPIN_RATE = 1.0
 _HOME_RADIUS = 0.4
 _DASH_DISTANCE = 5.0    # metres a fly_<compass> dash covers before hovering
@@ -52,11 +55,10 @@ class GestureController:
         self._cmd = ControlInput()
         self._armed = False
         self.maneuver = ""          # active autopilot routine, "" when hand-flown
+        self._alt_target = 0.0      # metres; the altitude the drone seeks when armed
         self._spin_start_yaw = 0.0
         self._dash_dir = np.zeros(2)
         self._dash_start = np.zeros(2)
-        self._dash_alt = 1.3
-        self._orbit_alt = 1.3
 
     def update(self, hand: HandState, gstate: GestureState, state) -> ControlInput:
         for event in gstate.events:
@@ -67,8 +69,9 @@ class GestureController:
         elif HAND_FLIGHT_ENABLED and hand.present:
             target = self._fly(hand, gstate)
         else:
-            # Gestures-only: an armed drone holds position and altitude.
-            target = ControlInput(armed=self._armed)
+            # Gestures-only: hold position, seek the target altitude.
+            target = ControlInput(armed=self._armed,
+                                  throttle=self._alt_throttle(state) if self._armed else 0.0)
 
         if gstate.events:
             target.event = " · ".join(gstate.events)
@@ -111,15 +114,26 @@ class GestureController:
         cy, sy = math.cos(-yaw), math.sin(-yaw)
         return np.array([cy * d[0] - sy * d[1], sy * d[0] + cy * d[1]])
 
+    def _alt_throttle(self, state) -> float:
+        """Throttle command to climb toward / hold ``self._alt_target`` (with damping)."""
+        err = self._alt_target - state.pos[2]
+        return float(np.clip(err * 1.3 - state.vel[2] * 0.45, -0.45, 1.0))
+
     # -- autopilot routines ------------------------------------------
     def _start_maneuver(self, event: str, state) -> None:
         if event == "estop":
             self._armed = False
+            self._alt_target = 0.0
             self.maneuver = ""
         elif event == "takeoff":
-            self._armed = True
-            self.maneuver = "takeoff"
+            if not self._armed:
+                self._armed = True
+                self._alt_target = _TAKEOFF_ALT
+            else:                       # already airborne: step up
+                self._alt_target = min(self._alt_target + _CLIMB_STEP, _MAX_ALT)
+            self.maneuver = "climb"
         elif event == "land":
+            self._alt_target = 0.0
             self.maneuver = "land"
         elif event == "spin360" and self._armed:
             self._spin_start_yaw = state.yaw
@@ -128,23 +142,18 @@ class GestureController:
             self.maneuver = "return_home"
         elif event == "orbit" and self._armed:
             # Repeat the gesture to stop orbiting and hover.
-            if self.maneuver == "orbit":
-                self.maneuver = ""
-            else:
-                self._orbit_alt = max(_TAKEOFF_ALT, float(state.pos[2]))
-                self.maneuver = "orbit"
+            self.maneuver = "" if self.maneuver == "orbit" else "orbit"
         elif event in _COMPASS and self._armed:
             self._dash_dir = _COMPASS[event]
             self._dash_start = np.array(state.pos[:2], dtype=float)
-            self._dash_alt = max(_TAKEOFF_ALT, float(state.pos[2]))
             self.maneuver = event
 
     def _run_maneuver(self, state) -> ControlInput:
         cmd = ControlInput(armed=self._armed, event=self.maneuver)
 
-        if self.maneuver == "takeoff":
-            cmd.throttle = 0.8
-            if state.pos[2] >= _TAKEOFF_ALT:
+        if self.maneuver == "climb":
+            cmd.throttle = self._alt_throttle(state)
+            if abs(state.pos[2] - self._alt_target) < 0.25:
                 self.maneuver = ""
         elif self.maneuver == "land":
             cmd.throttle = -0.8
@@ -166,6 +175,7 @@ class GestureController:
                 gain = min(1.0, dist / 3.0) * 0.8
                 cmd.roll = float(body[0]) * gain
                 cmd.pitch = float(body[1]) * gain
+                cmd.throttle = self._alt_throttle(state)
         elif self.maneuver in _COMPASS:
             travelled = float(np.linalg.norm(np.array(state.pos[:2]) - self._dash_start))
             if travelled >= _DASH_DISTANCE:
@@ -175,7 +185,7 @@ class GestureController:
                 ease = min(1.0, (_DASH_DISTANCE - travelled) / 1.5)  # slow into the stop
                 cmd.roll = float(body[0]) * 0.8 * ease
                 cmd.pitch = float(body[1]) * 0.8 * ease
-                cmd.throttle = float(np.clip((self._dash_alt - state.pos[2]) * 1.5, -0.5, 1.0))
+                cmd.throttle = self._alt_throttle(state)
         elif self.maneuver == "orbit":
             # Fly out to the 10 m ring, then circle the origin forever (until a
             # new command, or the gesture is repeated to stop).
@@ -190,7 +200,7 @@ class GestureController:
             mag = min(1.0, speed / 4.0) * 0.8
             cmd.roll = float(body[0]) * mag
             cmd.pitch = float(body[1]) * mag
-            cmd.throttle = float(np.clip((self._orbit_alt - state.pos[2]) * 1.5, -0.5, 1.0))
+            cmd.throttle = self._alt_throttle(state)
             # Point the nose along the direction of travel.
             desired_yaw = math.atan2(-world_v[0], world_v[1])
             err = (desired_yaw - state.yaw + math.pi) % (2 * math.pi) - math.pi
