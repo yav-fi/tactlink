@@ -188,7 +188,9 @@ class Visualizer:
                         _HUD_DIM, 1, cv2.LINE_AA)
             g = gstate.active_gesture
             if g and g != "None":
-                cv2.putText(img, g, (pad, 124), font, 0.5, _HUD, 1, cv2.LINE_AA)
+                tag = "*" if gstate.gesture_source == "custom" else ""
+                gcol = _OK if gstate.gesture_source == "custom" else _HUD
+                cv2.putText(img, g + tag, (pad, 124), font, 0.5, gcol, 1, cv2.LINE_AA)
                 if gstate.hold_progress > 0:
                     x0 = pad + 130
                     cv2.rectangle(img, (x0, 114), (x0 + 90, 124), (60, 58, 55), -1)

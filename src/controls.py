@@ -91,7 +91,10 @@ class GestureController:
 
     # -- autopilot routines ------------------------------------------
     def _start_maneuver(self, event: str, state) -> None:
-        if event == "takeoff":
+        if event == "estop":
+            self._armed = False
+            self.maneuver = ""
+        elif event == "takeoff":
             self._armed = True
             self.maneuver = "takeoff"
         elif event == "land":

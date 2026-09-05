@@ -1,0 +1,12 @@
+{
+  "__doc__": "Map gesture names (MediaPipe canned OR your own trained labels) to actions. Merged over the built-in defaults. Actions: takeoff, land, cycle_mode, speed_up, speed_down, spin360, return_home, estop. Keys starting with _ are ignored.",
+  "__example__": "\"thumbs_side\": \"estop\", \"flat_palm_down\": \"return_home\"",
+
+  "Open_Palm": "takeoff",
+  "Closed_Fist": "land",
+  "Victory": "cycle_mode",
+  "Thumb_Up": "speed_up",
+  "Thumb_Down": "speed_down",
+  "Pointing_Up": "spin360",
+  "ILoveYou": "return_home"
+}

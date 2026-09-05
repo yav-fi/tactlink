@@ -73,6 +73,19 @@ class HandTracker:
         self._t0 = time.monotonic()
         self._last_ts = -1  # recognize_for_video requires strictly increasing stamps
         self._last_pts = None  # pixel-space landmarks for drawing
+        self.raw_landmarks = None  # (21, 3) most recent landmarks, for collection
+        self.handedness = "Right"
+
+        # Optional custom classifier trained from your own recordings.
+        try:
+            from gesture_model import CustomGestureClassifier
+
+            self._custom = CustomGestureClassifier()
+        except Exception as exc:  # pragma: no cover
+            print(f"custom gesture model unavailable: {exc}")
+            self._custom = None
+        if self._custom and self._custom.loaded:
+            print(f"custom gestures loaded: {', '.join(self._custom.labels)}")
 
     def process(self, frame_bgr: np.ndarray) -> HandState:
         """Detect a hand + gesture in ``frame_bgr`` and return its state."""
@@ -84,17 +97,27 @@ class HandTracker:
 
         if not result.hand_landmarks:
             self._last_pts = None
+            self.raw_landmarks = None
             return HandState(present=False)
 
         lm = result.hand_landmarks[0]
         pts = np.array([(p.x, p.y) for p in lm], dtype=np.float32)
         h, w = frame_bgr.shape[:2]
         self._last_pts = (pts * (w, h)).astype(np.int32)
+        self.raw_landmarks = np.array([(p.x, p.y, p.z) for p in lm], dtype=np.float32)
+        if result.handedness and result.handedness[0]:
+            self.handedness = result.handedness[0][0].category_name
 
-        gesture, score = "None", 0.0
+        gesture, score, source = "None", 0.0, "none"
         if result.gestures and result.gestures[0]:
             top = result.gestures[0][0]
-            gesture, score = top.category_name, float(top.score)
+            gesture, score, source = top.category_name, float(top.score), "canned"
+
+        # Custom model wins when it is confident; canned gesture is the fallback.
+        if self._custom and self._custom.loaded:
+            label, conf = self._custom.predict(self.raw_landmarks, self.handedness)
+            if label is not None:
+                gesture, score, source = label, conf, "custom"
 
         palm = pts[[0, 5, 9, 13, 17]].mean(axis=0)
 
@@ -117,6 +140,7 @@ class HandTracker:
             fingers_up=self._count_fingers(pts),
             gesture=gesture,
             gesture_score=score,
+            gesture_source=source,
         )
 
     def draw(self, frame_bgr: np.ndarray) -> None:

@@ -4,8 +4,13 @@ __pycache__/
 .venv/
 venv/
 
-# Downloaded models / weights (fetched locally, never committed)
-models/
+# Downloaded models / weights (fetched locally, never committed) ...
+models/*
+# ... but do share the trained custom gesture model
+!models/custom_gestures.npz
+
+# Raw gesture recordings stay local; retrain to regenerate the model
+data/
 
 # Local artifacts / rendered output
 *.png

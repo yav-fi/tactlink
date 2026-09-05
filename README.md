@@ -104,17 +104,47 @@ Hold a sign steady for ~0.4 s to fire it; relax before repeating.
 Take off, land, spin, and return-home run as short autopilot routines that
 override the hand until they finish (`MODE` turns red in the HUD).
 
+## Custom gestures (train your own)
+
+Record your own hand signs and the app will prefer them over the 7 built-ins
+(falling back to a canned gesture when the custom model isn't confident). No
+image dataset, no TensorFlow - it classifies the 21 hand landmarks directly.
+
+```sh
+# 1. record ~200 samples per sign (hold pose, SPACE to record, Q to save)
+python scripts/collect_gestures.py --label flat_palm_down
+python scripts/collect_gestures.py --label point_left
+python scripts/collect_gestures.py --list          # see sample counts
+
+# 2. train (writes models/custom_gestures.npz, picked up automatically)
+python scripts/train_gestures.py
+
+# 3. map the new labels to actions
+#    edit config/gesture_actions.json, e.g.  "point_left": "return_home"
+```
+
+Actions available: `takeoff`, `land`, `cycle_mode`, `speed_up`, `speed_down`,
+`spin360`, `return_home`, `estop`. Feature layout is versioned
+(`landmark_features.FEATURE_VERSION`) - bump it and retrain if you change it.
+`models/custom_gestures.npz` is the one model file that *is* committed, so a
+trained set of gestures travels with the repo; raw recordings under `data/` stay
+local.
+
 ## Layout
 
 | File | Role |
 | --- | --- |
 | `src/main.py` | Capture loop, window, keys, `--demo` / `--headless` |
-| `src/hand_tracker.py` | MediaPipe GestureRecognizer → `HandState` (landmarks + gesture) |
+| `src/hand_tracker.py` | MediaPipe GestureRecognizer → `HandState`; custom model overrides canned |
+| `src/landmark_features.py` | 21 landmarks → normalized 63-d pose vector (shared by collect/train/infer) |
+| `src/gesture_model.py` | Dependency-free k-NN custom gesture classifier (`custom_gestures.npz`) |
 | `src/gestures.py` | Debounces the gesture stream → mode, speed, discrete events |
 | `src/controls.py` | Hand pose + gesture state → `ControlInput`; runs autopilot routines |
 | `src/simulator.py` | Arcade quadcopter physics (world frame: x right, y forward, z up) |
 | `src/visualizer.py` | Look-at pinhole camera, 3D drone render, control HUD |
 | `src/control_types.py` | Shared dataclasses and the `FlightMode` enum |
+| `scripts/collect_gestures.py` · `scripts/train_gestures.py` | Record samples · fit the custom model |
+| `config/gesture_actions.json` | Gesture-name → action map (merged over defaults) |
 
 The simulator takes a normalized `ControlInput` (throttle, yaw_rate, roll,
 pitch, armed), so swapping the simulator for a real link (Tello, MAVLink RC

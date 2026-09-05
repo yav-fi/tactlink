@@ -57,6 +57,7 @@ def _demo_hand(t: float) -> HandState:
         fingers_up=5 if gesture in ("None", "Open_Palm") else 1,
         gesture=gesture,
         gesture_score=0.9,
+        gesture_source="canned" if gesture != "None" else "none",
     )
 
 
@@ -123,7 +124,8 @@ def run(args: argparse.Namespace) -> int:
                                 (140, 240, 140), 2)
                 cam_frame = frame
 
-            gstate = interp.update(hand.gesture if hand.present else "None")
+            gstate = interp.update(hand.gesture if hand.present else "None",
+                                   hand.gesture_source)
             if kbd_event:
                 gstate.events.append(kbd_event)
                 kbd_event = None
