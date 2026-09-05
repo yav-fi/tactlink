@@ -45,9 +45,9 @@ git clone https://github.com/kaarelkaarelson/mlx-bench.git ~/mlx-bench
 
 ## Performance
 
-| Hardware | Model | Plug-in Algorithms | Decode tok/s |
-| --- | --- | --- | --- |
-| MacBook Pro, Apple M3 Max, 48GB | [mlx-community/Qwen3.8-27B-4bit](https://huggingface.co/mlx-community/Qwen3.8-27B-4bit) | DFlash2 (w4:gs64 draft), LibraSpec | 72.3 |
+| Hardware | Model | Draft Head | Plug-in Algorithms | Decode tok/s |
+| --- | --- | --- | --- | --- |
+| MacBook Pro, Apple M3 Max, 48GB | [mlx-community/Qwen3.8-27B-4bit](https://huggingface.co/mlx-community/Qwen3.8-27B-4bit) | [DFlash2](https://huggingface.co/z-lab/Qwen3.8-27B-DFlash2) (w4:gs64) | [LibraSpec](https://arxiv.org/abs/2608.08721) | **72.3** |
 
 Measured with `./scripts/benchmark.sh`, thermally gated (GPU cooled to 37.4°C, fans
 verified at max RPM before/after) — see `benchmark_result.json` for the full receipt.
