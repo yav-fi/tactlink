@@ -20,7 +20,7 @@ class Limits:
     max_laps: int = 10
 
 
-NUMBER = r"(-?\d+(?:\.\d+)?)"
+NUMBER = r"(-?\d{1,8}(?:\.\d{1,8})?)"
 METERS = r"(?:meters?|metres?|m)"
 
 
@@ -37,13 +37,17 @@ def _parse(text):
     match = re.fullmatch(rf"(?:fly|move) (north|south|east|west) {NUMBER} {METERS}", text)
     if match:
         return {"type": "move", "direction": match[1], "distance_m": float(match[2])}
+    match = re.fullmatch(rf"(?:go|fly) to point {NUMBER} {NUMBER} at altitude {NUMBER} {METERS}", text)
+    if match:
+        return {"type": "waypoint", "north_m": float(match[1]), "east_m": float(match[2]),
+                "altitude_m": float(match[3])}
     if text == "return home":
         return {"type": "return_home"}
     if text in ("land", "land here"):
         return {"type": "land"}
     match = re.fullmatch(
         rf"orbit (home|point {NUMBER} {NUMBER}) at (?:a )?radius (?:of )?{NUMBER} {METERS} "
-        r"(clockwise|counterclockwise) (once|twice|\d+ laps?)", text)
+        r"(clockwise|counterclockwise) (once|twice|\d{1,3} laps?)", text)
     if match:
         center = ({"reference": "home"} if match[1] == "home" else
                   {"reference": "local", "north_m": float(match[2]), "east_m": float(match[3])})
@@ -58,6 +62,24 @@ def _parse(text):
         "See docs/flight-language.md for examples.")
 
 
+def instruction_lines(text):
+    """Split syntax without requiring a complete grounded-to-airborne mission."""
+    if not isinstance(text, str) or len(text) > 8000:
+        raise MissionError('Instructions must be text of at most 8,000 characters.')
+    normalized = re.sub(r"\s+", " ", text.strip().lower()).rstrip('.')
+    parts = re.split(r"\s*(?:[,;]\s*(?:(?:and\s+)?then\s+|and\s+)?|\band then\b|\bthen\b|\band\b)\s*", normalized)
+    if len(parts) > 100:
+        raise MissionError('Use at most 100 commands per mission.')
+    for index, part in enumerate(parts, 1):
+        try:
+            if not part:
+                raise MissionError('Provide a command between separators.')
+            _parse(part)
+        except MissionError as error:
+            raise MissionError(f'Command {index}: {error}') from error
+    return parts
+
+
 def parse_mission(text, limits=None):
     """Parse and validate a mission starting grounded at home (north=0, east=0).
 
@@ -69,9 +91,7 @@ def parse_mission(text, limits=None):
     for value in vars(limits).values():
         if not math.isfinite(value) or value <= 0:
             raise MissionError("All configured limits must be finite and positive.")
-    normalized = re.sub(r"\s+", " ", text.strip().lower())
-    normalized = normalized.rstrip(".")
-    parts = re.split(r"\s*(?:[,;]\s*(?:(?:and\s+)?then\s+|and\s+)?|\band then\b|\bthen\b|\band\b)\s*", normalized)
+    parts = instruction_lines(text)
     commands = []
     north = east = altitude = 0.0
     airborne = False
@@ -90,10 +110,14 @@ def parse_mission(text, limits=None):
             for field in ("altitude_m", "distance_m", "duration_s", "radius_m", "laps"):
                 if field in command and (not math.isfinite(command[field]) or command[field] <= 0):
                     raise MissionError(f"{field} must be finite and positive.")
-            if kind in ("takeoff", "change_altitude"):
+            if kind in ("takeoff", "change_altitude", "waypoint"):
                 altitude = command["altitude_m"]
                 if altitude > limits.max_altitude_m:
                     raise MissionError("Altitude exceeds configured maximum.")
+                if kind == 'waypoint':
+                    if math.hypot(command['north_m'] - north, command['east_m'] - east) > limits.max_move_m:
+                        raise MissionError('Waypoint leg exceeds configured maximum distance.')
+                    north, east = command['north_m'], command['east_m']
             elif kind == "move":
                 distance = command["distance_m"]
                 if distance > limits.max_move_m:

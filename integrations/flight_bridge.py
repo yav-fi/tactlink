@@ -3,15 +3,18 @@
 import argparse
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.flight_language import MissionError
+from src.flight_language import MissionError, instruction_lines
 from .ardupilot_link import ArduPilotLink
 from .flight_path import build_preview, mission_planner_file
+from .speech_input import LocalTranscriber, normalize_instruction
 
 
 class Origin(BaseModel):
@@ -28,10 +31,11 @@ class PreviewRequest(BaseModel):
     sample_spacing_m: float = Field(default=2, ge=0.5, le=10)
 
 
-def create_app(endpoint=None, baud=115200, allowed_origins=(), link_factory=ArduPilotLink):
+def create_app(endpoint=None, baud=115200, allowed_origins=(), link_factory=ArduPilotLink, transcriber=None):
     preview = None
     link = None
     link_error = None
+    speech = transcriber or LocalTranscriber()
 
     async def read_telemetry():
         nonlocal link_error
@@ -109,6 +113,43 @@ def create_app(endpoint=None, baud=115200, allowed_origins=(), link_factory=Ardu
     async def get_telemetry():
         return telemetry()
 
+    @app.post('/api/planner/parse')
+    async def parse_input(request: PreviewRequest):
+        normalized = normalize_instruction(request.text)
+        try:
+            return dict(normalized_text=normalized, lines=instruction_lines(normalized))
+        except MissionError as error:
+            raise HTTPException(422, str(error)) from error
+
+    @app.post('/api/planner/export', response_class=PlainTextResponse)
+    async def export_draft(request: PreviewRequest):
+        # Validate the exact submitted draft, independent of other browser tabs.
+        try:
+            result = build_preview(request.text, request.origin.model_dump() if request.origin else None,
+                                   request.sample_spacing_m)
+            return PlainTextResponse(mission_planner_file(result),
+                                     headers={'Content-Disposition': 'attachment; filename="mission.waypoints"'})
+        except MissionError as error:
+            raise HTTPException(422, str(error)) from error
+
+    @app.get('/api/speech/status')
+    async def speech_status():
+        return speech.status()
+
+    @app.post('/api/speech/transcribe')
+    async def transcribe(request: Request):
+        audio = bytearray()
+        async for chunk in request.stream():
+            audio.extend(chunk)
+            if len(audio) > 1100000:
+                raise HTTPException(413, 'Recording exceeds the 30-second WAV size limit.')
+        try:
+            return await asyncio.to_thread(speech.transcribe, bytes(audio))
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        except Exception as error:
+            raise HTTPException(503, f'Local transcription unavailable: {error}') from error
+
     @app.websocket('/ws/flight')
     async def stream(socket: WebSocket):
         await socket.accept()
@@ -124,6 +165,7 @@ def create_app(endpoint=None, baud=115200, allowed_origins=(), link_factory=Ardu
         except (WebSocketDisconnect, RuntimeError, OSError):
             pass
 
+    app.mount('/planner', StaticFiles(directory=Path(__file__).with_name('waypoint_ui'), html=True), name='planner')
     return app
 
 

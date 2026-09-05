@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Waypoint planner</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><div class="brand"><span class="logo">↗</span><div><small>DNHACKS · FLIGHT TOOLS</small><h1>Waypoint planner</h1></div></div><span class="badge">MISSION PLANNER EXPORT</span><button id="export" disabled>Download .waypoints ↗</button></header>
+<main>
+<aside class="inputs">
+  <section><h2><span>01</span> Set your home</h2><p class="muted">The map starts at an example location. Enter your aircraft's home before exporting.</p>
+    <div class="fields"><label>Latitude °<input id="latitude" type="number" min="-85" max="85" step="any" value="38.8895"></label><label>Longitude °<input id="longitude" type="number" min="-180" max="180" step="any" value="-77.0353"></label></div>
+    <label>Home altitude · meters above sea level<input id="home-altitude" type="number" step="any" placeholder="Required for export"></label>
+    <label class="check"><input type="checkbox" id="home-confirmed"> These are my intended home coordinates</label>
+  </section>
+  <section><h2><span>02</span> Place on the map</h2>
+    <label>Command<select id="action"><option value="waypoint">Waypoint · click a destination</option><option value="orbit">Orbit · click its center</option><option value="takeoff">Take off</option><option value="change_altitude">Change altitude</option><option value="hover">Hover</option><option value="return_home">Return home</option><option value="land">Land</option></select></label>
+    <div class="fields"><label id="alt-field">Altitude above home (m)<input id="altitude" type="number" value="10" min="0.1" max="50" step="any"></label><label id="radius-field" hidden>Orbit radius (m)<input id="radius" type="number" value="20" min="0.1" max="200" step="any"></label></div>
+    <div id="orbit-fields" hidden class="fields"><label>Direction<select id="direction"><option>clockwise</option><option>counterclockwise</option></select></label><label>Laps<input id="laps" type="number" value="1" min="1" max="10" step="1"></label></div>
+    <label id="duration-field" hidden>Hover duration (s)<input id="duration" type="number" value="5" min="0.1" max="300" step="any"></label>
+    <button id="add-placement" class="secondary">Add command</button><p id="placement-help" class="muted">Click a destination on the map. Add takeoff first.</p>
+  </section>
+  <section><h2><span>03</span> Type or speak</h2>
+    <label for="instruction">Instruction / editable transcript</label><textarea id="instruction" rows="4" placeholder="Take off to 10 meters, fly north 20 meters, then land"></textarea>
+    <div class="buttons"><button id="record" class="secondary">● Hold to speak</button><button id="add-text">Add to mission</button></div>
+    <p id="speech-status" class="muted" role="status">Checking local speech recognition…</p>
+    <details><summary>Command examples</summary><p>take off to 10 meters<br>fly north 20 meters<br>hover for 5 seconds<br>orbit home at radius 20 m clockwise once<br>return home<br>land</p></details>
+  </section>
+</aside>
+<section class="map-panel">
+  <div class="map-toolbar"><div><small>PATH PREVIEW</small><h2>Plan your route</h2></div><label class="check"><input id="street-map" type="checkbox"> Street map (internet)</label></div>
+  <div id="map" tabindex="0" role="application" aria-label="Waypoint map. Click to place; drag to pan; plus and minus buttons zoom.">
+    <div id="tiles"></div><svg id="drawing" xmlns="http://www.w3.org/2000/svg" aria-label="Mission route"></svg>
+    <div class="map-controls"><button id="zoom-in" aria-label="Zoom in">+</button><button id="zoom-out" aria-label="Zoom out">−</button><button id="recenter" aria-label="Recenter on home">⌂</button></div>
+    <div class="north">N ↑</div><div id="map-caption">Offline coordinate grid · 50 m spacing</div>
+    <a id="attribution" hidden href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a>
+  </div>
+  <div class="map-footer"><span><i class="dot"></i> Planned path</span><span>Dashed boundary: 200 m from home</span><span id="cursor">East / north · meters</span></div>
+  <div id="status" role="status">Add a takeoff command to begin.</div>
+  <p class="footnote">Plan and export only. This page does not upload, arm, or start an aircraft. Map imagery does not establish obstacle clearance.</p>
+</section>
+<aside class="mission-panel"><div class="list-title"><div><small>YOUR MISSION</small><h2>Command sequence <span id="count">0</span></h2></div><button class="secondary" id="clear">Clear</button></div>
+  <p class="muted">Edit a command or use the arrows to change its order. Every change is revalidated.</p>
+  <ol id="commands"></ol><div id="empty"><span>＋</span><h3>Your route starts here</h3><p>Place points, type an instruction, or hold to speak.</p></div>
+  <div id="summary" class="muted"></div><p class="muted">Draft saved in this browser.</p>
+</aside>
+</main><script type="module" src="planner.js"></script></body></html>

@@ -60,6 +60,9 @@ def build_preview(text, origin=None, sample_spacing_m=2.0):
         elif kind == 'return_home':
             end.update(x=0.0, y=0.0)
             add('line', end, index)
+        elif kind == 'waypoint':
+            end.update(x=command['east_m'], y=command['north_m'], z=command['altitude_m'])
+            add('line', end, index)
         elif kind == 'hover':
             add('hold', end, index, duration_s=command['duration_s'])
         elif kind == 'orbit':
