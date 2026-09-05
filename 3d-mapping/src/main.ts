@@ -3,6 +3,7 @@ import "./style.css";
 import * as Cesium from "cesium";
 import { DroneController } from "./drone-controller";
 import { Fleet, DRONE_COLORS } from "./fleet";
+import { formationSlots } from "./formation";
 import { parseMission, sampleMission } from "./mission";
 
 const home = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
@@ -57,7 +58,16 @@ const heightInput = document.querySelector<HTMLInputElement>("#deployment-height
 const confirmDeployment = document.querySelector<HTMLButtonElement>("#confirm-deployment")!;
 let deploying = false;
 let pickedSurface: Cesium.Cartographic | undefined;
-let preview: Cesium.Entity | undefined;
+let previews: Cesium.Entity[] = [];
+let placementMode: "single" | "bulk" | "command" = "single";
+const selectedIds = new Set<string>();
+const memberList = document.querySelector<HTMLDivElement>("#group-members")!;
+const savedGroups = document.querySelector<HTMLSelectElement>("#saved-groups")!;
+const groupStatus = document.querySelector<HTMLParagraphElement>("#group-status")!;
+const countInput = document.querySelector<HTMLInputElement>("#batch-count")!;
+const spacingInput = document.querySelector<HTMLInputElement>("#formation-spacing")!;
+let pendingIds: string[] = [];
+let pendingGroup = "";
 const activeCameraKeys = new Set<string>();
 const controlDroneButton = document.querySelector<HTMLButtonElement>("#control-drone")!;
 let controllingDrone = false;
@@ -155,8 +165,9 @@ function refreshFleet(): void {
   if (!fleet.drones.size) droneSelect.add(new Option("No drones deployed", ""));
   let index = 0;
   for (const item of fleet.drones.values()) {
-    const color = DRONE_COLORS[index++ % DRONE_COLORS.length];
-    droneSelect.add(new Option(`${item.id.replace("_", " ")} · ${color.name}`, item.id));
+    index++;
+    const color = DRONE_COLORS.find(color => color.hex === item.colorHex);
+    droneSelect.add(new Option(`${item.id.replace("_", " ")} · ${color?.name ?? item.colorHex}`, item.id));
   }
   droneSelect.value = drone?.id ?? "";
   droneSelect.disabled = deploying || !drone;
@@ -170,7 +181,43 @@ function refreshFleet(): void {
   document.querySelector<HTMLButtonElement>("#deploy-drone")!.disabled = fleet.replay.running;
   replayButton.disabled = deploying || fleet.replay.running || !fleet.drones.size;
   stopReplayButton.disabled = !fleet.replay.running;
+  document.querySelector<HTMLButtonElement>("#bulk-deploy")!.disabled = fleet.replay.running;
+  refreshGroups();
 }
+
+function refreshGroups(): void {
+  const locked = deploying || fleet.replay.running;
+  memberList.replaceChildren();
+  for (const item of fleet.drones.values()) {
+    const row = document.createElement("label"); row.className = "member-row";
+    const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.checked = selectedIds.has(item.id); checkbox.disabled = locked;
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) selectedIds.add(item.id); else selectedIds.delete(item.id);
+      savedGroups.value = ""; refreshGroups();
+    });
+    const swatch = document.createElement("span"); swatch.className = "member-swatch"; swatch.style.background = item.colorHex;
+    row.append(checkbox, swatch, document.createTextNode(item.id.replace("_", " "))); memberList.append(row);
+  }
+  const previousGroup = savedGroups.value;
+  savedGroups.replaceChildren(new Option("Custom selection", ""));
+  for (const [name, group] of fleet.groups) savedGroups.add(new Option(`${name} (${group.ids.length})`, name));
+  savedGroups.value = previousGroup;
+  savedGroups.disabled = locked;
+  for (const id of ["select-all", "select-none", "save-group", "choose-destination"]) {
+    document.querySelector<HTMLButtonElement>(`#${id}`)!.disabled = locked || (id === "choose-destination" || id === "save-group" ? !selectedIds.size : !fleet.drones.size);
+  }
+  groupStatus.textContent = `${selectedIds.size} drone${selectedIds.size === 1 ? "" : "s"} selected. Click Choose destination to assign arrival slots.`;
+}
+document.querySelector<HTMLButtonElement>("#select-all")!.addEventListener("click", () => { for (const id of fleet.drones.keys()) selectedIds.add(id); savedGroups.value = ""; refreshGroups(); });
+document.querySelector<HTMLButtonElement>("#select-none")!.addEventListener("click", () => { selectedIds.clear(); savedGroups.value = ""; refreshGroups(); });
+savedGroups.addEventListener("change", () => { selectedIds.clear(); for (const id of fleet.groups.get(savedGroups.value)?.ids ?? []) selectedIds.add(id); refreshGroups(); });
+document.querySelector<HTMLButtonElement>("#save-group")!.addEventListener("click", () => {
+  try {
+    const name = document.querySelector<HTMLInputElement>("#group-name")!.value.trim();
+    fleet.saveGroup(name, [...selectedIds]); refreshFleet(); savedGroups.value = name;
+    groupStatus.textContent = `${name} saved. Its drones now share a color.`;
+  } catch (error) { groupStatus.textContent = error instanceof Error ? error.message : "Unable to save group."; }
+});
 
 replayButton.addEventListener("click", () => {
   flyToFreeCameraOverview();
@@ -189,37 +236,76 @@ stopReplayButton.addEventListener("click", () => {
 function cancelDeployment(): void {
   deploying = false;
   pickedSurface = undefined;
-  if (preview) viewer.entities.remove(preview);
-  preview = undefined;
+  for (const preview of previews) viewer.entities.remove(preview);
+  previews = [];
   deploymentPanel.hidden = true;
   confirmDeployment.disabled = true;
   refreshFleet();
 }
 
 function updatePreview(): void {
+  for (const preview of previews) viewer.entities.remove(preview);
+  previews = [];
   const height = heightInput.valueAsNumber;
-  confirmDeployment.disabled = !pickedSurface || !heightInput.checkValidity() || !Number.isFinite(height);
+  confirmDeployment.disabled = !pickedSurface || !heightInput.checkValidity() || !Number.isFinite(height) || !spacingInput.checkValidity() || !Number.isFinite(spacingInput.valueAsNumber) || (placementMode === "bulk" && (!countInput.checkValidity() || !Number.isInteger(countInput.valueAsNumber))) || (placementMode === "command" && pendingIds.length > 100);
   if (confirmDeployment.disabled || !pickedSurface) return;
-  const position = Cesium.Cartesian3.fromRadians(pickedSurface.longitude, pickedSurface.latitude, pickedSurface.height + height);
-  if (!preview) {
-    preview = viewer.entities.add({ id: "deployment-preview", position, point: { pixelSize: 12, color: Cesium.Color.fromCssColorString(fleet.nextColor.hex) }, label: { text: "START HERE", pixelOffset: new Cesium.Cartesian2(0, -22), font: "14px system-ui", showBackground: true } });
-  } else preview.position = new Cesium.ConstantPositionProperty(position);
-  deploymentStatus.textContent = `Starting point: ${Cesium.Math.toDegrees(pickedSurface.latitude).toFixed(5)}, ${Cesium.Math.toDegrees(pickedSurface.longitude).toFixed(5)}. Click elsewhere to adjust, then Deploy here.`;
+  const center = { longitude: Cesium.Math.toDegrees(pickedSurface.longitude), latitude: Cesium.Math.toDegrees(pickedSurface.latitude), altitude: pickedSurface.height + height };
+  const count = placementMode === "command" ? pendingIds.length : placementMode === "bulk" ? countInput.valueAsNumber : 1;
+  const slots = formationSlots(center, count, spacingInput.valueAsNumber);
+  slots.forEach((slot, index) => {
+    const position = Cesium.Cartesian3.fromDegrees(slot.longitude, slot.latitude, slot.altitude);
+    const member = placementMode === "command" ? fleet.drones.get(pendingIds[index]) : undefined;
+    const sharedColor = fleet.groups.get(pendingGroup)?.color ?? fleet.drones.get(pendingIds[0])?.colorHex;
+    const color = Cesium.Color.fromCssColorString(placementMode === "command" ? sharedColor! : fleet.nextColor.hex);
+    previews.push(viewer.entities.add({ position, point: { pixelSize: 10, color }, label: { text: member?.id ?? `${index + 1}`, pixelOffset: new Cesium.Cartesian2(0, -20), font: "12px system-ui", showBackground: true } }));
+    if (member) {
+      const start = member.snapshot();
+      previews.push(viewer.entities.add({ polyline: { positions: [Cesium.Cartesian3.fromDegrees(start.longitude, start.latitude, start.altitude), position], width: 2, material: new Cesium.PolylineDashMaterialProperty({ color }), arcType: Cesium.ArcType.NONE } }));
+    }
+  });
+  deploymentStatus.textContent = `${count} ${placementMode === "command" ? "arrival" : "starting"} slot(s), ${spacingInput.value} m apart. Click elsewhere to adjust, then confirm.`;
 }
 
 document.querySelector<HTMLButtonElement>("#deploy-drone")!.addEventListener("click", () => {
   cancelDeployment();
   flyToFreeCameraOverview();
   deploying = true;
+  placementMode = "single";
+  countInput.disabled = true;
+  countInput.value = "1";
+  confirmDeployment.textContent = "Deploy here";
   deploymentPanel.hidden = false;
   deploymentStatus.textContent = `Next drone: ${fleet.nextColor.name}. Fly the camera, then click a starting point on the map. No route is recorded during placement.`;
   commandStatus.textContent = "Choose a starting point, then confirm deployment.";
   refreshFleet();
 });
+document.querySelector<HTMLButtonElement>("#bulk-deploy")!.addEventListener("click", () => {
+  cancelDeployment(); flyToFreeCameraOverview(); deploying = true; placementMode = "bulk";
+  countInput.disabled = false; countInput.value = "10"; deploymentPanel.hidden = false; confirmDeployment.textContent = "Deploy batch here";
+  deploymentStatus.textContent = "Choose a map location for the batch, then adjust number, height and spacing.";
+  refreshFleet();
+});
+document.querySelector<HTMLButtonElement>("#choose-destination")!.addEventListener("click", () => {
+  if (!selectedIds.size) return;
+  pendingIds = [...selectedIds]; pendingGroup = savedGroups.value;
+  cancelDeployment(); flyToFreeCameraOverview(); deploying = true; placementMode = "command";
+  countInput.disabled = true; countInput.value = String(pendingIds.length); deploymentPanel.hidden = false;
+  confirmDeployment.textContent = "Send selected drones";
+  deploymentStatus.textContent = "Click the destination, adjust height and spacing, and review the dashed routes before sending.";
+  deploymentPanel.scrollIntoView({ block: "nearest" }); refreshFleet();
+});
 heightInput.addEventListener("input", updatePreview);
+countInput.addEventListener("input", updatePreview);
+spacingInput.addEventListener("input", updatePreview);
 document.querySelector<HTMLButtonElement>("#cancel-deployment")!.addEventListener("click", cancelDeployment);
 cameraHandler.setInputAction((event: { position: Cesium.Cartesian2 }) => {
-  if (!deploying) return;
+  if (!deploying) {
+    if (controllingDrone || fleet.replay.running) return;
+    const picked = viewer.scene.pick(event.position);
+    const id = typeof picked?.id?.id === "string" ? picked.id.id.match(/^drone_\d+/)?.[0] : undefined;
+    if (id && fleet.drones.has(id)) { if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id); savedGroups.value = ""; refreshGroups(); }
+    return;
+  }
   let picked: Cesium.Cartesian3 | undefined;
   if (viewer.scene.pickPositionSupported) picked = viewer.scene.pickPosition(event.position);
   if (!picked) {
@@ -234,12 +320,17 @@ cameraHandler.setInputAction((event: { position: Cesium.Cartesian2 }) => {
   updatePreview();
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 confirmDeployment.addEventListener("click", () => {
-  if (!deploying || !pickedSurface || !heightInput.checkValidity()) return;
-  const selected = fleet.deploy({ latitude: Cesium.Math.toDegrees(pickedSurface.latitude), longitude: Cesium.Math.toDegrees(pickedSurface.longitude), altitude: pickedSurface.height + heightInput.valueAsNumber });
-  drone = selected;
-  cancelDeployment();
-  selectDrone(selected.id);
-  commandStatus.textContent = `${selected.id.replace("_", " ")} deployed. Choose Control drone to fly it, or deploy another.`;
+  if (!deploying || !pickedSurface || confirmDeployment.disabled) return;
+  const center = { latitude: Cesium.Math.toDegrees(pickedSurface.latitude), longitude: Cesium.Math.toDegrees(pickedSurface.longitude), altitude: pickedSurface.height + heightInput.valueAsNumber };
+  if (placementMode === "command") {
+    fleet.commandGroup(pendingIds, center, spacingInput.valueAsNumber, performance.now() / 1000, pendingGroup);
+    cancelDeployment(); refreshFleet(); commandStatus.textContent = `${pendingIds.length} drones launched together; routes replaced. Shared color assigned.`;
+    return;
+  }
+  const added = placementMode === "bulk" ? fleet.deployBulk(center, countInput.valueAsNumber, spacingInput.valueAsNumber) : [fleet.deploy(center)];
+  drone = added[0]; selectedIds.clear(); for (const item of added) selectedIds.add(item.id);
+  cancelDeployment(); selectDrone(drone.id);
+  commandStatus.textContent = `${added.length} drone(s) deployed. Select Control drone for individual flight or Choose destination for the selection.`;
 });
 
 function selectDrone(id: string): void {
@@ -263,6 +354,7 @@ document.querySelector<HTMLButtonElement>("#reset-all")!.addEventListener("click
   flyToFreeCameraOverview();
   cancelDeployment();
   fleet.clear();
+  selectedIds.clear();
   replayStatus.textContent = "Record paths by piloting drones, then run them together.";
   drone = undefined;
   refreshFleet();

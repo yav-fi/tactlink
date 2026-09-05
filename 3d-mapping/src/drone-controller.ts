@@ -57,7 +57,7 @@ export class DroneController {
   private replayDistances: number[] = [];
   private replaySpeed = 0;
 
-  constructor(private readonly viewer: Cesium.Viewer, home: Coordinates, private readonly color = Cesium.Color.fromCssColorString("#35e8ff"), readonly id = "drone_1") {
+  constructor(private readonly viewer: Cesium.Viewer, home: Coordinates, private color = Cesium.Color.fromCssColorString("#35e8ff"), readonly id = "drone_1") {
     this.home = { ...home };
     this.position = { ...home };
     this.entity = viewer.entities.add({
@@ -142,6 +142,39 @@ export class DroneController {
   }
 
   get heading(): number { return this.manualHeading; }
+  stopCommand(): void { this.stopManualMotion(); this.state = "HOVERING"; }
+  get colorHex(): string { return this.color.toCssHexString(); }
+  setColor(hex: string): void {
+    const color = Cesium.Color.fromCssColorString(hex);
+    if (!color) throw new Error("Invalid drone color.");
+    this.color = color;
+    this.entity.polyline!.material = new Cesium.PolylineArrowMaterialProperty(color);
+    this.trailEntity.polyline!.material = new Cesium.ColorMaterialProperty(color);
+    for (const item of [this.entity, this.originEntity, ...this.releases, ...this.arrows, ...(this.replayEntity ? [this.replayEntity] : [])]) {
+      if (item.label) item.label.fillColor = new Cesium.ConstantProperty(color);
+      if (item.box) {
+        item.box.material = new Cesium.ColorMaterialProperty(color.withAlpha(item === this.originEntity ? 0.3 : 1));
+        item.box.outlineColor = new Cesium.ConstantProperty(color);
+      }
+      if (item !== this.entity && item.polyline) item.polyline.material = new Cesium.PolylineArrowMaterialProperty(color);
+    }
+  }
+
+  commandDestination(destination: Coordinates): void {
+    this.hideReplay();
+    this.stopManualMotion();
+    this.mission = null;
+    this.state = "NAVIGATING";
+    const origin = Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude);
+    this.originEntity.position = new Cesium.ConstantPositionProperty(origin);
+    this.originEntity.show = true;
+    for (const marker of [...this.releases, ...this.arrows]) this.viewer.entities.remove(marker);
+    this.releases.length = 0;
+    this.arrows.length = 0;
+    this.trailPoints = [origin, Cesium.Cartesian3.fromDegrees(destination.longitude, destination.latitude, destination.altitude)];
+    this.trailEntity.show = true;
+    this.updateTrailArrows();
+  }
   get homeCoordinates(): Coordinates { return { ...this.home }; }
   get speedMph(): number { return this.configuredSpeedMph; }
   set speedMph(value: number) {
@@ -221,10 +254,10 @@ export class DroneController {
     return length / this.replaySpeed;
   }
 
-  replayAt(elapsedSeconds: number): void {
+  replayAt(elapsedSeconds: number, moveDrone = false): void {
     if (!this.replayEntity) return;
     const length = this.replayDistances.at(-1)!;
-    const distance = Math.min(length, Math.max(0, elapsedSeconds) * this.replaySpeed);
+    const distance = elapsedSeconds >= length / this.replaySpeed ? length : Math.max(0, elapsedSeconds) * this.replaySpeed;
     let low = 1, high = this.replayDistances.length - 1;
     while (low < high) {
       const mid = Math.floor((low + high) / 2);
@@ -233,6 +266,12 @@ export class DroneController {
     const start = this.replayDistances[low - 1];
     const span = this.replayDistances[low] - start;
     this.replayPosition = Cesium.Cartesian3.lerp(this.replayPoints[low - 1], this.replayPoints[low], span > 0 ? (distance - start) / span : 0, new Cesium.Cartesian3());
+    if (moveDrone) {
+      const geographic = Cesium.Cartographic.fromCartesian(this.replayPosition);
+      this.position = { latitude: Cesium.Math.toDegrees(geographic.latitude), longitude: Cesium.Math.toDegrees(geographic.longitude), altitude: geographic.height };
+      this.lastRenderedPosition = Cesium.Cartesian3.clone(this.replayPosition);
+      this.state = distance >= length ? "HOVERING" : "NAVIGATING";
+    }
   }
 
   hideReplay(): void {

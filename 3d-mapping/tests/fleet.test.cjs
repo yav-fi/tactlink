@@ -20,6 +20,63 @@ function loadSource(name) {
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
 
+test("bulk deployment preserves individual control and grid spacing", () => {
+  const entities = new Cesium.EntityCollection();
+  const fleet = new Fleet({ entities });
+  const batch = fleet.deployBulk(home, 10, 30);
+  assert.equal(batch.length, 10);
+  assert.equal(fleet.drones.size, 10);
+  for (let i = 0; i < batch.length; i++) for (let j = i + 1; j < batch.length; j++) {
+    assert(Cesium.Cartesian3.distance(entities.getById(batch[i].id).position.getValue(), entities.getById(batch[j].id).position.getValue()) > 29.9);
+  }
+  assert(batch.every(d => !entities.getById(`${d.id}_trail`).show));
+  const before = batch[1].snapshot();
+  batch[0].setManualControl(true); batch[0].moveManually(1, 0, 0, 0.1);
+  assert.deepEqual(batch[1].snapshot(), before);
+  assert.throws(() => fleet.deployBulk(home, 0, 30));
+  assert.throws(() => fleet.deployBulk(home, 3, 0));
+  assert.equal(fleet.drones.size, 10);
+});
+
+test("named groups launch together, share color and actually arrive at separate destinations", () => {
+  const entities = new Cesium.EntityCollection();
+  const fleet = new Fleet({ entities });
+  const batch = fleet.deployBulk(home, 10, 30);
+  fleet.saveGroup("Alpha", batch.slice(0, 4).map(d => d.id));
+  assert.equal(new Set(batch.slice(0, 4).map(d => d.colorHex)).size, 1);
+  const outsider = batch[9].snapshot();
+  const center = { ...home, longitude: home.longitude + 0.01 };
+  batch[0].speedMph = 30;
+  const ids = fleet.groups.get("Alpha").ids;
+  fleet.commandGroup(ids, center, 40, 100, "Alpha");
+  assert.equal(fleet.replay.total, 4);
+  const duration = fleet.replay.duration;
+  fleet.updateReplay(101);
+  assert.notEqual(batch[0].snapshot().longitude, home.longitude);
+  fleet.updateReplay(100 + duration + 1);
+  assert.equal(fleet.replay.arrived, 4);
+  const { formationSlots } = loadSource("formation");
+  const slots = formationSlots(center, 4, 40);
+  for (let i = 0; i < 4; i++) {
+    const state = batch[i].snapshot();
+    assert(Math.abs(state.longitude - slots[i].longitude) < 1e-9);
+    assert(Math.abs(state.latitude - slots[i].latitude) < 1e-9);
+    assert.equal(state.state, "HOVERING");
+    const originColor = entities.getById(`${batch[i].id}_origin`).box.material.color.getValue();
+    assert.equal(originColor.withAlpha(1).toCssHexString(), batch[i].colorHex);
+  }
+  assert.deepEqual(batch[9].snapshot(), outsider);
+  // An ad-hoc selection also gets one color and starts from its real current positions.
+  fleet.commandGroup([batch[0].id, batch[4].id], home, 30, 200);
+  assert.equal(batch[0].colorHex, batch[4].colorHex);
+  fleet.updateReplay(201);
+  const stopped = batch[0].snapshot();
+  fleet.stopReplay(); fleet.updateReplay(300);
+  assert.equal(batch[0].snapshot().longitude, stopped.longitude);
+  assert.equal(batch[0].snapshot().state, "HOVERING");
+  fleet.clear(); assert.equal(fleet.groups.size, 0); assert.equal(entities.values.length, 0);
+});
+
 test("synchronized replay uses assigned speeds and stops at the last arrival", () => {
   const entities = new Cesium.EntityCollection();
   const fleet = new Fleet({ entities });

@@ -23,12 +23,17 @@
           <p id="playback-status" class="hint" role="status">Record paths by piloting drones, then run them together.</p>
           <div class="actions">
             <button id="deploy-drone" type="button">Deploy a new drone</button>
+            <button id="bulk-deploy" type="button">Deploy a batch</button>
             <button id="reset-all" type="button" class="secondary">Reset all drones</button>
           </div>
           <div id="deployment" hidden>
             <p id="deployment-status" class="hint" role="status">Click a starting point on the map.</p>
             <label for="deployment-height">Height above picked surface (m)</label>
             <input id="deployment-height" type="number" min="5" max="1000" value="20" step="5" />
+            <label for="batch-count">Number of drones</label>
+            <input id="batch-count" type="number" min="1" max="100" step="1" value="10" />
+            <label for="formation-spacing">Spacing (meters)</label>
+            <input id="formation-spacing" type="number" min="20" max="1000" step="any" value="30" />
             <div class="actions">
               <button id="confirm-deployment" type="button" disabled>Deploy here</button>
               <button id="cancel-deployment" type="button" class="secondary">Cancel</button>
@@ -39,6 +44,22 @@
           <label for="drone-speed">Selected drone speed (mph)</label>
           <input id="drone-speed" type="number" min="0.1" step="any" value="60" disabled />
           <p id="speed-status" class="hint" role="status">Default: 60 mph · 26.82 m/s</p>
+        </section>
+        <section>
+          <h2>Group commands</h2>
+          <div class="actions">
+            <button id="select-all" type="button" class="secondary">Select all</button>
+            <button id="select-none" type="button" class="secondary">Clear selection</button>
+          </div>
+          <div id="group-members" aria-label="Drones for group command"></div>
+          <label for="group-name">Group name</label>
+          <input id="group-name" placeholder="Group A" maxlength="60" />
+          <button id="save-group" type="button">Save group</button>
+          <label for="saved-groups">Saved groups</label>
+          <select id="saved-groups"><option value="">Custom selection</option></select>
+          <button id="choose-destination" type="button" disabled>Choose destination</button>
+          <p id="group-status" class="hint" role="status">Select drones above or click their markers on the map.</p>
+          <p class="hint">Selected drones get spaced destination slots and launch together at their own speeds. Sending a new destination replaces their previous route. Routes do not avoid obstacles or guarantee separation during flight.</p>
         </section>
         <section>
           <h2>Mission command</h2>
