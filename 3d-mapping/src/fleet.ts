@@ -1,5 +1,6 @@
 import * as Cesium from "cesium";
 import { DroneController } from "./drone-controller";
+import type { DroneType } from "./drone-controller";
 import type { Coordinates } from "./mission";
 import { formationSlots } from "./formation";
 
@@ -27,8 +28,8 @@ export class Fleet {
   replay = { running: false, elapsed: 0, duration: 0, total: 0, arrived: 0 };
   constructor(private readonly viewer: Cesium.Viewer) {}
   get nextColor() { return DRONE_COLORS[(this.nextNumber - 1) % DRONE_COLORS.length]; }
-  deploy(position: Coordinates): DroneController {
-    const drone = new DroneController(this.viewer, position, Cesium.Color.fromCssColorString(this.nextColor.hex), `drone_${this.nextNumber++}`);
+  deploy(position: Coordinates, type: DroneType = "normal"): DroneController {
+    const drone = new DroneController(this.viewer, position, Cesium.Color.fromCssColorString(this.nextColor.hex), `drone_${this.nextNumber++}`, type);
     this.drones.set(drone.id, drone);
     return drone;
   }
@@ -44,8 +45,8 @@ export class Fleet {
     this.groups.clear();
   }
 
-  deployBulk(center: Coordinates, count: number, spacing: number): DroneController[] {
-    return formationSlots(center, count, spacing).map(position => this.deploy(position));
+  deployBulk(center: Coordinates, count: number, spacing: number, type: DroneType = "normal"): DroneController[] {
+    return formationSlots(center, count, spacing).map(position => this.deploy(position, type));
   }
 
   setBatchSpeed(ids: string[], speed: number): void {

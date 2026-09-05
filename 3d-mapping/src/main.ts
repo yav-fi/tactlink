@@ -34,6 +34,7 @@ panelTabs.forEach((tab, index) => {
 });
 
 function showPlacementControls(batch: boolean): void {
+  document.getElementById("drone-type-fields")!.hidden = placementMode === "command";
   const name = batch ? "batches" : "drone";
   showControlTab(name);
   document.getElementById(`panel-${name}`)!.append(deploymentPanel);
@@ -208,7 +209,7 @@ function refreshFleet(): void {
   for (const item of fleet.drones.values()) {
     index++;
     const color = DRONE_COLORS.find(color => color.hex === item.colorHex);
-    droneSelect.add(new Option(`${item.id.replace("_", " ")} · ${color?.name ?? item.colorHex}`, item.id));
+    droneSelect.add(new Option(`${item.id.replace("_", " ")} · ${item.droneType === "survey" ? "Survey" : "Normal"} · ${color?.name ?? item.colorHex}`, item.id));
   }
   droneSelect.value = drone?.id ?? "";
   droneSelect.disabled = deploying || !drone;
@@ -238,7 +239,7 @@ function refreshGroups(): void {
       savedGroups.value = ""; refreshGroups();
     });
     const swatch = document.createElement("span"); swatch.className = "member-swatch"; swatch.style.background = item.colorHex;
-    row.append(checkbox, swatch, document.createTextNode(item.id.replace("_", " "))); memberList.append(row);
+    row.append(checkbox, swatch, document.createTextNode(`${item.id.replace("_", " ")} · ${item.droneType}`)); memberList.append(row);
   }
   const previousGroup = savedGroups.value;
   savedGroups.replaceChildren(new Option("Custom selection", ""));
@@ -407,7 +408,8 @@ confirmDeployment.addEventListener("click", () => {
     cancelDeployment(); refreshFleet(); commandStatus.textContent = `${pendingIds.length} drones launched together; routes replaced. Shared color assigned.`;
     return;
   }
-  const added = placementMode === "bulk" ? fleet.deployBulk(center, countInput.valueAsNumber, spacingInput.valueAsNumber) : [fleet.deploy(center)];
+  const type = document.querySelector<HTMLSelectElement>("#drone-type")!.value === "survey" ? "survey" : "normal";
+  const added = placementMode === "bulk" ? fleet.deployBulk(center, countInput.valueAsNumber, spacingInput.valueAsNumber, type) : [fleet.deploy(center, type)];
   drone = added[0]; selectedIds.clear(); for (const item of added) selectedIds.add(item.id);
   cancelDeployment(); selectDrone(drone.id);
   commandStatus.textContent = `${added.length} drone(s) deployed. Select Control drone for individual flight or Choose destination for the selection.`;

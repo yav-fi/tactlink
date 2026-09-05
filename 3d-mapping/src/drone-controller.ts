@@ -5,6 +5,7 @@ import { movementBlocked } from "./collision";
 export type DroneSnapshot = Coordinates & { state: string; currentStep: number; totalSteps: number };
 
 export const METERS_PER_SECOND_PER_MPH = 0.44704;
+export type DroneType = "normal" | "survey";
 
 function destinationPoint(origin: Coordinates, eastMeters: number, northMeters: number): Coordinates {
   const center = Cesium.Cartesian3.fromDegrees(origin.longitude, origin.latitude, origin.altitude);
@@ -61,8 +62,12 @@ export class DroneController {
   private replayPoints: Cesium.Cartesian3[] = [];
   private replayDistances: number[] = [];
   private replaySpeed = 0;
+  private readonly surveyCone?: Cesium.Entity;
+  private readonly crashIndicator: Cesium.Entity;
+  private crashUntil = 0;
+  private crashPosition = new Cesium.Cartesian3();
 
-  constructor(private readonly viewer: Cesium.Viewer, home: Coordinates, private color = Cesium.Color.fromCssColorString("#35e8ff"), readonly id = "drone_1") {
+  constructor(private readonly viewer: Cesium.Viewer, home: Coordinates, private color = Cesium.Color.fromCssColorString("#35e8ff"), readonly id = "drone_1", readonly droneType: DroneType = "normal") {
     this.home = { ...home };
     this.position = { ...home };
     this.entity = viewer.entities.add({
@@ -103,6 +108,39 @@ export class DroneController {
       },
     });
     this.lastRenderedPosition = Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, home.altitude);
+    this.crashIndicator = viewer.entities.add({
+      id: `${id}_crash`,
+      position: new Cesium.CallbackPositionProperty(() => this.crashPosition, false),
+      point: { show: new Cesium.CallbackProperty(() => Date.now() < this.crashUntil, false), pixelSize: 20, color: Cesium.Color.ORANGERED, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, disableDepthTestDistance: Infinity },
+      label: { show: new Cesium.CallbackProperty(() => Date.now() < this.crashUntil, false), text: "⚠ COLLISION — STOPPED", font: "600 13px system-ui", fillColor: Cesium.Color.ORANGERED, showBackground: true, pixelOffset: new Cesium.Cartesian2(0, -48), disableDepthTestDistance: Infinity },
+    });
+    if (droneType === "survey") {
+      this.surveyCone = viewer.entities.add({
+        id: `${id}_survey_cone`,
+        position: new Cesium.CallbackPositionProperty(() => Cesium.Cartesian3.add(this.visualPosition(), Cesium.Cartesian3.multiplyByScalar(this.viewDirection(), 40, new Cesium.Cartesian3()), new Cesium.Cartesian3()), false),
+        orientation: new Cesium.CallbackProperty(() => {
+          const direction = this.viewDirection();
+          const axis = Cesium.Cartesian3.cross(Cesium.Cartesian3.UNIT_Z, direction, new Cesium.Cartesian3());
+          if (Cesium.Cartesian3.magnitudeSquared(axis) < 1e-12) return direction.z > 0 ? Cesium.Quaternion.IDENTITY : Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_X, Math.PI);
+          return Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.normalize(axis, axis), Math.acos(Cesium.Math.clamp(direction.z, -1, 1)));
+        }, false),
+        cylinder: { length: 80, bottomRadius: 0, topRadius: 30, material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => this.color.withAlpha(0.16), false)), outline: true, outlineColor: new Cesium.CallbackProperty(() => this.color.withAlpha(0.5), false), numberOfVerticalLines: 8 },
+      });
+    }
+  }
+
+  private visualPosition(): Cesium.Cartesian3 {
+    return this.replayEntity ? this.replayPosition : Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude);
+  }
+
+  private viewDirection(): Cesium.Cartesian3 {
+    if (this.state !== "MANUAL" && this.travelDirection) return this.travelDirection;
+    return Cesium.Matrix4.multiplyByPointAsVector(Cesium.Transforms.eastNorthUpToFixedFrame(this.visualPosition()), new Cesium.Cartesian3(Math.sin(this.manualHeading), Math.cos(this.manualHeading), 0), new Cesium.Cartesian3());
+  }
+
+  private showCrash(at = this.visualPosition()): void {
+    this.crashPosition = Cesium.Cartesian3.clone(at);
+    this.crashUntil = Date.now() + 4000;
   }
 
   run(command: MissionCommand): void {
@@ -194,6 +232,8 @@ export class DroneController {
     this.viewer.entities.remove(this.entity);
     this.viewer.entities.remove(this.originEntity);
     this.viewer.entities.remove(this.trailEntity);
+    this.viewer.entities.remove(this.crashIndicator);
+    if (this.surveyCone) this.viewer.entities.remove(this.surveyCone);
   }
 
   moveManually(east: number, north: number, up: number, seconds: number, heading = 0): void {
@@ -211,7 +251,7 @@ export class DroneController {
     const next = destinationPoint(this.position, this.manualVelocity.x * seconds, this.manualVelocity.y * seconds);
     next.altitude += this.manualVelocity.z * seconds;
     this.collisionBlocked = this.blocksMove(this.position, next);
-    if (this.collisionBlocked) { this.stopManualMotion(); return; }
+    if (this.collisionBlocked) { this.showCrash(); this.stopManualMotion(); return; }
     return next;
   }
 
@@ -225,6 +265,7 @@ export class DroneController {
   }
 
   reset(): void {
+    this.crashUntil = 0;
     this.collisionBlocked = this.replayBlocked = false;
     this.hideReplay();
     this.lastRenderedPosition = undefined;
@@ -297,12 +338,14 @@ export class DroneController {
     const crossed = this.replayPoints.filter((_, i) => this.replayDistances[i] > this.replayDistance && this.replayDistances[i] < distance);
     for (const point of [...crossed, next]) {
       if (movementBlocked(this.viewer, previous, point)) {
+        this.showCrash();
         this.replayBlocked = this.collisionBlocked = true;
         this.state = "BLOCKED";
         return;
       }
       previous = point;
     }
+    if (Cesium.Cartesian3.distance(this.replayPosition, next) > 0.001) this.travelDirection = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(next, this.replayPosition, new Cesium.Cartesian3()), new Cesium.Cartesian3());
     this.replayPosition = next;
     this.replayDistance = distance;
     if (moveDrone) {
@@ -345,6 +388,7 @@ export class DroneController {
     this.collisionBlocked = this.blocksMove(previous, this.position);
     if (this.collisionBlocked) {
       this.position = previous;
+      this.showCrash();
       this.mission = null;
       this.state = "BLOCKED";
       this.stopManualMotion();

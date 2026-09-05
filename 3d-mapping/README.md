@@ -19,6 +19,8 @@ To load Google Photorealistic 3D Tiles, create a Cesium ion token with that data
 
 ## Mission contract
 
+Choose **Normal** or **Survey** during single or bulk deployment. Normal drones retain the existing controls. Survey drones add a translucent, forward-facing camera cone (80 m long, 30 m radius at its far end) that follows heading, movement, playback and drone color. It is a field-of-view illustration, not object detection or visibility/occlusion analysis. Both types show a four-second orange **COLLISION — STOPPED** marker at the stopped position when an obstacle blocks movement; reset clears it. Drones remain controllable after manual collisions.
+
 Photorealistic-map collisions use the tile mesh, not the hidden fallback globe: valid flight positions can have negative ellipsoid heights. Failed geometry queries display a warning rather than freezing movement; building protection is unavailable while those queries fail. Fallback-globe ground checks still run independently, and drones starting inside the clearance margin can climb out.
 
 The left panel has **Individual drone** and **Batches** tabs. Single deployment, selected-drone speed and mission editing live in the first; bulk deployment, batch piloting/speed, selection and saved groups live in the second. Placement controls appear in the matching tab. Fleet playback, reset-all, camera controls and drone state are shared. Switching tabs preserves selection and flight state; picking up a batch opens its tab automatically.

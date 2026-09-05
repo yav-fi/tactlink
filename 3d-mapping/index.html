@@ -65,6 +65,11 @@
         </section>
       </div>
           <div id="deployment" hidden>
+            <div id="drone-type-fields">
+            <label for="drone-type">Drone type</label>
+            <select id="drone-type"><option value="normal">Normal</option><option value="survey">Survey · camera cone</option></select>
+            <p class="hint">Survey cones show camera direction and field of view; they do not detect objects or account for occlusion. Both types show a collision indicator when stopped by an obstacle.</p>
+            </div>
             <p id="deployment-status" class="hint" role="status">Click a starting point on the map.</p>
             <label for="deployment-height">Height above picked surface (m)</label>
             <input id="deployment-height" type="number" min="15" max="1000" value="20" step="5" />

@@ -20,6 +20,49 @@ function loadSource(name) {
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
 
+test("Survey cone stays attached, turns with heading, follows color and cleans up", () => {
+  const entities = new Cesium.EntityCollection();
+  const fleet = new Fleet({ entities });
+  const normal = fleet.deploy(home);
+  const survey = fleet.deploy(home, "survey");
+  assert.equal(normal.droneType, "normal");
+  assert.equal(entities.getById(`${normal.id}_survey_cone`), undefined);
+  const cone = entities.getById(`${survey.id}_survey_cone`);
+  survey.setManualControl(true);
+  for (const heading of [0, Math.PI / 2, Math.PI]) {
+    survey.moveManually(0, 0, 0, 0.1, heading);
+    const body = entities.getById(survey.id).position.getValue();
+    const rotation = Cesium.Matrix3.fromQuaternion(cone.orientation.getValue());
+    const direction = Cesium.Matrix3.multiplyByVector(rotation, Cesium.Cartesian3.UNIT_Z, new Cesium.Cartesian3());
+    const apex = Cesium.Cartesian3.subtract(cone.position.getValue(), Cesium.Cartesian3.multiplyByScalar(direction, 40, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+    assert(Cesium.Cartesian3.distance(apex, body) < 1e-6);
+    const expected = Cesium.Matrix4.multiplyByPointAsVector(Cesium.Transforms.eastNorthUpToFixedFrame(body), new Cesium.Cartesian3(Math.sin(heading), Math.cos(heading), 0), new Cesium.Cartesian3());
+    assert(Cesium.Cartesian3.distance(direction, expected) < 1e-6);
+  }
+  survey.setColor("#ff6666");
+  assert.equal(cone.cylinder.material.color.getValue().withAlpha(1).toCssHexString(), "#ff6666");
+  assert(fleet.deployBulk(home, 2, 30, "survey").every(d => d.droneType === "survey"));
+  fleet.clear(); assert.equal(entities.values.length, 0);
+});
+
+test("both drone types display a collision marker and reset clears it", () => {
+  for (const type of ["normal", "survey"]) {
+    const entities = new Cesium.EntityCollection();
+    const viewer = { entities, scene: { globe: { show: false }, pickFromRay: ray => ({ position: Cesium.Ray.getPoint(ray, 1) }) } };
+    const drone = new Fleet(viewer).deploy(home, type);
+    const marker = entities.getById(`${drone.id}_crash`);
+    assert.equal(marker.point.show.getValue(), false);
+    drone.setManualControl(true);
+    drone.moveManually(1, 0, 0, 0.1);
+    assert.equal(marker.point.show.getValue(), true);
+    assert.equal(marker.label.show.getValue(), true);
+    assert(Cesium.Cartesian3.distance(marker.position.getValue(), entities.getById(drone.id).position.getValue()) < 1e-6);
+    drone.reset();
+    assert.equal(marker.point.show.getValue(), false);
+    drone.destroy(); assert.equal(entities.values.length, 0);
+  }
+});
+
 test("photorealistic ground can be below the hidden fallback ellipsoid", () => {
   const viewer = { entities: new Cesium.EntityCollection(), scene: {
     pickFromRay: () => undefined,
