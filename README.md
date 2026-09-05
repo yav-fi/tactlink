@@ -29,10 +29,16 @@ Open <http://127.0.0.1:8000> for the lightweight control console. API documentat
 Run the accelerated end-to-end scenario with:
 
 ```sh
-python -m simulation.demo
+./scripts/demo
 ```
 
 Add `--realtime` to play it at wall-clock speed. The scenario allocates WATCH and SEARCH tasks across four drones, fails Drone 2 at 10 seconds, waits for heartbeat timeout and reassignment, removes GPS from Drone 3, and raises network packet loss.
+
+If `python3 -m simulation.demo` reports that `pydantic` is missing, it is using the system Python instead of the project environment. Either activate the environment with `source .venv/bin/activate` first, or invoke it directly:
+
+```sh
+.venv/bin/python -m simulation.demo
+```
 
 ### Integration contracts
 
