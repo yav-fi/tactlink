@@ -11,10 +11,40 @@ consistent across tools.
 
 This repo hosts two hackathon workstreams:
 
-- **[Webcam gesture quadcopter control](#webcam-gesture-quadcopter-control)** —
-  fly a simulated drone with hand gestures (`src/`).
 - **[Local LLM chat + benchmark](#local-llm-chat--benchmark)** — fast on-device
   chat inference (`chat_client.py`, `scripts/`).
+- **[Webcam gesture quadcopter control](#webcam-gesture-quadcopter-control)** —
+  fly a simulated drone with hand gestures (`src/`).
+
+---
+
+# Local LLM chat + benchmark
+
+## Setup
+
+```sh
+pip install -r requirements.txt
+git clone https://github.com/kaarelkaarelson/mlx-bench.git ~/mlx-bench
+./scripts/download_model.sh
+./scripts/build_dflash_draft.sh
+```
+
+## Commands
+
+```sh
+./scripts/start_chat_server.sh   # spin up the inference server
+./scripts/ask.sh "question"      # ask it something (no arg = interactive chat)
+./scripts/benchmark.sh           # thermally-gated tok/s benchmark
+```
+
+## Performance
+
+| Hardware | Model | Decode tok/s |
+| --- | --- | --- |
+| MacBook Pro, Apple M3 Max, 48GB | mlx-community/Qwen3.8-27B-4bit + w4:gs64 DFlash2 draft + LibraSpec | 72.3 |
+
+Measured with `./scripts/benchmark.sh`, thermally gated (GPU cooled to 37.4°C, fans
+verified at max RPM before/after) — see `benchmark_result.json` for the full receipt.
 
 ---
 
@@ -73,24 +103,3 @@ The simulator takes a normalized `ControlInput` (throttle, yaw_rate, roll,
 pitch, armed), so swapping the simulator for a real link (Tello, MAVLink RC
 override, serial) is a matter of writing one adapter that consumes the same
 struct.
-
----
-
-# Local LLM chat + benchmark
-
-## Setup
-
-```sh
-pip install -U huggingface_hub mlx-vlm uv chad-code
-git clone https://github.com/kaarelkaarelson/mlx-bench.git ~/mlx-bench
-./scripts/download_model.sh
-./scripts/build_dflash_draft.sh
-```
-
-## Commands
-
-```sh
-./scripts/start_chat_server.sh   # spin up the inference server
-./scripts/ask.sh "question"      # ask it something (no arg = interactive chat)
-./scripts/benchmark.sh           # thermally-gated tok/s benchmark
-```
