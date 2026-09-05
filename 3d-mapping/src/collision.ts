@@ -9,6 +9,46 @@ type RayScene = Cesium.Scene & {
 const queryWarnings = new WeakMap<Cesium.Viewer, string>();
 export function collisionWarning(viewer: Cesium.Viewer): string | undefined { return queryWarnings.get(viewer); }
 
+export type AvoidanceMove = {
+  position: Cesium.Cartesian3;
+  detoured: boolean;
+};
+
+/**
+ * Return a safe next position, preferring the requested segment and then
+ * progressively wider lateral detours. A climb is the final option for a
+ * horizontal/ascending request; a commanded descent never turns into a climb.
+ */
+export function avoidanceMove(viewer: Cesium.Viewer, from: Cesium.Cartesian3, to: Cesium.Cartesian3): AvoidanceMove | undefined {
+  if (!movementBlocked(viewer, from, to)) return { position: Cesium.Cartesian3.clone(to), detoured: false };
+
+  const frame = Cesium.Transforms.eastNorthUpToFixedFrame(from);
+  const inverse = Cesium.Matrix4.inverseTransformation(frame, new Cesium.Matrix4());
+  const worldDelta = Cesium.Cartesian3.subtract(to, from, new Cesium.Cartesian3());
+  const local = Cesium.Matrix4.multiplyByPointAsVector(inverse, worldDelta, new Cesium.Cartesian3());
+  const horizontal = Math.hypot(local.x, local.y);
+  if (horizontal < 0.00001) return undefined;
+
+  const candidates: Cesium.Cartesian3[] = [];
+  for (const degrees of [35, -35, 60, -60, 90, -90]) {
+    const angle = Cesium.Math.toRadians(degrees);
+    candidates.push(new Cesium.Cartesian3(
+      local.x * Math.cos(angle) - local.y * Math.sin(angle),
+      local.x * Math.sin(angle) + local.y * Math.cos(angle),
+      local.z,
+    ));
+  }
+  if (local.z >= -0.00001) {
+    candidates.push(new Cesium.Cartesian3(local.x, local.y, Math.max(local.z, horizontal * 0.75, DRONE_CLEARANCE * 4)));
+  }
+
+  for (const candidate of candidates) {
+    const position = Cesium.Matrix4.multiplyByPoint(frame, candidate, new Cesium.Cartesian3());
+    if (!movementBlocked(viewer, from, position)) return { position, detoured: true };
+  }
+  return undefined;
+}
+
 export function movementBlocked(viewer: Cesium.Viewer, from: Cesium.Cartesian3, to: Cesium.Cartesian3): boolean {
   const scene = viewer.scene as RayScene | undefined;
   if (!scene) return false; // Controller-only simulations have no map geometry.

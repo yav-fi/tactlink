@@ -596,7 +596,7 @@ function updateOverview(now: number): void {
     const title = document.createElement("strong"); title.textContent = `${member.id.replace("_", " ")} · ${member.droneType}`;
     const detail = document.createElement("p");
     const route = member.routeLength;
-    detail.textContent = `${member.collisionBlocked ? "Obstacle stopped" : member.snapshot().state} · ${member.speedMph} mph · ${route.toFixed(0)} m route · ${(route / (member.speedMph * 0.44704)).toFixed(1)} s estimated${member.droneType === "survey" ? ` · ${member.coverageCount} coverage patches` : ""}`;
+    detail.textContent = `${member.collisionBlocked ? "No safe route" : member.avoidanceActive ? "Auto-avoiding obstacle" : member.snapshot().state} · ${member.speedMph} mph · ${route.toFixed(0)} m route · ${(route / (member.speedMph * 0.44704)).toFixed(1)} s estimated${member.droneType === "survey" ? ` · ${member.coverageCount} coverage patches` : ""}`;
     card.append(title, detail); container.append(card);
   }
 }
@@ -622,7 +622,9 @@ viewer.clock.onTick.addEventListener((clock) => {
   const snapshot = drone?.snapshot();
   if (controllingDrone) {
     commandStatus.textContent = drone?.collisionBlocked
-      ? "Obstacle ahead: movement stopped. Steer away or climb to continue."
+      ? "No safe path found. Steer away or climb to continue."
+      : drone?.avoidanceActive
+        ? "Obstacle detected: autopilot is routing around it."
       : collisionWarning(viewer) ?? "Pilot control active. Esc releases; WASD moves; R/F changes height.";
   }
   if (!snapshot) { stateElement.innerHTML = "<dt>Fleet</dt><dd>No drones deployed</dd>"; return; }

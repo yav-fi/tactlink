@@ -187,7 +187,7 @@ test("Survey mesh uses underside mount and records only surface hits", () => {
   fleet.clear(); assert.equal(entities.values.length, 0);
 });
 
-test("both drone types display a collision marker and reset clears it", () => {
+test("both drone types report when no safe avoidance route exists and reset clears it", () => {
   for (const type of ["normal", "survey"]) {
     const entities = new Cesium.EntityCollection();
     const viewer = { entities, scene: { globe: { show: false }, pickFromRay: ray => ({ position: Cesium.Ray.getPoint(ray, 1) }) } };
@@ -198,11 +198,39 @@ test("both drone types display a collision marker and reset clears it", () => {
     drone.moveManually(1, 0, 0, 0.1);
     assert.equal(marker.point.show.getValue(), true);
     assert.equal(marker.label.show.getValue(), true);
+    assert.equal(marker.label.text.getValue(), "⚠ NO SAFE ROUTE");
     assert(Cesium.Cartesian3.distance(marker.position.getValue(), entities.getById(drone.id).position.getValue()) < 1e-6);
     drone.reset();
     assert.equal(marker.point.show.getValue(), false);
     drone.destroy(); assert.equal(entities.values.length, 0);
   }
+});
+
+test("manual flight automatically detours around a directional obstacle", () => {
+  const entities = new Cesium.EntityCollection();
+  const viewer = { entities, scene: {
+    globe: { show: false },
+    pickFromRay(ray) {
+      const frame = Cesium.Transforms.eastNorthUpToFixedFrame(ray.origin);
+      const local = Cesium.Matrix4.multiplyByPointAsVector(Cesium.Matrix4.inverseTransformation(frame, new Cesium.Matrix4()), ray.direction, new Cesium.Cartesian3());
+      return local.x > 0.7 ? { position: Cesium.Ray.getPoint(ray, 1) } : undefined;
+    },
+  } };
+  const fleet = new Fleet(viewer);
+  const drone = fleet.deploy(home);
+  drone.setManualControl(true);
+  drone.moveManually(1, 0, 0, 0.1);
+  assert.equal(drone.collisionBlocked, false);
+  assert.equal(drone.avoidanceActive, true);
+  assert.equal(entities.getById(`${drone.id}_crash`).label.text.getValue(), "↗ AUTO-AVOIDING");
+  assert.notEqual(drone.snapshot().latitude, home.latitude);
+
+  const missionDrone = fleet.deploy(home);
+  missionDrone.run({ drone_id: missionDrone.id, mission: [{ action: "goto", ...home, longitude: home.longitude + 0.01, speed_mps: 100 }] });
+  missionDrone.update(0.1);
+  assert.equal(missionDrone.snapshot().state, "AVOIDING");
+  assert.equal(missionDrone.collisionBlocked, false);
+  assert.equal(missionDrone.avoidanceActive, true);
 });
 
 test("photorealistic ground can be below the hidden fallback ellipsoid", () => {

@@ -175,7 +175,7 @@ export class Fleet {
     this.replay.arrived = 0;
     for (const flight of this.replayFlights) {
       flight.drone.replayAt(this.replay.elapsed, this.groupFlight);
-      if (!flight.drone.replayBlocked && this.replay.elapsed >= flight.duration) this.replay.arrived++;
+      if (!flight.drone.replayBlocked && flight.drone.replayComplete) this.replay.arrived++;
     }
     this.replay.running = this.replay.arrived + this.blockedCount < this.replay.total;
   }
