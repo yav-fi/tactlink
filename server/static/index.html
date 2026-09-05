@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mission Runtime</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body { margin: 0; background: #07100d; color: #d9f7e8; }
+    header { padding: 16px 22px; border-bottom: 1px solid #24463a; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    h1 { font: 600 18px system-ui; margin: 0 auto 0 0; }
+    button { background: #143d30; color: #e8fff6; border: 1px solid #39715d; padding: 7px 10px; cursor: pointer; }
+    button:hover { background: #1b5541; }
+    main { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; padding: 14px; }
+    section { border: 1px solid #24463a; background: #0b1814; padding: 12px; overflow: auto; }
+    h2 { font: 600 14px system-ui; margin: 0 0 10px; color: #80d9b5; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 7px; border-bottom: 1px solid #1c352c; text-align: left; vertical-align: top; }
+    .events { height: 320px; font-size: 11px; }
+    .event { padding: 5px 0; border-bottom: 1px solid #1c352c; }
+    .controls { grid-column: 1 / -1; }
+    label { display: inline-grid; width: 220px; margin: 5px 10px 5px 0; }
+    input { accent-color: #55d49e; }
+    .metric { color: #55d49e; font-weight: 700; }
+    @media (max-width: 850px) { main { grid-template-columns: 1fr; } .controls { grid-column: auto; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Distributed Mission Runtime <span id="clock"></span></h1>
+    <button onclick="post('/api/simulation/pause')">Pause</button>
+    <button onclick="post('/api/simulation/resume')">Resume</button>
+    <button onclick="post('/api/drones/fail-random')">Kill random node</button>
+    <button onclick="post('/api/simulation/reset')">Reset</button>
+  </header>
+  <main>
+    <section><h2>Drones</h2><table><thead><tr><th>Node</th><th>State/task</th><th>True position</th><th>Estimated position</th><th>Uncertainty</th><th>Battery</th><th>Peers</th></tr></thead><tbody id="drones"></tbody></table></section>
+    <section><h2>Missions — overall <span class="metric" id="capability"></span></h2><div id="missions"></div><h2 style="margin-top:18px">Links</h2><div id="links"></div></section>
+    <section class="controls"><h2>Interference and presets</h2><div id="sliders"></div><button onclick="preset('NORMAL')">Normal</button> <button onclick="preset('DEGRADED')">Degraded</button> <button onclick="preset('CONTESTED')">Contested</button> <button onclick="preset('CHAOS')">Chaos</button></section>
+    <section style="grid-column:1/-1"><h2>Recent events</h2><div class="events" id="events"></div></section>
+  </main>
+  <script>
+    let latest;
+    const fields = ['gps_interference','network_interference','sensor_interference','node_failure_rate'];
+    const sliders = document.getElementById('sliders');
+    for (const field of fields) sliders.insertAdjacentHTML('beforeend', `<label>${field.replaceAll('_',' ')} <input id="${field}" type="range" min="0" max="1" step="0.01" onchange="setInterference()"><span id="${field}-value"></span></label>`);
+    const pos = p => `${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}`;
+    async function post(path, body) { await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:body ? JSON.stringify(body):undefined}); }
+    async function preset(name) { await post('/api/simulation/scenario/'+name); }
+    async function setInterference() { const body={}; fields.forEach(f=>body[f]=Number(document.getElementById(f).value)); await post('/api/interference',body); }
+    function render(s) {
+      latest=s; document.getElementById('clock').textContent=`t=${s.simulation_time.toFixed(1)}s ${s.running?'RUNNING':'PAUSED'} ${s.scenario}`;
+      document.getElementById('capability').textContent=(s.mission_capability*100).toFixed(0)+'%';
+      document.getElementById('drones').innerHTML=s.drones.map(d=>`<tr><td>${d.identity.name}</td><td>${d.state}<br>${d.current_task_id||'—'}</td><td>${pos(d.truth.position)}</td><td>${pos(d.estimated.position)}</td><td>${d.estimated.position_uncertainty.toFixed(1)}m<br>${d.estimated.localization_mode}</td><td>${(d.truth.actual_battery*100).toFixed(0)}%</td><td>${Object.values(d.peers).map(p=>p.node_id+': '+(s.simulation_time-p.last_seen).toFixed(1)+'s').join('<br>')||'—'}</td></tr>`).join('');
+      document.getElementById('missions').innerHTML=s.missions.map(m=>`<div>${m.id} ${m.type} <b>${(m.capability*100).toFixed(0)}%</b><br>${m.status}: ${m.assigned_nodes.join(', ')||'unassigned'}</div>`).join('<br>')||'No missions';
+      document.getElementById('links').innerHTML=s.links.map(l=>`${l.source_id} ↔ ${l.target_id}: ${l.available?'up':'down'} ${(l.quality*100).toFixed(0)}%`).join('<br>');
+      document.getElementById('events').innerHTML=[...s.events].reverse().map(e=>`<div class="event">${e.timestamp.toFixed(1)} <b>${e.event_type}</b> ${e.human_readable_summary}</div>`).join('');
+      fields.forEach(f=>{ if(document.activeElement.id!==f) document.getElementById(f).value=s.interference[f]; document.getElementById(f+'-value').textContent=Number(s.interference[f]).toFixed(2); });
+    }
+    const ws = new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`); ws.onmessage=e=>render(JSON.parse(e.data));
+  </script>
+</body>
+</html>
