@@ -8,8 +8,8 @@ Continuous flying comes from the hand pose; the mapping depends on the current
 * HOVER    - translation locked, only palm y -> throttle
 
 In every mode a pinch adds forward pitch. Discrete gesture events (takeoff,
-land, spin360, return_home) run as short autopilot routines that override the
-hand until they finish.
+land, spin360, return_home, fly_north/south/east/west) run as short autopilot
+routines that override the hand until they finish.
 """
 
 import math
@@ -26,6 +26,15 @@ _SMOOTHING = 0.35
 _TAKEOFF_ALT = 1.3
 _SPIN_RATE = 1.0
 _HOME_RADIUS = 0.4
+_DASH_DISTANCE = 5.0   # metres a fly_<compass> dash covers before hovering
+
+# World-frame compass directions (x = east, y = north).
+_COMPASS = {
+    "fly_north": np.array([0.0, 1.0]),
+    "fly_south": np.array([0.0, -1.0]),
+    "fly_east": np.array([1.0, 0.0]),
+    "fly_west": np.array([-1.0, 0.0]),
+}
 
 
 def _axis(value: float, center: float, dead: float) -> float:
@@ -42,6 +51,9 @@ class GestureController:
         self._armed = False
         self.maneuver = ""          # active autopilot routine, "" when hand-flown
         self._spin_start_yaw = 0.0
+        self._dash_dir = np.zeros(2)
+        self._dash_start = np.zeros(2)
+        self._dash_alt = 1.3
 
     def update(self, hand: HandState, gstate: GestureState, state) -> ControlInput:
         for event in gstate.events:
@@ -104,6 +116,11 @@ class GestureController:
             self.maneuver = "spin360"
         elif event == "return_home" and self._armed:
             self.maneuver = "return_home"
+        elif event in _COMPASS and self._armed:
+            self._dash_dir = _COMPASS[event]
+            self._dash_start = np.array(state.pos[:2], dtype=float)
+            self._dash_alt = max(1.3, float(state.pos[2]))
+            self.maneuver = event
 
     def _run_maneuver(self, state) -> ControlInput:
         cmd = ControlInput(armed=self._armed, event=self.maneuver)
@@ -134,6 +151,18 @@ class GestureController:
                 gain = min(1.0, dist / 3.0) * 0.8
                 cmd.roll = float(body[0]) * gain
                 cmd.pitch = float(body[1]) * gain
+        elif self.maneuver in _COMPASS:
+            travelled = float(np.linalg.norm(np.array(state.pos[:2]) - self._dash_start))
+            if travelled >= _DASH_DISTANCE:
+                self.maneuver = ""
+            else:
+                d = self._dash_dir
+                cy, sy = math.cos(-state.yaw), math.sin(-state.yaw)
+                body = np.array([cy * d[0] - sy * d[1], sy * d[0] + cy * d[1]])
+                ease = min(1.0, (_DASH_DISTANCE - travelled) / 1.5)  # slow into the stop
+                cmd.roll = float(body[0]) * 0.8 * ease
+                cmd.pitch = float(body[1]) * 0.8 * ease
+                cmd.throttle = float(np.clip((self._dash_alt - state.pos[2]) * 1.5, -0.5, 1.0))
         return cmd
 
     def _blend(self, target: ControlInput) -> None:

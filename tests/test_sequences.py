@@ -20,20 +20,29 @@ RETURN_HOME = [{"pattern": ["Open_Palm", "Closed_Fist", "Open_Palm"],
                 "window": 3.0, "action": "return_home"}]
 DOUBLE_FIST = [{"pattern": ["Closed_Fist", "Closed_Fist"],
                 "window": 1.2, "action": "estop"}]
+WIPER = [{"pattern": ["Victory", "v_flat", "Victory", "v_flat"],
+          "window": 5.0, "action": "fly_pointed"}]
+
+
+class _Hand:
+    def __init__(self, point_dir=(0.0, 0.0)):
+        self.present = True
+        self.point_dir = point_dir
 
 
 class Clock:
     """Feeds a gesture into the interpreter frame by frame and collects events."""
 
-    def __init__(self, interp: GestureInterpreter):
+    def __init__(self, interp: GestureInterpreter, hand=None):
         self.interp = interp
+        self.hand = hand
         self.t = 0.0
         self.events: list[str] = []
 
     def hold(self, gesture: str, seconds: float, dt: float = 0.05):
         for _ in range(max(1, round(seconds / dt))):
             self.t += dt
-            state = self.interp.update(gesture, "canned", now=self.t)
+            state = self.interp.update(gesture, "canned", now=self.t, hand=self.hand)
             self.events.extend(state.events)
         return self
 
@@ -106,6 +115,20 @@ def test_double_token_needs_a_gap():
     c.hold("Closed_Fist", 0.5).hold("None", 0.3)
     c.hold("Closed_Fist", 0.5).hold("None", 0.5)
     assert "estop" in c.drain()
+
+
+def test_wiper_combo_resolves_fly_direction():
+    for point_dir, expected in [((0.9, 0.1), "fly_east"),
+                                ((-0.9, 0.1), "fly_west"),
+                                ((0.1, -0.9), "fly_north")]:
+        c = Clock(_interp(WIPER, 0.6), hand=_Hand(point_dir))
+        c.hold("Victory", 0.6).hold("None", 0.3)
+        c.hold("v_flat", 0.6).hold("None", 0.3)
+        c.hold("Victory", 0.6).hold("None", 0.3)
+        c.hold("v_flat", 0.6).hold("None", 0.4)
+        fired = c.drain()
+        assert fired == [expected], (point_dir, fired)
+        assert "mode: heading" not in fired and "mode: position" not in fired
 
 
 def test_sequence_hint_reports_partial_combo():

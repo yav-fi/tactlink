@@ -148,8 +148,12 @@ python scripts/train_gestures.py
 ```
 
 Actions available: `takeoff`, `land`, `cycle_mode`, `speed_up`, `speed_down`,
-`spin360`, `return_home`, `estop`. Feature layout is versioned
-(`landmark_features.FEATURE_VERSION`) - bump it and retrain if you change it.
+`spin360`, `return_home`, `estop`, `fly_north` / `fly_south` / `fly_east` /
+`fly_west` (dash ~5 m that compass way then hover), and `fly_pointed` (combos
+only - dash toward wherever the fingers point when the combo completes; a clear
+left/right becomes west/east, anything else falls back to north). Feature layout
+is versioned (`landmark_features.FEATURE_VERSION`) - bump it and retrain if you
+change it.
 `models/custom_gestures.npz` is the one model file that *is* committed, so a
 trained set of gestures travels with the repo; raw recordings under `data/` stay
 local.
@@ -163,7 +167,8 @@ gesture password. Configured in `config/gesture_sequences.json`:
 {
   "single_delay": 0.6,
   "sequences": [
-    { "pattern": ["Open_Palm", "Closed_Fist", "Open_Palm"], "window": 3.0, "action": "return_home" }
+    { "pattern": ["Open_Palm", "Closed_Fist", "Open_Palm"], "window": 3.0, "action": "return_home" },
+    { "pattern": ["Victory", "v_flat", "Victory", "v_flat"], "window": 5.0, "action": "fly_pointed" }
   ]
 }
 ```
@@ -171,6 +176,12 @@ gesture password. Configured in `config/gesture_sequences.json`:
 So flashing **open → fist → open within 3 s** triggers return-home. `pattern`
 entries are gesture names (canned or your own trained labels); `action` is any of
 the actions above.
+
+The second combo is the **"fly where I point"** gesture: a spread ✌️ V rotated
+**up → flat → up → flat** (a double wiper) within 5 s, then the drone dashes in
+the direction the fingers point on the final flat pose. `v_flat` is a custom
+label you train (spread V held horizontal - `python scripts/collect_gestures.py
+--label v_flat`); the up pose reuses canned `Victory`.
 
 Because a combo's gestures could also fire on their own (open palm = take off),
 any gesture used in a pattern has its single-gesture command **held back
