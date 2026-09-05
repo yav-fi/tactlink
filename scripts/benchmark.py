@@ -33,17 +33,29 @@ PROMPT_FILE = Path(__file__).parent / "matched_prompt.txt"
 MLX_BENCH_DIR = os.environ.get("MLX_BENCH_DIR", os.path.expanduser("~/mlx-bench"))
 
 
+def _stage(name: str):
+    print(f"[stage] {name}...", file=sys.stderr, flush=True)
+
+
+def _stage_ok(name: str, detail: str = "") -> None:
+    suffix = f" ({detail})" if detail else ""
+    print(f"[stage] {name}: OK{suffix}", file=sys.stderr, flush=True)
+
+
+def _stage_failed(name: str, err: Exception) -> None:
+    print(f"[stage] {name}: FAILED — {err}", file=sys.stderr, flush=True)
+
+
 def _load_thermal():
     thermal_core = os.path.join(MLX_BENCH_DIR, "core")
     if not os.path.isdir(thermal_core):
-        print(
-            f"error: mlx-bench not found at {MLX_BENCH_DIR}\n"
-            f"Clone it once (public repo, no access needed):\n"
-            f"  git clone https://github.com/kaarelkaarelson/mlx-bench.git {MLX_BENCH_DIR}\n"
-            f"Or set MLX_BENCH_DIR to point at an existing clone.",
-            file=sys.stderr,
+        err = FileNotFoundError(
+            f"mlx-bench not found at {MLX_BENCH_DIR}. Clone it once (public repo, no "
+            f"access needed): git clone https://github.com/kaarelkaarelson/mlx-bench.git "
+            f"{MLX_BENCH_DIR} — or set MLX_BENCH_DIR to point at an existing clone."
         )
-        sys.exit(1)
+        _stage_failed("load thermal gate module", err)
+        raise err
     sys.path.insert(0, thermal_core)
     import thermal  # type: ignore
 
@@ -58,23 +70,42 @@ def main() -> None:
     ap.add_argument("--out", default=str(PROJECT_ROOT / "benchmark_result.json"))
     args = ap.parse_args()
 
+    _stage("load thermal gate module")
     thermal = _load_thermal()
-    prompt_text = PROMPT_FILE.read_text().strip()
+    _stage_ok("load thermal gate module", MLX_BENCH_DIR)
+
+    _stage("read matched prompt")
+    try:
+        prompt_text = PROMPT_FILE.read_text().strip()
+    except Exception as e:
+        _stage_failed("read matched prompt", e)
+        raise
+    _stage_ok("read matched prompt", f"{len(prompt_text)} chars from {PROMPT_FILE.name}")
 
     # Untimed, discarded warmup: absorbs one-time costs (prefix cache setup,
     # lazy kernel compilation) that would otherwise land on rep 1 and skew it
     # — see dflash2-mlx's http_api_bench.py, which hit exactly this once.
-    print("warmup (untimed, discarded)...", file=sys.stderr)
-    chat_sync(prompt_text, n_predict=8, base_url=args.base_url)
+    _stage("warmup (untimed, discarded)")
+    try:
+        chat_sync(prompt_text, n_predict=8, base_url=args.base_url)
+    except Exception as e:
+        _stage_failed("warmup", e)
+        raise
+    _stage_ok("warmup")
 
     reps = []
     for i in range(1, args.reps + 1):
         label = f"rep{i}"
+        _stage(f"{label}: thermal-gated measurement")
 
         def _do():
             return chat_sync(prompt_text, n_predict=args.max_tokens, base_url=args.base_url)
 
-        result, elapsed_s, receipt = thermal.gated_run(label, _do)
+        try:
+            result, elapsed_s, receipt = thermal.gated_run(label, _do)
+        except Exception as e:
+            _stage_failed(f"{label}: thermal-gated measurement", e)
+            raise
         t = result.timings
         prompt_n, prompt_ms = t.get("prompt_n", 0), t.get("prompt_ms", 0)
         predicted_n, predicted_ms = t.get("predicted_n", 0), t.get("predicted_ms", 0)
@@ -90,20 +121,26 @@ def main() -> None:
             "wall_s": elapsed_s,
             "thermal_receipt": receipt.to_dict(),
         })
-        if decode_tps:
-            print(f"[{label}] {predicted_n} tok in {predicted_ms / 1000:.2f}s -> {decode_tps:.1f} tok/s decode")
-        else:
-            print(f"[{label}] no decode timing")
+        if not decode_tps:
+            err = RuntimeError(f"{label}: server returned no decode timing")
+            _stage_failed(f"{label}: thermal-gated measurement", err)
+            raise err
+        _stage_ok(f"{label}: thermal-gated measurement",
+                  f"{predicted_n} tok in {predicted_ms / 1000:.2f}s -> {decode_tps:.1f} tok/s decode")
 
+    _stage("aggregate results")
     decode_values = [r["decode_tok_s"] for r in reps if r["decode_tok_s"] is not None]
     if not decode_values:
-        print("no valid decode measurements collected", file=sys.stderr)
-        sys.exit(1)
+        err = RuntimeError("no valid decode measurements collected")
+        _stage_failed("aggregate results", err)
+        raise err
     median_tps = statistics.median(decode_values)
+    _stage_ok("aggregate results", f"{len(decode_values)}/{args.reps} rep(s) valid")
 
     print(f"\ndecode tok/s per rep: {[round(v, 1) for v in decode_values]}")
     print(f"median decode tok/s: {median_tps:.1f}")
 
+    _stage("write results file")
     summary = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "base_url": args.base_url,
@@ -112,8 +149,12 @@ def main() -> None:
         "reps": reps,
         "median_decode_tok_s": median_tps,
     }
-    Path(args.out).write_text(json.dumps(summary, indent=2))
-    print(f"wrote {args.out}")
+    try:
+        Path(args.out).write_text(json.dumps(summary, indent=2))
+    except Exception as e:
+        _stage_failed("write results file", e)
+        raise
+    _stage_ok("write results file", args.out)
 
 
 if __name__ == "__main__":
