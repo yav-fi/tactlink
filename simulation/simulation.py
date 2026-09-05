@@ -11,10 +11,15 @@ from .autonomy import PlanningAutonomy
 from .config import SimulationConfig
 from .drone import DroneNode
 from .events import EventBus
+from .explain import DecisionExplanation, ExplanationLog
 from .interference import InterferenceEngine
 from .mission import MissionManager
 from .models import (
+    AdaptiveRuntimeState,
+    CommunicationCellState,
     DronePublicState,
+    EdgeComputeState,
+    NodeAdaptiveState,
     EventCategory,
     EventType,
     GPSMeasurement,
@@ -36,6 +41,7 @@ from .models import (
 from .network import NetworkSimulator
 from .resilience import NetworkResilienceManager
 from .scenarios import PRESET_INTERFERENCE, ScenarioEngine, ScenarioPreset
+from .workunits import EdgeComputeBroker, EdgeResourceProfile, WorkExecutor
 from .world import BoxObstacle, MovingEntity, Region, World, WorldDefinition
 from .world_model import CoverageGrid, WorldBelief
 from .authentication import MessageAuthenticator, deterministic_private_key, public_key_text
@@ -61,8 +67,15 @@ class SimulationEngine:
         self.events = EventBus(self.config.recent_event_limit)
         definition = world_definition or self.default_world_definition()
         self.world = World(definition, self.config.battery_drain_per_meter)
+        self.explanations = ExplanationLog()
+        self.broker = EdgeComputeBroker(
+            maximum_attempts=self.config.adaptive.edge_compute.maximum_attempts
+        )
         # Built once from the STATIC world definition; nodes never see World truth.
-        self.autonomy = PlanningAutonomy.from_world_definition(definition)
+        self.autonomy = PlanningAutonomy.from_world_definition(
+            definition,
+            communication_routing=self.config.adaptive.communication_aware_routing,
+        )
         self.interference = InterferenceEngine(PRESET_INTERFERENCE[self.scenario].model_copy(deep=True))
         self.network = NetworkSimulator(
             self.config.network,
@@ -80,8 +93,19 @@ class SimulationEngine:
         self.allocator = TaskAllocator(self.config.allocator)
         self.missions = MissionManager(self.allocator, self.events, self.config.peer_timeout)
         self.resilience = NetworkResilienceManager(
-            self.events, self.config.relay_health_threshold, self.config.relay_evaluation_seconds
+            self.events,
+            self.config.relay_health_threshold,
+            self.config.relay_evaluation_seconds,
+            prediction=self.config.adaptive.prediction,
+            counterfactual=self.config.adaptive.counterfactual,
+            explanations=self.explanations,
+            broker=self.broker if self.config.adaptive.edge_compute.enabled else None,
+            multi_relay=self.config.adaptive.multi_relay_coordination,
         )
+        self._preemptive_handoffs = 0
+        self._route_changes = 0
+        self._seen_handoffs: set[str] = set()
+        self._seen_route_choices: set[str] = set()
         self.drones: dict[str, DroneNode] = {}
         self._coverage_templates = [
             CoverageGrid(region.id, region.center, region.radius, self.config.sensing.cell_size_m)
@@ -191,6 +215,8 @@ class SimulationEngine:
                     MessageAuthenticator(public_keys, keys[node_id])
                     if self.config.security.enabled else None
                 ),
+                communication=self.config.adaptive.communication,
+                prediction=self.config.adaptive.prediction,
             )
             self.events.emit(
                 self.time,
@@ -363,6 +389,7 @@ class SimulationEngine:
         )
         if relay_command is not None and self.mode == "fabric":
             self._submit_relay_mission(relay_command)
+        self._collect_adaptive_signals()
         snapshot = self.snapshot()
         if self._recorder is not None:
             self._recorder.record_snapshot(snapshot)
@@ -471,6 +498,18 @@ class SimulationEngine:
         for node_id in self._online_node_ids():
             aggregate.merge(self.drones[node_id].world_belief.observations.values(), self.time)
         return aggregate
+
+    def observed_entities(self) -> dict[str, float]:
+        """Entity ids in the fused belief, with when each was last observed.
+
+        Read-only projection for operator-facing consumers (the mission plan
+        runtime evaluates ENTITY_OBSERVED triggers from it). Nodes are
+        unaffected; this reads the same merged belief the snapshot reports.
+        """
+        return {
+            entity_id: observation.timestamp
+            for entity_id, observation in self._aggregate_belief().known_entities.items()
+        }
 
     def _emit_knowledge_metrics(self, belief: WorldBelief) -> None:
         for region_id, grid in belief.grids.items():
@@ -707,6 +746,156 @@ class SimulationEngine:
             "Simulation reset to deterministic initial state",
         )
 
+
+    # -- adaptive fabric state ----------------------------------------------
+
+    def _node_adaptive_state(self, node: DroneNode) -> NodeAdaptiveState:
+        belief = node.comm_belief
+        cells = belief.cells
+        mean_quality = (
+            sum(cell.quality for cell in cells.values()) / len(cells) if cells else 1.0
+        )
+        route_choice = None
+        if node.plan is not None:
+            candidate = node.plan.metadata.get("route_choice")
+            if isinstance(candidate, dict):
+                route_choice = candidate
+        return NodeAdaptiveState(
+            learned_cells=len(cells),
+            learned_mean_quality=max(0.0, min(1.0, mean_quality)),
+            observed_samples=belief.observed_samples,
+            merged_samples=belief.merged_samples,
+            peer_link_quality=dict(sorted(belief.peer_quality.items())),
+            predictions=[item.model_dump(mode="json") for item in node.active_predictions],
+            route_choice=route_choice,
+            handoffs=[dict(item) for item in node.handoff_requests[-3:]],
+            explanations=[item.model_dump(mode="json") for item in node.explanations.recent(3)],
+        )
+
+    def _adaptive_state(self) -> AdaptiveRuntimeState:
+        adaptive = self.config.adaptive
+        merged: dict[str, CommunicationCellState] = {}
+        predictions: list[dict[str, object]] = []
+        for node_id in sorted(self.drones):
+            node = self.drones[node_id]
+            for record in node.comm_belief.snapshot():
+                state = CommunicationCellState.model_validate(record)
+                current = merged.get(state.cell)
+                if current is None or (state.updated_at, state.weight) > (current.updated_at, current.weight):
+                    merged[state.cell] = state
+            predictions.extend(item.model_dump(mode="json") for item in node.active_predictions)
+        broker = self.broker
+        edge = EdgeComputeState(
+            enabled=adaptive.edge_compute.enabled,
+            edge_nodes=broker.edge_nodes,
+            profiles=[
+                broker.profiles[node_id].model_dump(mode="json") for node_id in broker.edge_nodes
+            ],
+            units_completed=len(broker.completed),
+            executed_remotely=broker.executed_remotely,
+            executed_locally=broker.executed_locally,
+            reassigned=broker.reassigned,
+            orphaned=list(broker.orphaned),
+            failures=broker.failures,
+            recent_units=[
+                {
+                    "unit_id": item.unit_id,
+                    "kind": item.kind.value,
+                    "executed_by": item.executed_by,
+                    "digest": item.digest,
+                }
+                for item in broker.completed[-5:]
+            ],
+        )
+        return AdaptiveRuntimeState(
+            adaptive_messaging=self.config.network.adaptive_messaging,
+            communication_belief=adaptive.communication.enabled,
+            communication_aware_routing=adaptive.communication_aware_routing,
+            predictive_recovery=adaptive.prediction.enabled,
+            counterfactual_selection=adaptive.counterfactual.enabled,
+            multi_relay_coordination=adaptive.multi_relay_coordination,
+            communication_map=[merged[key] for key in sorted(merged)],
+            predictions=predictions,
+            decisions=[item.model_dump(mode="json") for item in self.explanations.recent(8)],
+            relay_stations=(
+                self.resilience.last_plan.to_records() if self.resilience.last_plan else []
+            ),
+            counterfactual_runs=self.resilience.counterfactual_runs,
+            preemptive_relay_triggers=self.resilience.preemptive_triggers,
+            preemptive_handoffs=self._preemptive_handoffs,
+            communication_route_changes=self._route_changes,
+            edge_compute=edge,
+        )
+
+    def attach_edge_node(self, profile: EdgeResourceProfile, executor: WorkExecutor) -> None:
+        """Register an optional compute contributor; core execution is unaffected."""
+
+        self.broker.join(profile, executor)
+        self.events.emit(
+            self.time, EventCategory.AUTONOMY, EventType.EDGE_NODE_JOINED, profile.node_id,
+            f"{profile.node_id} joined as an edge compute node "
+            f"(cpu {profile.cpu_score:.1f}, gpu={'yes' if profile.gpu_available else 'no'})",
+            [profile.node_id], profile.model_dump(mode="json"),
+        )
+
+    def detach_edge_node(self, node_id: str) -> list[str]:
+        orphans = self.broker.leave(node_id)
+        self.events.emit(
+            self.time, EventCategory.FAILURE, EventType.EDGE_NODE_LEFT, node_id,
+            f"{node_id} left the edge compute pool; {len(orphans)} work unit(s) are retryable",
+            [node_id], {"orphaned": orphans},
+        )
+        return orphans
+
+    def connect_edge_worker(self, uri: str, node_id: str | None = None) -> EdgeResourceProfile:
+        """Attach a WebSocket edge worker announced by ``simulation.edge``."""
+
+        from .worker import WebSocketEdgeClient
+
+        client = WebSocketEdgeClient(uri, expected_node_id=node_id)
+        self.attach_edge_node(client.profile, client)
+        return client.profile
+
+    def _collect_adaptive_signals(self) -> None:
+        """Surface node-level adaptive decisions as engine events, once each."""
+
+        for node_id in sorted(self.drones):
+            node = self.drones[node_id]
+            for request in node.handoff_requests:
+                key = f"{node_id}:{request['task_id']}"
+                if key in self._seen_handoffs:
+                    continue
+                self._seen_handoffs.add(key)
+                self._preemptive_handoffs += 1
+                explanation = request.get("explanation") or {}
+                if explanation:
+                    self.explanations.add(DecisionExplanation.model_validate(explanation))
+                self.events.emit(
+                    self.time, EventCategory.AUTONOMY, EventType.PREEMPTIVE_HANDOFF, node_id,
+                    f"{node_id} released {request['task_id']} before hitting battery reserve",
+                    [node_id, request["task_id"]], request,
+                )
+            for prediction in node.active_predictions:
+                if node.predictions.should_alert(f"event:{prediction.kind}", self.time):
+                    self.events.emit(
+                        self.time, EventCategory.AUTONOMY, EventType.PREDICTION_EMITTED, node_id,
+                        f"{node_id}: {prediction.explanation}",
+                        [node_id], prediction.model_dump(mode="json"),
+                    )
+            plan = node.plan
+            if plan is not None:
+                choice = plan.metadata.get("route_choice")
+                if isinstance(choice, dict) and choice.get("changed"):
+                    signature = f"{node_id}:{plan.task_id}:{choice.get('selected')}"
+                    if signature not in self._seen_route_choices:
+                        self._seen_route_choices.add(signature)
+                        self._route_changes += 1
+                        self.events.emit(
+                            self.time, EventCategory.AUTONOMY, EventType.COMMUNICATION_AWARE_ROUTE, node_id,
+                            f"{node_id}: {choice.get('explanation', 'communication-aware route selected')}",
+                            [node_id], choice,
+                        )
+
     def snapshot(self, event_limit: int = 30) -> SimulationSnapshot:
         drones: list[DronePublicState] = []
         for node_id, node in sorted(self.drones.items()):
@@ -737,6 +926,7 @@ class SimulationEngine:
                     },
                     last_world_reconciliation=node.world_belief.last_reconciled_at,
                     policy=node.last_policy_result,
+                    adaptive=self._node_adaptive_state(node),
                 )
             )
         network_metrics = self.network.metrics(self.time)
@@ -788,6 +978,7 @@ class SimulationEngine:
             world_knowledge=world_knowledge,
             network=network_metrics,
             control_available=self.missions.control_available,
+            adaptive=self._adaptive_state(),
             events=self.events.recent(event_limit),
         )
 

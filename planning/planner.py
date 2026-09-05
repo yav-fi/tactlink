@@ -18,6 +18,7 @@ from .behaviors.search import plan_search
 from .behaviors.trace import plan_trace
 from .behaviors.watch import plan_watch
 from .behaviors.base import BehaviorOutcome
+from .comms import choose_route, connectivity_priority_for, measure_route
 from .coordination import active_team, layered_altitude, shard_index
 from .deconfliction import deconflict, relevant_peers
 from .energy import assess_route
@@ -118,6 +119,11 @@ class MissionPlanner:
 
         waypoints, routing_warnings = self._route(context, environment, targets, clearance, altitude, config)
         warnings.extend(routing_warnings)
+        route_choice = self._communication_route(
+            context, environment, targets, waypoints, clearance, altitude, config
+        )
+        if route_choice is not None and route_choice.changed:
+            waypoints = route_choice.selected.points
 
         mode = behavior.mode
         phase = behavior.phase
@@ -206,6 +212,8 @@ class MissionPlanner:
                 },
             }
         )
+        if route_choice is not None:
+            metadata["route_choice"] = route_choice.to_record()
 
         state.last_target = waypoints[0] if waypoints else None
         state.last_plan_time = context.now
@@ -381,6 +389,60 @@ class MissionPlanner:
         if result.detoured and PlanWarning.ROUTE_ADJUSTED not in warnings:
             warnings.append(PlanWarning.ROUTE_ADJUSTED)
         return (result.points or targets), warnings
+
+    def _communication_route(
+        self,
+        context: PlanningContext,
+        environment: EnvironmentQuery | None,
+        targets: list[Vector3],
+        baseline: list[Vector3],
+        clearance: float,
+        altitude: float,
+        config: PlanningConfig,
+    ):
+        """Offer the routed path a better-connected alternative, if one exists.
+
+        Bounded on purpose: at most a few detour anchors drawn from the learned
+        field, each routed once with the same A* the direct path uses. A task
+        that does not need connectivity keeps the shortest route.
+        """
+
+        if not config.communication_routing or context.communication is None or not baseline or not targets:
+            return None
+        task = context.current_task
+        priority = context.connectivity_priority
+        if priority is None:
+            priority = (
+                connectivity_priority_for(str(task.type), task.priority, task.metadata) if task else 0.0
+            )
+        if priority <= 0.0:
+            return None
+        start = context.estimated_position.with_z(altitude)
+        options = [measure_route("direct", start, baseline, context.communication)]
+        goal = targets[-1]
+        midpoint = Vector3(x=(start.x + goal.x) / 2.0, y=(start.y + goal.y) / 2.0, z=altitude)
+        anchors = context.communication.strong_points(
+            midpoint,
+            config.communication_detour_radius,
+            limit=config.communication_detour_candidates,
+        ) if hasattr(context.communication, "strong_points") else []
+        limit = options[0].length_m * config.communication_maximum_detour_ratio
+        for index, anchor in enumerate(anchors):
+            waypoint = anchor.with_z(altitude)
+            if waypoint.distance_xy(start) < 1.0 or waypoint.distance_xy(goal) < 1.0:
+                continue
+            points, _ = self._route(
+                context, environment, [waypoint, *targets], clearance, altitude, config
+            )
+            if not points:
+                continue
+            option = measure_route(f"via-{index}", start, points, context.communication)
+            if option.length_m > limit:
+                continue  # never accept an unbounded detour to hug the mesh
+            options.append(option)
+        if len(options) < 2:
+            return None
+        return choose_route(options, priority, minimum_margin=config.communication_route_margin)
 
     @staticmethod
     def _progress_fraction(

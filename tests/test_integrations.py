@@ -70,12 +70,13 @@ def test_invalid_llm_output_is_rejected(response: str) -> None:
 def test_gesture_return_and_hold_create_canonical_commands() -> None:
     adapter = GestureMissionAdapter()
     returned = adapter.event_to_command("return_home")
-    held = adapter.event_to_command("Closed_Fist")
+    held = adapter.event_to_command("Thumb_Down")
     assert isinstance(returned, MissionCommand)
     assert returned.type == TaskType.RETURN
     assert isinstance(held, MissionCommand)
     assert held.type == TaskType.HOLD
     assert held.metadata["input_source"] == "gesture"
+    assert adapter.event_to_command("Closed_Fist") is None
     assert adapter.event_to_command("spin360") is None
 
 

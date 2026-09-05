@@ -9,8 +9,9 @@ the simulator, and shows the camera feed beside a 3D view of the drone.
     python src/main.py --demo          # no camera: scripted flight for testing
     python src/main.py --demo --headless --out flight.png   # render a sample
 
-Gestures: Open_Palm take off · Closed_Fist land · Victory cycle mode ·
-Thumb_Up/Thumb_Down speed · Pointing_Up 360 spin · ILoveYou return home.
+Gestures: Thumb_Up take off / step altitude · Thumb_Down land · Pointing_Up
+orbit · ILoveYou return home · two-finger wiper directional dash · three-finger
+pose forward dash. Open_Palm, Closed_Fist, and Victory are disabled by default.
 
 Keys: q quit · r reset · space take off / land
 """

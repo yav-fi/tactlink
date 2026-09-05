@@ -8,17 +8,29 @@ messages that actually traverse this transport.
 from __future__ import annotations
 
 import heapq
+import json
 import random
 from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from hashlib import sha1
 from math import sqrt
 from typing import Any
 
 from .config import NetworkConfig
 from .events import EventBus
 from .interference import InterferenceEngine
-from .models import EventCategory, EventType, LinkState, NetworkMessage, NetworkMetrics, Vector3
+from .messaging import MessageClass, MessagingCounters, classify
+from .models import (
+    EventCategory,
+    EventType,
+    LinkState,
+    MessagePriority,
+    MessagingMetrics,
+    NetworkMessage,
+    NetworkMetrics,
+    Vector3,
+)
 
 
 @dataclass(order=True)
@@ -27,6 +39,9 @@ class _Delivery:
     order: int
     recipient: str = field(compare=False)
     message: NetworkMessage = field(compare=False)
+    grade: MessageClass | None = field(compare=False, default=None)
+    dropped: bool = field(compare=False, default=False)
+    drop_reason: str = field(compare=False, default="")
 
 
 class NetworkSimulator:
@@ -50,10 +65,14 @@ class NetworkSimulator:
         self._endpoints: set[str] = {self.CONTROL_ID}
         self._online: dict[str, bool] = {self.CONTROL_ID: True}
         self._pending: list[_Delivery] = []
+        self._ready: list[_Delivery] = []
+        self._recent_digests: deque[tuple[str, str, float]] = deque(maxlen=512)
+        self._digest_index: dict[tuple[str, str], float] = {}
         self._inboxes: dict[str, deque[NetworkMessage]] = defaultdict(deque)
         self._partitions: dict[frozenset[str], float] = {}
         self._recent_outcomes: deque[bool] = deque(maxlen=500)
         self._counter = 0
+        self.counters = MessagingCounters()
 
     def register(self, endpoint_id: str) -> None:
         self._endpoints.add(endpoint_id)
@@ -97,45 +116,205 @@ class NetworkSimulator:
                 now, EventCategory.NETWORK, EventType.NETWORK_RECONNECTED, "network",
                 "A temporary network partition ended", affected,
             )
+        self._drain(now)
+
+    # -- scheduling ---------------------------------------------------------
+
+    def _drain(self, now: float) -> None:
+        """Move transmitted packets into inboxes under the bandwidth budget.
+
+        Physical loss already happened in :meth:`send`.  This stage models the
+        *scheduling* side of a congested radio: a finite number of messages and
+        bytes get through per tick, and adaptive mode spends that budget on the
+        most valuable packets instead of on whatever arrived first.
+        """
+
+        while self._pending and self._pending[0].deliver_at <= now + 1e-9:
+            self._ready.append(heapq.heappop(self._pending))
+
+        adaptive = self.config.adaptive_messaging
+        survivors: list[_Delivery] = []
+        for item in self._ready:
+            if item.dropped:
+                continue
+            grade = item.grade or classify(item.message)
+            if adaptive and grade.ttl_seconds > 0.0 and now - item.message.timestamp_sent > grade.ttl_seconds:
+                item.dropped, item.drop_reason = True, "ttl_expired"
+                self.counters.expired += 1
+                self.counters.note_drop("ttl_expired")
+                continue
+            survivors.append(item)
+
+        if adaptive:
+            survivors = self._coalesce(survivors)
+            survivors.sort(
+                key=lambda entry: (
+                    (entry.grade or classify(entry.message)).rank,
+                    entry.deliver_at,
+                    entry.order,
+                )
+            )
+        else:
+            survivors.sort(key=lambda entry: (entry.deliver_at, entry.order))
+
+        message_budget = self.config.bandwidth_messages_per_tick
+        byte_budget = self.config.bandwidth_bytes_per_tick
         delivered = 0
-        while self._pending and self._pending[0].deliver_at <= now:
-            item = heapq.heappop(self._pending)
+        spent_bytes = 0
+        remainder: list[_Delivery] = []
+        for index, item in enumerate(survivors):
+            if (message_budget > 0 and delivered >= message_budget) or (
+                byte_budget > 0 and spent_bytes >= byte_budget
+            ):
+                remainder = survivors[index:]
+                break
+            grade = item.grade or classify(item.message)
+            delivered += 1
+            spent_bytes += grade.payload_bytes
             if self._online.get(item.recipient, False) and not self._is_partitioned(
                 item.message.sender_id, item.recipient, now
             ):
                 self._inboxes[item.recipient].append(item.message)
-            delivered += 1
-            if delivered >= self.config.bandwidth_messages_per_tick:
-                break
+                self.counters.note_delivery(grade)
+            else:
+                self.counters.note_drop("recipient_unreachable")
+        if remainder:
+            self.counters.bandwidth_deferred += len(remainder)
+            self.counters.saturated_ticks += 1
+        self._ready = remainder
+
+    def _coalesce(self, survivors: list[_Delivery]) -> list[_Delivery]:
+        """Keep only the newest of each replaceable stream still awaiting bandwidth.
+
+        Coalescing applies to packets that are *queued behind congestion*, never
+        to ones merely propagating: replacing an in-flight beacon would silently
+        lower its arrival rate on a high-latency link.
+        """
+
+        newest: dict[tuple[str, str], _Delivery] = {}
+        for item in survivors:
+            grade = item.grade or classify(item.message)
+            if grade.coalesce_key is None:
+                continue
+            key = (item.recipient, grade.coalesce_key)
+            current = newest.get(key)
+            if current is None or (item.message.timestamp_sent, item.order) > (
+                current.message.timestamp_sent,
+                current.order,
+            ):
+                newest[key] = item
+        if not newest:
+            return survivors
+        kept: list[_Delivery] = []
+        for item in survivors:
+            grade = item.grade or classify(item.message)
+            key = (item.recipient, grade.coalesce_key) if grade.coalesce_key else None
+            if key is not None and newest.get(key) is not item:
+                item.dropped, item.drop_reason = True, "coalesced"
+                self.counters.coalesced += 1
+                self.counters.note_drop("coalesced")
+                continue
+            kept.append(item)
+        return kept
 
     def send(self, message: NetworkMessage, now: float) -> bool:
         if not self._online.get(message.sender_id, False):
             return False
+        grade = classify(message)
         recipients = sorted(self._endpoints - {message.sender_id}) if message.recipient_id is None else [message.recipient_id]
         accepted = False
         for recipient in recipients:
             if recipient not in self._endpoints or not self._online.get(recipient, False):
                 continue
+            self.counters.note_attempt(grade)
             link = self.link_state(message.sender_id, recipient, now)
+            # Physical loss is evaluated before any prioritisation: a CRITICAL
+            # packet is exactly as fragile on the air as a LOW one.
             if not link.available:
-                self._drop(message, recipient, now, "partition" if link.partitioned else "physical_link")
+                reason = "partition" if link.partitioned else "physical_link"
+                self._drop(message, recipient, now, reason)
+                self.counters.note_drop(reason)
                 self._recent_outcomes.append(False)
                 continue
             if self.rng.random() < link.packet_loss:
                 self._drop(message, recipient, now, "packet_loss")
+                self.counters.note_drop("packet_loss")
                 self._recent_outcomes.append(False)
                 continue
+            self.counters.transmitted += 1
             latency = max(0.0, link.latency_seconds + self.rng.uniform(-self.config.jitter, self.config.jitter))
-            self._queue(message, recipient, now + latency)
+            self._queue(message, recipient, now + latency, grade, now)
             self._recent_outcomes.append(True)
             accepted = True
             if self.config.duplication_probability and self.rng.random() < self.config.duplication_probability:
-                self._queue(message, recipient, now + latency + 0.01)
+                self._queue(message, recipient, now + latency + 0.01, grade, now)
         return accepted
 
-    def _queue(self, message: NetworkMessage, recipient: str, deliver_at: float) -> None:
+    def _queue(
+        self,
+        message: NetworkMessage,
+        recipient: str,
+        deliver_at: float,
+        grade: MessageClass | None = None,
+        now: float | None = None,
+    ) -> None:
+        grade = grade or classify(message)
+        moment = now if now is not None else message.timestamp_sent
+        if self.config.adaptive_messaging and grade.dedupable and self._is_duplicate(message, recipient, grade, moment):
+            self.counters.deduplicated += 1
+            self.counters.note_drop("duplicate")
+            return
         self._counter += 1
-        heapq.heappush(self._pending, _Delivery(deliver_at, self._counter, recipient, message.model_copy(deep=True)))
+        item = _Delivery(deliver_at, self._counter, recipient, message.model_copy(deep=True), grade)
+        heapq.heappush(self._pending, item)
+        self._enforce_queue_bound()
+
+    def _enforce_queue_bound(self) -> None:
+        """Bound transport memory while preserving the most valuable packets."""
+
+        maximum = self.config.maximum_queue_messages
+        while len(self._pending) + len(self._ready) > maximum:
+            candidates = self._pending + self._ready
+            if self.config.adaptive_messaging:
+                victim = max(
+                    candidates,
+                    key=lambda item: (
+                        (item.grade or classify(item.message)).rank,
+                        item.deliver_at,
+                        item.order,
+                    ),
+                )
+            else:
+                victim = max(candidates, key=lambda item: (item.deliver_at, item.order))
+            if victim in self._pending:
+                self._pending.remove(victim)
+                heapq.heapify(self._pending)
+            else:
+                self._ready.remove(victim)
+            victim.dropped = True
+            victim.drop_reason = "queue_overflow"
+            self.counters.note_drop("queue_overflow")
+
+    def _is_duplicate(
+        self, message: NetworkMessage, recipient: str, grade: MessageClass, now: float
+    ) -> bool:
+        """Suppress a byte-identical retransmission inside a short window."""
+
+        digest = sha1(
+            json.dumps(message.payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+        ).hexdigest()
+        key = (recipient, f"{message.sender_id}|{message.type.value}|{digest}")
+        window = self.config.deduplication_window_seconds
+        last = self._digest_index.get(key)
+        if last is not None and now - last < window:
+            return True
+        self._digest_index[key] = now
+        self._recent_digests.append((key[0], key[1], now))
+        while len(self._recent_digests) >= self._recent_digests.maxlen and self._recent_digests:
+            stale = self._recent_digests.popleft()
+            if self._digest_index.get((stale[0], stale[1])) == stale[2]:
+                del self._digest_index[(stale[0], stale[1])]
+        return False
 
     def _drop(self, message: NetworkMessage, recipient: str, now: float, reason: str) -> None:
         noisy_control_plane = message.type.value in {"HEARTBEAT", "STATUS", "MISSION_SYNC", "TASK_BID", "WORLD_UPDATE"}
@@ -258,6 +437,29 @@ class NetworkSimulator:
             network_health=health, connected_components=components,
             largest_component_fraction=largest, mean_link_quality=mean_quality,
             packet_loss_recent=loss, active_nodes=len(active),
+            messaging=self.messaging_metrics(),
+        )
+
+    def messaging_metrics(self) -> MessagingMetrics:
+        counters = self.counters
+        return MessagingMetrics(
+            adaptive=self.config.adaptive_messaging,
+            messages_attempted=counters.attempted,
+            messages_transmitted=counters.transmitted,
+            messages_delivered=counters.delivered,
+            bytes_attempted=counters.bytes_attempted,
+            bytes_delivered=counters.bytes_delivered,
+            expired=counters.expired,
+            coalesced=counters.coalesced,
+            deduplicated=counters.deduplicated,
+            bandwidth_deferred=counters.bandwidth_deferred,
+            saturated_ticks=counters.saturated_ticks,
+            queue_depth=len(self._ready) + len(self._pending),
+            attempted_by_priority=dict(sorted(counters.attempted_by_priority.items())),
+            delivered_by_priority=dict(sorted(counters.delivered_by_priority.items())),
+            dropped_by_reason=dict(sorted(counters.dropped_by_reason.items())),
+            critical_delivery_ratio=round(counters.delivery_ratio(MessagePriority.CRITICAL), 6),
+            low_delivery_ratio=round(counters.delivery_ratio(MessagePriority.LOW), 6),
         )
 
     def _obstructed(self, start: Vector3, end: Vector3) -> bool:
