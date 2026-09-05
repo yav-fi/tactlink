@@ -13,6 +13,35 @@ const commandStatus = document.querySelector<HTMLParagraphElement>("#command-sta
 const missionInput = document.querySelector<HTMLTextAreaElement>("#mission-json")!;
 const stateElement = document.querySelector<HTMLDListElement>("#drone-state")!;
 
+const panelTabs = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+function showControlTab(name: "drone" | "batches"): void {
+  for (const tab of panelTabs) {
+    const selected = tab.id === `tab-${name}`;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    document.getElementById(tab.getAttribute("aria-controls")!)!.hidden = !selected;
+  }
+}
+panelTabs.forEach((tab, index) => {
+  tab.addEventListener("click", () => { clearInput(); showControlTab(index === 0 ? "drone" : "batches"); });
+  tab.addEventListener("keydown", event => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? 1 : 1 - index;
+    panelTabs[next].click(); panelTabs[next].focus();
+  });
+});
+
+function showPlacementControls(batch: boolean): void {
+  const name = batch ? "batches" : "drone";
+  showControlTab(name);
+  document.getElementById(`panel-${name}`)!.append(deploymentPanel);
+  for (const id of ["batch-count", "formation-spacing"]) {
+    document.getElementById(id)!.hidden = !batch;
+    document.querySelector<HTMLLabelElement>(`label[for="${id}"]`)!.hidden = !batch;
+  }
+}
+
 missionInput.value = JSON.stringify(sampleMission, null, 2);
 if (token) Cesium.Ion.defaultAccessToken = token;
 
@@ -225,6 +254,7 @@ function refreshGroups(): void {
 }
 
 function beginBatchControl(ids: string[]): void {
+  showControlTab("batches");
   const speed = batchSpeedInput.valueAsNumber;
   if (!Number.isFinite(speed) || speed <= 0) { batchStatus.textContent = "Enter a positive batch speed in mph."; return; }
   flyToFreeCameraOverview();
@@ -312,6 +342,7 @@ document.querySelector<HTMLButtonElement>("#deploy-drone")!.addEventListener("cl
   flyToFreeCameraOverview();
   deploying = true;
   placementMode = "single";
+  showPlacementControls(false);
   countInput.disabled = true;
   countInput.value = "1";
   confirmDeployment.textContent = "Deploy here";
@@ -322,6 +353,7 @@ document.querySelector<HTMLButtonElement>("#deploy-drone")!.addEventListener("cl
 });
 document.querySelector<HTMLButtonElement>("#bulk-deploy")!.addEventListener("click", () => {
   cancelDeployment(); flyToFreeCameraOverview(); deploying = true; placementMode = "bulk";
+  showPlacementControls(true);
   countInput.disabled = false; countInput.value = "10"; deploymentPanel.hidden = false; confirmDeployment.textContent = "Deploy batch here";
   deploymentStatus.textContent = "Choose a map location for the batch, then adjust number, height and spacing.";
   refreshFleet();
@@ -330,6 +362,7 @@ document.querySelector<HTMLButtonElement>("#choose-destination")!.addEventListen
   if (!selectedIds.size) return;
   pendingIds = [...selectedIds]; pendingGroup = savedGroups.value;
   cancelDeployment(); flyToFreeCameraOverview(); deploying = true; placementMode = "command";
+  showPlacementControls(true);
   countInput.disabled = true; countInput.value = String(pendingIds.length); deploymentPanel.hidden = false;
   confirmDeployment.textContent = "Send selected drones";
   deploymentStatus.textContent = "Click the destination, adjust height and spacing, and review the dashed routes before sending.";
