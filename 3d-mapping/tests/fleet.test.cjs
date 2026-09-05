@@ -20,6 +20,72 @@ function loadSource(name) {
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
 
+test("synchronized replay uses assigned speeds and stops at the last arrival", () => {
+  const entities = new Cesium.EntityCollection();
+  const fleet = new Fleet({ entities });
+  const first = fleet.deploy(home), second = fleet.deploy(home);
+  fleet.deploy(home); // No path: excluded from the completion timer.
+  for (const drone of [first, second]) {
+    drone.setManualControl(true);
+    for (let i = 0; i < 240; i++) drone.moveManually(1, 0, 0, 1 / 60);
+    // Turn and climb so playback must follow segments, not a straight shortcut.
+    for (let i = 0; i < 120; i++) drone.moveManually(0, 1, 1, 1 / 60);
+    drone.setManualControl(false);
+  }
+  first.speedMph = 30;
+  second.speedMph = 60;
+  const trail = entities.getById(`${first.id}_trail`).polyline.positions.getValue().map(p => Cesium.Cartesian3.clone(p));
+  const length = trail.slice(1).reduce((sum, p, i) => sum + Cesium.Cartesian3.distance(trail[i], p), 0);
+  const expectedDuration = length / (30 * 0.44704);
+  fleet.startReplay(100);
+  assert.equal(fleet.replay.total, 2);
+  assert.equal(fleet.replay.elapsed, 0);
+  assert(Math.abs(fleet.replay.duration - expectedDuration) < 1e-9);
+  for (const drone of [first, second]) {
+    const replay = entities.getById(`${drone.id}_replay`);
+    assert(replay.box);
+    assert.equal(replay.position.isConstant, false);
+    assert(Cesium.Cartesian3.equals(replay.position.getValue(), trail[0]));
+  }
+  fleet.updateReplay(101);
+  const distance = drone => Cesium.Cartesian3.distance(trail[0], entities.getById(`${drone.id}_replay`).position.getValue());
+  assert(Math.abs(distance(first) - 30 * 0.44704) < 0.01);
+  assert(Math.abs(distance(second) - 60 * 0.44704) < 0.01);
+  fleet.updateReplay(100 + expectedDuration * 0.75);
+  assert.equal(fleet.replay.arrived, 1);
+  assert.equal(fleet.replay.running, true);
+  assert(Cesium.Cartesian3.equalsEpsilon(entities.getById(`${second.id}_replay`).position.getValue(), trail.at(-1), 1e-12, 1e-8));
+  // A delayed frame must land exactly, without adding the delay to the final time.
+  fleet.updateReplay(100 + expectedDuration + 10);
+  assert.equal(fleet.replay.running, false);
+  assert.equal(fleet.replay.elapsed, expectedDuration);
+  assert.equal(fleet.replay.arrived, 2);
+  fleet.updateReplay(1000);
+  assert.equal(fleet.replay.elapsed, expectedDuration);
+  assert.deepEqual(entities.getById(`${first.id}_trail`).polyline.positions.getValue(), trail);
+  fleet.startReplay(1001);
+  assert(Cesium.Cartesian3.equals(entities.getById(`${first.id}_replay`).position.getValue(), trail[0]));
+  fleet.stopReplay();
+  assert(!entities.getById(`${first.id}_replay`));
+  assert.equal(entities.getById(first.id).show, true);
+  assert.deepEqual(entities.getById(`${first.id}_trail`).polyline.positions.getValue(), trail);
+  fleet.clear();
+  assert.equal(entities.values.length, 0);
+});
+
+test("empty and stationary routes do not start a timer", () => {
+  const fleet = new Fleet({ entities: new Cesium.EntityCollection() });
+  fleet.startReplay(0);
+  assert.equal(fleet.replay.running, false);
+  const drone = fleet.deploy(home);
+  drone.setManualControl(true);
+  drone.setManualControl(false);
+  fleet.startReplay(10);
+  assert.equal(fleet.replay.total, 0);
+  fleet.updateReplay(100);
+  assert.equal(fleet.replay.elapsed, 0);
+});
+
 test("60 mph equals 26.8224 meters per second on the georeferenced map", () => {
   function traveled(hz, diagonal = false) {
     const entities = new Cesium.EntityCollection();

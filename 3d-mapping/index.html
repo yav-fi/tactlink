@@ -16,6 +16,12 @@
         <section>
           <h2>Drone fleet</h2>
           <div class="actions">
+            <button id="run-all-paths" type="button">Run all paths</button>
+            <button id="stop-paths" type="button" class="secondary" disabled>Stop playback</button>
+          </div>
+          <p id="playback-time" class="hint" role="timer">Elapsed: 0.00 s</p>
+          <p id="playback-status" class="hint" role="status">Record paths by piloting drones, then run them together.</p>
+          <div class="actions">
             <button id="deploy-drone" type="button">Deploy a new drone</button>
             <button id="reset-all" type="button" class="secondary">Reset all drones</button>
           </div>

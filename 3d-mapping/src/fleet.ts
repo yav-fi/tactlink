@@ -16,6 +16,9 @@ export const DRONE_COLORS = [
 export class Fleet {
   readonly drones = new Map<string, DroneController>();
   private nextNumber = 1;
+  private replayStart = 0;
+  private replayFlights: { drone: DroneController; duration: number }[] = [];
+  replay = { running: false, elapsed: 0, duration: 0, total: 0, arrived: 0 };
   constructor(private readonly viewer: Cesium.Viewer) {}
   get nextColor() { return DRONE_COLORS[(this.nextNumber - 1) % DRONE_COLORS.length]; }
   deploy(position: Coordinates): DroneController {
@@ -24,8 +27,38 @@ export class Fleet {
     return drone;
   }
   clear(): void {
+    this.stopReplay();
     for (const drone of this.drones.values()) drone.destroy();
     this.drones.clear();
     this.nextNumber = 1;
+  }
+
+  startReplay(nowSeconds: number): void {
+    this.stopReplay();
+    this.replayFlights = [];
+    for (const drone of this.drones.values()) {
+      const duration = drone.beginReplay();
+      if (duration !== null) this.replayFlights.push({ drone, duration });
+    }
+    const duration = Math.max(0, ...this.replayFlights.map(flight => flight.duration));
+    this.replayStart = nowSeconds;
+    this.replay = { running: duration > 0, elapsed: 0, duration, total: this.replayFlights.length, arrived: 0 };
+  }
+
+  updateReplay(nowSeconds: number): void {
+    if (!this.replay.running) return;
+    this.replay.elapsed = Math.min(this.replay.duration, Math.max(0, nowSeconds - this.replayStart));
+    this.replay.arrived = 0;
+    for (const flight of this.replayFlights) {
+      flight.drone.replayAt(this.replay.elapsed);
+      if (this.replay.elapsed >= flight.duration) this.replay.arrived++;
+    }
+    this.replay.running = this.replay.elapsed < this.replay.duration;
+  }
+
+  stopReplay(): void {
+    for (const drone of this.drones.values()) drone.hideReplay();
+    this.replayFlights = [];
+    this.replay = { running: false, elapsed: 0, duration: 0, total: 0, arrived: 0 };
   }
 }

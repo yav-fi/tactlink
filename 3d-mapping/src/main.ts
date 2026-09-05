@@ -32,6 +32,10 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
 
 viewer.scene.globe.enableLighting = true;
 const fleet = new Fleet(viewer);
+const replayButton = document.querySelector<HTMLButtonElement>("#run-all-paths")!;
+const stopReplayButton = document.querySelector<HTMLButtonElement>("#stop-paths")!;
+const replayTime = document.querySelector<HTMLParagraphElement>("#playback-time")!;
+const replayStatus = document.querySelector<HTMLParagraphElement>("#playback-status")!;
 let drone: DroneController | undefined;
 const previewButton = document.querySelector<HTMLButtonElement>("#preview-flight")!;
 const previewStatus = document.querySelector<HTMLParagraphElement>("#preview-status")!;
@@ -193,14 +197,32 @@ function refreshFleet(): void {
   }
   droneSelect.value = drone?.id ?? "";
   droneSelect.disabled = deploying || !drone;
-  speedInput.disabled = deploying || !drone;
+  speedInput.disabled = deploying || !drone || fleet.replay.running;
   speedInput.value = String(drone?.speedMph ?? 60);
   speedInput.removeAttribute("aria-invalid");
   speedStatus.textContent = `${drone?.speedMph ?? 60} mph · ${((drone?.speedMph ?? 60) * 0.44704).toFixed(2)} m/s`;
   for (const id of ["run-mission", "reset-mission", "control-drone"]) {
-    document.querySelector<HTMLButtonElement>(`#${id}`)!.disabled = deploying || !drone;
+    document.querySelector<HTMLButtonElement>(`#${id}`)!.disabled = deploying || !drone || fleet.replay.running;
   }
+  document.querySelector<HTMLButtonElement>("#deploy-drone")!.disabled = fleet.replay.running;
+  previewButton.disabled = fleet.replay.running;
+  replayButton.disabled = deploying || fleet.replay.running || !fleet.drones.size;
+  stopReplayButton.disabled = !fleet.replay.running;
 }
+
+replayButton.addEventListener("click", () => {
+  flyToFreeCameraOverview();
+  fleet.startReplay(performance.now() / 1000);
+  replayStatus.textContent = fleet.replay.total
+    ? `All ${fleet.replay.total} routed drones launched together. Drones without a path stay parked.`
+    : "No recorded paths yet. Pilot a drone to record its route first.";
+  refreshFleet();
+});
+stopReplayButton.addEventListener("click", () => {
+  fleet.stopReplay();
+  replayStatus.textContent = "Playback stopped. Recorded paths are preserved.";
+  refreshFleet();
+});
 
 function cancelDeployment(): void {
   deploying = false;
@@ -279,6 +301,7 @@ document.querySelector<HTMLButtonElement>("#reset-all")!.addEventListener("click
   flyToFreeCameraOverview();
   cancelDeployment();
   fleet.clear();
+  replayStatus.textContent = "Record paths by piloting drones, then run them together.";
   if (flightRoute) viewer.entities.remove(flightRoute);
   flightRoute = undefined;
   drone = undefined;
@@ -396,6 +419,13 @@ viewer.clock.onTick.addEventListener((clock) => {
   previousTime = Cesium.JulianDate.clone(clock.currentTime, previousTime);
   for (const item of fleet.drones.values()) item.update(deltaSeconds);
   const cameraTime = performance.now();
+  const wasPlaying = fleet.replay.running;
+  fleet.updateReplay(cameraTime / 1000);
+  replayTime.textContent = `Elapsed: ${fleet.replay.elapsed.toFixed(2)} s`;
+  if (fleet.replay.total) {
+    replayStatus.textContent = `${fleet.replay.arrived} / ${fleet.replay.total} arrived${fleet.replay.running ? " · Playing at assigned speeds" : " · All paths complete"}`;
+  }
+  if (wasPlaying && !fleet.replay.running) refreshFleet();
   updateFreeCamera(Math.min(0.1, Math.max(0, (cameraTime - previousCameraTime) / 1000)));
   previousCameraTime = cameraTime;
   const snapshot = drone?.snapshot();

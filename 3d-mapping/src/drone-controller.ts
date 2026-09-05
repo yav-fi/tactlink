@@ -51,6 +51,11 @@ export class DroneController {
   private readonly releases: Cesium.Entity[] = [];
   private lastRenderedPosition: Cesium.Cartesian3 | undefined;
   private travelDirection: Cesium.Cartesian3 | undefined;
+  private replayEntity: Cesium.Entity | undefined;
+  private replayPosition = new Cesium.Cartesian3();
+  private replayPoints: Cesium.Cartesian3[] = [];
+  private replayDistances: number[] = [];
+  private replaySpeed = 0;
 
   constructor(private readonly viewer: Cesium.Viewer, home: Coordinates, private readonly color = Cesium.Color.fromCssColorString("#35e8ff"), readonly id = "drone_1") {
     this.home = { ...home };
@@ -96,6 +101,7 @@ export class DroneController {
   }
 
   run(command: MissionCommand): void {
+    this.hideReplay();
     this.mission = command;
     this.stepIndex = 0;
     this.stepElapsed = 0;
@@ -104,6 +110,7 @@ export class DroneController {
   }
 
   setManualControl(enabled: boolean): void {
+    if (enabled) this.hideReplay();
     if (!enabled && this.state === "MANUAL") {
       const number = this.releases.length + 1;
       this.releases.push(this.viewer.entities.add({
@@ -162,6 +169,7 @@ export class DroneController {
   }
 
   reset(): void {
+    this.hideReplay();
     this.lastRenderedPosition = undefined;
     this.travelDirection = undefined;
     for (const marker of [...this.releases, ...this.arrows]) this.viewer.entities.remove(marker);
@@ -188,6 +196,49 @@ export class DroneController {
 
   snapshot(): DroneSnapshot {
     return { ...this.position, state: this.state, currentStep: this.mission ? this.stepIndex + 1 : 0, totalSteps: this.mission?.mission.length ?? 0 };
+  }
+
+  beginReplay(): number | null {
+    this.hideReplay();
+    this.stopManualMotion();
+    this.mission = null;
+    this.replayPoints = this.trailPoints.map(point => Cesium.Cartesian3.clone(point));
+    this.replayDistances = [0];
+    for (let i = 1; i < this.replayPoints.length; i++) {
+      this.replayDistances.push(this.replayDistances[i - 1] + Cesium.Cartesian3.distance(this.replayPoints[i - 1], this.replayPoints[i]));
+    }
+    const length = this.replayDistances.at(-1) ?? 0;
+    if (length < 0.001) return null;
+    this.replaySpeed = this.speedMph * METERS_PER_SECOND_PER_MPH;
+    this.replayPosition = Cesium.Cartesian3.clone(this.replayPoints[0]);
+    this.entity.show = false;
+    this.replayEntity = this.viewer.entities.add({
+      id: `${this.id}_replay`,
+      position: new Cesium.CallbackPositionProperty((_time, result) => Cesium.Cartesian3.clone(this.replayPosition, result), false),
+      box: { dimensions: new Cesium.Cartesian3(16, 10, 4), material: this.color, outline: true, outlineColor: this.color },
+      label: { text: this.id.replace("_", " ").toUpperCase(), font: "600 13px system-ui", fillColor: this.color, showBackground: true, pixelOffset: new Cesium.Cartesian2(0, -28) },
+    });
+    return length / this.replaySpeed;
+  }
+
+  replayAt(elapsedSeconds: number): void {
+    if (!this.replayEntity) return;
+    const length = this.replayDistances.at(-1)!;
+    const distance = Math.min(length, Math.max(0, elapsedSeconds) * this.replaySpeed);
+    let low = 1, high = this.replayDistances.length - 1;
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      if (this.replayDistances[mid] < distance) low = mid + 1; else high = mid;
+    }
+    const start = this.replayDistances[low - 1];
+    const span = this.replayDistances[low] - start;
+    this.replayPosition = Cesium.Cartesian3.lerp(this.replayPoints[low - 1], this.replayPoints[low], span > 0 ? (distance - start) / span : 0, new Cesium.Cartesian3());
+  }
+
+  hideReplay(): void {
+    if (this.replayEntity) this.viewer.entities.remove(this.replayEntity);
+    this.replayEntity = undefined;
+    this.entity.show = true;
   }
 
   private updateStep(step: MissionStep, deltaSeconds: number): void {
