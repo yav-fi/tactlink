@@ -48,11 +48,11 @@ If a local checkout of the LibraSpec-enabled chad fork is present at
 the extra ~1.5% from LibraSpec; otherwise it falls back to the public `chad-code`
 package with the same target/draft pair (~65 tok/s, no LibraSpec).
 
-**One command, ollama-`run`-style** (starts the server if it's not already up, then asks
-it a question):
+**One command, ollama-`run`-style** (starts the server if it's not already up):
 
 ```sh
-./scripts/ask.sh "what's 17 * 23?"
+./scripts/ask.sh "what's 17 * 23?"   # one-shot: streams the answer + a tok/s readout
+./scripts/ask.sh                     # interactive multi-turn REPL (/bye or Ctrl-D to exit)
 ```
 
 Or, once it's serving on `http://localhost:8081`, use it from Python directly:
@@ -67,7 +67,18 @@ print(result.text, result.timings)
 `chat_sync`/`chat` apply the model's own chat template (system/user/assistant turns)
 before sending, so replies act like an assistant instead of a raw continuation of your
 text. Use `complete`/`complete_sync` instead if you want to send an already-formatted
-prompt as-is with no template applied.
+prompt as-is with no template applied. For multi-turn conversations (history carried
+across turns, like the REPL above), use `Conversation`:
+
+```python
+from chat_client import Conversation
+
+conv = Conversation()
+for chunk in conv.send("my favorite color is teal"):
+    print(chunk, end="")
+for chunk in conv.send("what is my favorite color?"):
+    print(chunk, end="")
+```
 
 Set `CHAT_SERVER_URL` if the server runs on a different host/port, or `CHAT_MODEL_DIR` if
 the chat template should be loaded from a model dir other than `models/qwen3.8-27b-4bit`.
