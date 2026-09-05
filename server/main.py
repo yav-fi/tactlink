@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from simulation.models import (
+    AdaptiveRuntimeState,
     DronePublicState,
     InterferenceConfig,
     MissionCommand,
@@ -22,20 +23,38 @@ from simulation.models import (
 )
 from simulation.scenarios import ScenarioPreset
 from simulation.simulation import SimulationEngine
+from simulation.world import WorldDefinition
 
+from .mission_intel import install as install_mission_intel
 from .websocket import WebSocketHub
 
+# How often, in simulated seconds, a registered mission plan is re-evaluated.
+PLAN_EVALUATION_SECONDS = 1.0
 
-def create_app(engine: SimulationEngine | None = None, start_runner: bool = True) -> FastAPI:
+
+def create_app(
+    engine: SimulationEngine | None = None,
+    start_runner: bool = True,
+    mission_backend: str = "local-llm",
+) -> FastAPI:
     runtime = engine or SimulationEngine()
     hub = WebSocketHub()
 
     async def simulation_loop() -> None:
         interval = runtime.config.tick_seconds
+        next_plan_evaluation = 0.0
         while True:
             started = asyncio.get_running_loop().time()
             if runtime.running:
                 runtime.tick(interval)
+                # Mission plans advance on their own cadence: trigger checks and
+                # constraint enforcement do not need to run at the tick rate.
+                if runtime.time >= next_plan_evaluation and app.state.mission_session.plans:
+                    next_plan_evaluation = runtime.time + PLAN_EVALUATION_SECONDS
+                    snapshot = runtime.snapshot()
+                    app.state.mission_session.evaluate(
+                        snapshot, snapshot.events, runtime.observed_entities()
+                    )
             elapsed = asyncio.get_running_loop().time() - started
             await asyncio.sleep(max(0.0, interval - elapsed))
 
@@ -60,6 +79,7 @@ def create_app(engine: SimulationEngine | None = None, start_runner: bool = True
     )
     app.state.engine = runtime
     app.state.websocket_hub = hub
+    app.state.mission_session = install_mission_intel(app, runtime, mission_backend)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
@@ -75,6 +95,11 @@ def create_app(engine: SimulationEngine | None = None, start_runner: bool = True
     @app.get("/api/state", response_model=SimulationSnapshot)
     async def state() -> SimulationSnapshot:
         return runtime.snapshot()
+
+    @app.get("/api/world", response_model=WorldDefinition)
+    async def world() -> WorldDefinition:
+        """World bounds, obstacles, regions, and current moving-entity seeds."""
+        return runtime.world.definition
 
     @app.get("/api/drones", response_model=list[DronePublicState])
     async def drones() -> list[DronePublicState]:
@@ -161,6 +186,26 @@ def create_app(engine: SimulationEngine | None = None, start_runner: bool = True
         except (OSError, RuntimeError) as exc:
             raise HTTPException(409, str(exc)) from exc
         return {"node_id": node_id, "worker": uri, "status": "connected"}
+
+    @app.get("/api/adaptive", response_model=AdaptiveRuntimeState)
+    async def adaptive() -> AdaptiveRuntimeState:
+        return runtime.snapshot(event_limit=0).adaptive
+
+    @app.get("/api/adaptive/explanations")
+    async def explanations(limit: int = Query(default=20, ge=1, le=60)) -> list[dict]:
+        return [item.model_dump(mode="json") for item in runtime.explanations.recent(limit)]
+
+    @app.post("/api/edge/connect")
+    async def connect_edge(uri: str = Query(..., pattern=r"^wss?://"), node_id: str | None = None) -> dict[str, object]:
+        try:
+            profile = runtime.connect_edge_worker(uri, node_id)
+        except (OSError, RuntimeError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"status": "connected", "profile": profile.model_dump(mode="json")}
+
+    @app.post("/api/edge/{node_id}/disconnect")
+    async def disconnect_edge(node_id: str) -> dict[str, object]:
+        return {"node_id": node_id, "orphaned": runtime.detach_edge_node(node_id)}
 
     @app.post("/api/control/fail")
     async def fail_control() -> dict[str, str]:
