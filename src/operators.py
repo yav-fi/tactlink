@@ -50,16 +50,20 @@ class OperatorPool:
             pos = (7.0 * math.cos(a), 7.0 * math.sin(a))
             self.operators.append(Operator(f"op{i + 1}", pos, a + math.pi))  # face inward
         self.active = 0
-        self.wander_enabled = True
+        self.wander_enabled = False   # off until real phone positions drive it
 
     @property
     def active_op(self) -> Operator:
         return self.operators[self.active]
 
-    def set_active_by_proximity(self, xy) -> int:
-        """Control goes to the operator nearest the drone (horizontal distance)."""
+    def set_active_by_proximity(self, xy, hysteresis: float = 0.72) -> int:
+        """Control goes to the operator nearest the drone, with hysteresis so it
+        doesn't flicker when the drone passes between two people."""
         xy = np.asarray(xy, dtype=float)
-        self.active = int(np.argmin([np.linalg.norm(op.pos - xy) for op in self.operators]))
+        dists = [float(np.linalg.norm(op.pos - xy)) for op in self.operators]
+        nearest = int(np.argmin(dists))
+        if dists[nearest] < dists[self.active] * hysteresis:
+            self.active = nearest
         return self.active
 
     def step(self, dt: float) -> None:

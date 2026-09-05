@@ -165,10 +165,10 @@ def run(args: argparse.Namespace) -> int:
     swarm = None if (runtime_mode or check_mode) else Swarm(args.drones)
     viz = None if (runtime_mode or check_mode) else Visualizer()
     operators = OperatorPool(max(args.operators, 4) if args.demo else args.operators)
+    operators.wander_enabled = args.wander and not args.demo
     if args.demo:                        # deterministic: a line of people facing east
-        operators.wander_enabled = False
         for i, op in enumerate(operators.operators):
-            op.pos[:] = [i * 6.0 - (operators.n - 1) * 3.0, 0.0]
+            op.pos[:] = [i * 12.0 - (operators.n - 1) * 6.0, 0.0]
             op.heading = 0.0
     event_log: list[str] = []
     mission_adapter = mission_client = mission_error_cls = None
@@ -322,6 +322,8 @@ def main() -> int:
                    help="squad size flown in formation (1 = single drone)")
     p.add_argument("--operators", type=int, default=1,
                    help="simulated people giving gestures (built for 5)")
+    p.add_argument("--wander", action="store_true",
+                   help="let the simulated operators walk around (default: they stand still)")
     p.add_argument("--demo", action="store_true",
                    help="run without a camera using a scripted hand path")
     p.add_argument("--headless", action="store_true",

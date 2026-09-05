@@ -133,6 +133,35 @@ def test_fly_bearing_dashes_along_the_given_angle():
     assert ctl.maneuver == ""
 
 
+def test_orbit_circles_the_anchor_not_the_origin():
+    ctl = GestureController()
+    sim = QuadSimulator()
+    _armed_at(ctl, sim, alt=3.0)
+    anchor = (12.0, -8.0)
+    for i in range(int(25 / (1 / 60))):
+        ev = ["orbit"] if i == 0 else []
+        cmd = ctl.update(HandState(present=False),
+                         GestureState(events=ev, follow_pos=anchor), sim.state)
+        sim.step(cmd, 1 / 60)
+    r = float(np.linalg.norm(np.array(sim.state.pos[:2]) - anchor))
+    assert abs(r - _ORBIT_RADIUS) < 1.5, r
+    assert np.linalg.norm(sim.state.pos[:2]) > 5.0    # nowhere near the origin
+
+
+def test_return_home_goes_to_the_anchor():
+    ctl = GestureController()
+    sim = QuadSimulator()
+    _armed_at(ctl, sim, alt=3.0)
+    sim.state.pos[:2] = [0.0, 0.0]
+    anchor = (9.0, 4.0)
+    for i in range(int(12 / (1 / 60))):
+        ev = ["return_home"] if i == 0 else []
+        cmd = ctl.update(HandState(present=False),
+                         GestureState(events=ev, follow_pos=anchor), sim.state)
+        sim.step(cmd, 1 / 60)
+    assert np.linalg.norm(np.array(sim.state.pos[:2]) - anchor) < 1.2, sim.state.pos
+
+
 def test_idle_drone_follows_the_given_point():
     ctl = GestureController()
     sim = QuadSimulator()

@@ -32,6 +32,18 @@ def test_active_is_nearest_operator_to_the_drone():
     assert pool.set_active_by_proximity([11.0, 0.0]) == 0
 
 
+def test_proximity_has_hysteresis():
+    pool = OperatorPool(2)
+    pool.wander_enabled = False
+    pool.operators[0].pos[:] = [-5.0, 0.0]
+    pool.operators[1].pos[:] = [5.0, 0.0]
+    assert pool.set_active_by_proximity([-5.0, 0.0]) == 0
+    # just barely past the midpoint toward op1 - should NOT flip yet
+    assert pool.set_active_by_proximity([0.3, 0.0]) == 0
+    # clearly closer to op1 now
+    assert pool.set_active_by_proximity([4.0, 0.0]) == 1
+
+
 def test_forward_bearing_is_active_operator_heading():
     pool = OperatorPool(3)
     pool.wander_enabled = False

@@ -105,16 +105,15 @@ commanding is the next step — the hook is there, `Swarm.selected`).
 
 The picture: **N people, each with a chest-mounted phone** running the gesture
 model, all in the scene; one virtual drone flies **above** them. `--operators N`
-(`src/operators.py`) simulates the people — position, facing, wander.
+(`src/operators.py`) simulates the people — position + facing. They stand still
+by default (real phone positions will drive them); `--wander` makes them walk.
 
 - **Control = proximity.** The drone obeys whichever operator it is currently
-  **nearest** to (recomputed every frame). The HUD shows `CTRL opN`, and that
-  operator is cyan in the 3D view.
-- **Idle = follow.** With no command running, the drone gently trails the
-  operator it is nearest to, staying at altitude above them.
-- **Direction is operator-relative.** The three-finger "forward" dash flies along
-  the *controlling operator's* facing (their chest camera points where they
-  face).
+  **nearest** to (with hysteresis so it doesn't flicker mid-pass). The HUD shows
+  `CTRL opN`, and that operator is cyan in the 3D view.
+- **Everything is relative to the controlling operator.** Idle → the drone
+  trails them. `orbit` → circles them. `return_home` → flies back to them. The
+  three-finger "forward" dash → along their facing.
 - **Handoff is emergent.** Dash the drone toward someone else; when it arrives it
   is nearest to them, so they take control. No dedicated handoff gesture.
 
@@ -147,8 +146,8 @@ Hold a sign steady for ~0.4 s to fire it; relax before repeating.
 | --- | --- |
 | 👍 Thumb up | **Arm + take off** (to ~3 m, above the operators); each one after that **steps the altitude up ~1.5 m** (to 9 m) |
 | 👎 Thumb down | **Land + disarm** |
-| ☝️ Pointing up | Orbit: fly out to a 10 m radius and circle the origin, nose kept pointed inward — point again to stop |
-| 🤟 ILoveYou | Return to the start point and hover |
+| ☝️ Pointing up | Orbit: circle the **controlling operator** at ~6 m, nose kept pointed inward — point again to stop |
+| 🤟 ILoveYou | Fly back to the **controlling operator** and hover |
 | **Three fingers held sideways** (index+middle+ring) | Dash ~5 m **forward** — along the bearing the gesturing operator faces (`ThreeFingerForward`) |
 | ✋ Open palm · ✊ Closed fist · ✌️ Victory | *no action* |
 
