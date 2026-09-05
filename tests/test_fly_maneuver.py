@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 import numpy as np  # noqa: E402
 
 from control_types import GestureState, HandState  # noqa: E402
-from controls import _DASH_DISTANCE, GestureController  # noqa: E402
+from controls import _DASH_DISTANCE, _ORBIT_RADIUS, GestureController  # noqa: E402
 from simulator import QuadSimulator  # noqa: E402
 
 
@@ -48,6 +48,40 @@ def test_fly_west_holds_altitude():
     state, _ = _fly("fly_west")
     assert state.pos[0] < -3.0, state.pos
     assert state.pos[2] > 1.0, f"altitude collapsed: {state.pos[2]}"
+
+
+def test_orbit_converges_to_ring_and_keeps_circling():
+    ctl = GestureController()
+    sim = QuadSimulator()
+    ctl._armed = True
+    sim.state.armed = True
+    sim.state.pos[:] = [1.0, 0.0, 2.0]
+    angles = []
+    for i in range(int(30 / (1 / 60))):
+        events = ["orbit"] if i == 0 else []
+        cmd = ctl.update(HandState(present=False), GestureState(events=events), sim.state)
+        sim.step(cmd, 1 / 60)
+        if i % 120 == 0 and i > 1200:
+            angles.append(np.arctan2(sim.state.pos[1], sim.state.pos[0]))
+    r = float(np.linalg.norm(sim.state.pos[:2]))
+    assert abs(r - _ORBIT_RADIUS) < 1.5, r
+    assert sim.state.pos[2] > 1.0, sim.state.pos[2]
+    # angle keeps advancing -> still circling
+    assert len(set(np.round(angles, 1))) > 2, angles
+
+
+def test_orbit_repeat_gesture_stops():
+    ctl = GestureController()
+    sim = QuadSimulator()
+    ctl._armed = True
+    sim.state.armed = True
+    sim.state.pos[:] = [1.0, 0.0, 2.0]
+    for i in range(600):
+        cmd = ctl.update(HandState(present=False), GestureState(events=["orbit"] if i == 0 else []), sim.state)
+        sim.step(cmd, 1 / 60)
+    assert ctl.maneuver == "orbit"
+    ctl.update(HandState(present=False), GestureState(events=["orbit"]), sim.state)
+    assert ctl.maneuver == ""
 
 
 def test_fly_dash_ignored_when_disarmed():

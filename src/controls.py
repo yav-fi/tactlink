@@ -1,15 +1,13 @@
 """Translate hand pose + gesture state into a normalized ControlInput.
 
-Continuous flying comes from the hand pose; the mapping depends on the current
-:class:`FlightMode`:
+The drone is flown entirely by discrete gesture commands and the autopilot
+routines they trigger (takeoff, land, spin360, return_home,
+fly_north/south/east/west, orbit). When no routine is running an armed drone
+simply hovers.
 
-* HEADING  - palm x -> yaw,  palm y -> throttle, hand tilt -> roll
-* POSITION - palm x -> roll, palm y -> throttle, hand tilt -> yaw
-* HOVER    - translation locked, only palm y -> throttle
-
-In every mode a pinch adds forward pitch. Discrete gesture events (takeoff,
-land, spin360, return_home, fly_north/south/east/west) run as short autopilot
-routines that override the hand until they finish.
+Set ``HAND_FLIGHT_ENABLED = True`` to also fly continuously from the hand pose
+(palm position -> yaw/throttle, hand tilt -> roll, pinch -> forward pitch,
+mapped per :class:`FlightMode`).
 """
 
 import math
@@ -17,6 +15,8 @@ import math
 import numpy as np
 
 from control_types import ControlInput, FlightMode, GestureState, HandState
+
+HAND_FLIGHT_ENABLED = False   # continuous palm/tilt/pinch flying (off: gestures only)
 
 _DEAD_ZONE = 0.12
 _ROLL_DEAD_ZONE = 0.18
@@ -26,7 +26,9 @@ _SMOOTHING = 0.35
 _TAKEOFF_ALT = 1.3
 _SPIN_RATE = 1.0
 _HOME_RADIUS = 0.4
-_DASH_DISTANCE = 5.0   # metres a fly_<compass> dash covers before hovering
+_DASH_DISTANCE = 5.0    # metres a fly_<compass> dash covers before hovering
+_ORBIT_RADIUS = 10.0    # metres from origin for the orbit maneuver
+_ORBIT_SPEED = 3.0      # m/s tangential while orbiting
 
 # World-frame compass directions (x = east, y = north).
 _COMPASS = {
@@ -54,6 +56,7 @@ class GestureController:
         self._dash_dir = np.zeros(2)
         self._dash_start = np.zeros(2)
         self._dash_alt = 1.3
+        self._orbit_alt = 1.3
 
     def update(self, hand: HandState, gstate: GestureState, state) -> ControlInput:
         for event in gstate.events:
@@ -61,10 +64,11 @@ class GestureController:
 
         if self.maneuver:
             target = self._run_maneuver(state)
-        elif not hand.present:
-            target = ControlInput(armed=self._armed, event="no hand - holding")
-        else:
+        elif HAND_FLIGHT_ENABLED and hand.present:
             target = self._fly(hand, gstate)
+        else:
+            # Gestures-only: an armed drone holds position and altitude.
+            target = ControlInput(armed=self._armed)
 
         if gstate.events:
             target.event = " · ".join(gstate.events)
@@ -101,6 +105,12 @@ class GestureController:
         return ControlInput(throttle=throttle, yaw_rate=yaw * s, roll=roll * s,
                             pitch=pitch * s, armed=self._armed)
 
+    @staticmethod
+    def _world_to_body(d, yaw: float):
+        """Rotate a world-frame xy direction into the drone's body frame."""
+        cy, sy = math.cos(-yaw), math.sin(-yaw)
+        return np.array([cy * d[0] - sy * d[1], sy * d[0] + cy * d[1]])
+
     # -- autopilot routines ------------------------------------------
     def _start_maneuver(self, event: str, state) -> None:
         if event == "estop":
@@ -116,10 +126,17 @@ class GestureController:
             self.maneuver = "spin360"
         elif event == "return_home" and self._armed:
             self.maneuver = "return_home"
+        elif event == "orbit" and self._armed:
+            # Repeat the gesture to stop orbiting and hover.
+            if self.maneuver == "orbit":
+                self.maneuver = ""
+            else:
+                self._orbit_alt = max(_TAKEOFF_ALT, float(state.pos[2]))
+                self.maneuver = "orbit"
         elif event in _COMPASS and self._armed:
             self._dash_dir = _COMPASS[event]
             self._dash_start = np.array(state.pos[:2], dtype=float)
-            self._dash_alt = max(1.3, float(state.pos[2]))
+            self._dash_alt = max(_TAKEOFF_ALT, float(state.pos[2]))
             self.maneuver = event
 
     def _run_maneuver(self, state) -> ControlInput:
@@ -145,9 +162,7 @@ class GestureController:
             if dist <= _HOME_RADIUS:
                 self.maneuver = ""
             else:
-                d = home_vec / dist
-                cy, sy = math.cos(-state.yaw), math.sin(-state.yaw)
-                body = np.array([cy * d[0] - sy * d[1], sy * d[0] + cy * d[1]])
+                body = self._world_to_body(home_vec / dist, state.yaw)
                 gain = min(1.0, dist / 3.0) * 0.8
                 cmd.roll = float(body[0]) * gain
                 cmd.pitch = float(body[1]) * gain
@@ -156,13 +171,30 @@ class GestureController:
             if travelled >= _DASH_DISTANCE:
                 self.maneuver = ""
             else:
-                d = self._dash_dir
-                cy, sy = math.cos(-state.yaw), math.sin(-state.yaw)
-                body = np.array([cy * d[0] - sy * d[1], sy * d[0] + cy * d[1]])
+                body = self._world_to_body(self._dash_dir, state.yaw)
                 ease = min(1.0, (_DASH_DISTANCE - travelled) / 1.5)  # slow into the stop
                 cmd.roll = float(body[0]) * 0.8 * ease
                 cmd.pitch = float(body[1]) * 0.8 * ease
                 cmd.throttle = float(np.clip((self._dash_alt - state.pos[2]) * 1.5, -0.5, 1.0))
+        elif self.maneuver == "orbit":
+            # Fly out to the 10 m ring, then circle the origin forever (until a
+            # new command, or the gesture is repeated to stop).
+            p = np.array(state.pos[:2], dtype=float)
+            r = float(np.linalg.norm(p))
+            radial = p / r if r > 0.3 else np.array([1.0, 0.0])
+            tangent = np.array([-radial[1], radial[0]])          # counter-clockwise
+            v_radial = float(np.clip(-(r - _ORBIT_RADIUS) * 1.3, -_ORBIT_SPEED, _ORBIT_SPEED))
+            world_v = v_radial * radial + _ORBIT_SPEED * tangent
+            speed = float(np.linalg.norm(world_v)) + 1e-6
+            body = self._world_to_body(world_v / speed, state.yaw)
+            mag = min(1.0, speed / 4.0) * 0.8
+            cmd.roll = float(body[0]) * mag
+            cmd.pitch = float(body[1]) * mag
+            cmd.throttle = float(np.clip((self._orbit_alt - state.pos[2]) * 1.5, -0.5, 1.0))
+            # Point the nose along the direction of travel.
+            desired_yaw = math.atan2(-world_v[0], world_v[1])
+            err = (desired_yaw - state.yaw + math.pi) % (2 * math.pi) - math.pi
+            cmd.yaw_rate = float(np.clip(err * 1.2, -1.0, 1.0))
         return cmd
 
     def _blend(self, target: ControlInput) -> None:

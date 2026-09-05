@@ -51,7 +51,7 @@ def _load_mission_integration():
 _DEMO_GESTURES = [
     (1.5, 3.0, "Open_Palm"),      # takeoff
     (7.0, 8.5, "Victory"),        # cycle flight mode
-    (12.0, 13.3, "Pointing_Up"),  # 360 spin
+    (12.0, 13.3, "Pointing_Up"),  # orbit the origin (until the next command)
     (16.5, 17.2, "Open_Palm"),    # combo: open ->
     (17.6, 18.3, "Closed_Fist"),  #        fist ->
     (18.7, 19.4, "Open_Palm"),    #        open  => return home (within 3 s)

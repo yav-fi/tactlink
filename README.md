@@ -99,17 +99,15 @@ runs a deterministic, camera-free check of combos and the single-gesture delay.
 When first tuning a combo, map it to a harmless action (e.g. `speed_up`) so a
 misfire costs nothing.
 
-## Flying (continuous, from hand pose)
+## Control model
 
-The mapping depends on the current **flight mode**:
+The drone is flown **entirely by discrete gestures** and the autopilot routines
+they trigger. When nothing is running, an armed drone hovers (`MODE HOLD`).
 
-| Mode | palm ← → | palm ↑ ↓ | hand tilt | pinch |
-| --- | --- | --- | --- | --- |
-| `HEADING` (default) | yaw | throttle | roll | pitch forward |
-| `POSITION` | roll | throttle | yaw | pitch forward |
-| `HOVER` | — | throttle | — | — |
-
-A centered dead zone keeps the drone steady when your hand is neutral.
+Continuous hand-pose flying (palm position, tilt, pinch → stick inputs, per a
+`HEADING` / `POSITION` / `HOVER` mode) is available but **off by default** - set
+`HAND_FLIGHT_ENABLED = True` in `src/controls.py` to turn it on. While it is off,
+`cycle_mode` (Victory) and `speed_up` / `speed_down` (thumbs) do nothing.
 
 ## Gestures (discrete, MediaPipe GestureRecognizer)
 
@@ -119,14 +117,15 @@ Hold a sign steady for ~0.4 s to fire it; relax before repeating.
 | --- | --- |
 | ✋ Open palm | Take off / arm |
 | ✊ Closed fist | Land / disarm |
-| ✌️ Victory | Cycle flight mode (heading → position → hover) |
-| 👍 Thumb up | Speed up (slow → normal → sport) |
-| 👎 Thumb down | Speed down |
-| ☝️ Pointing up | Do a 360° spin |
+| ✌️ Victory | Cycle flight mode *(no-op unless hand flight is on)* |
+| 👍 Thumb up | Speed up *(no-op unless hand flight is on)* |
+| 👎 Thumb down | Speed down *(no-op unless hand flight is on)* |
+| ☝️ Pointing up | Orbit: fly out to a 10 m radius and circle the origin — point again to stop |
 | 🤟 ILoveYou | Return to the start point and hover |
 
-Take off, land, spin, and return-home run as short autopilot routines that
-override the hand until they finish (`MODE` turns red in the HUD).
+Take off, land, orbit, return-home (and the `fly_*` dashes) run as autopilot
+routines that take over until they finish (`MODE` turns red in the HUD). Orbit
+runs until you point again, or any other command interrupts it.
 
 ## Custom gestures (train your own)
 
@@ -148,11 +147,12 @@ python scripts/train_gestures.py
 ```
 
 Actions available: `takeoff`, `land`, `cycle_mode`, `speed_up`, `speed_down`,
-`spin360`, `return_home`, `estop`, `fly_north` / `fly_south` / `fly_east` /
-`fly_west` (dash ~5 m that compass way then hover), and `fly_pointed` (combos
-only - dash toward wherever the fingers point when the combo completes; a clear
-left/right becomes west/east, anything else falls back to north). Feature layout
-is versioned (`landmark_features.FEATURE_VERSION`) - bump it and retrain if you
+`spin360`, `return_home`, `estop`, `orbit` (fly to a 10 m radius then circle the
+origin; fire again to stop), `fly_north` / `fly_south` / `fly_east` / `fly_west`
+(dash ~5 m that compass way then hover), and `fly_pointed` (combos only - dash
+toward wherever the fingers point when the combo completes; a clear left/right
+becomes west/east, anything else falls back to north). Feature layout is
+versioned (`landmark_features.FEATURE_VERSION`) - bump it and retrain if you
 change it.
 `models/custom_gestures.npz` is the one model file that *is* committed, so a
 trained set of gestures travels with the repo; raw recordings under `data/` stay

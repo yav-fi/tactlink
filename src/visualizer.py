@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 
 from control_types import ControlInput
+from controls import HAND_FLIGHT_ENABLED
 from simulator import QuadState
 
 _BG = (28, 26, 24)
@@ -181,11 +182,16 @@ class Visualizer:
                         _HUD_DIM, 1, cv2.LINE_AA)
 
         if gstate is not None:
-            mode = gstate.maneuver.upper() if gstate.maneuver else gstate.mode.value.upper()
-            mode_color = _WARN if gstate.maneuver else _ARM
+            if gstate.maneuver:
+                mode, mode_color = gstate.maneuver.upper(), _WARN
+            elif HAND_FLIGHT_ENABLED:
+                mode, mode_color = gstate.mode.value.upper(), _ARM
+            else:
+                mode, mode_color = "HOLD", _ARM
             cv2.putText(img, f"MODE {mode}", (pad, 80), font, 0.55, mode_color, 1, cv2.LINE_AA)
-            cv2.putText(img, f"SPEED {gstate.speed_name}", (pad, 100), font, 0.5,
-                        _HUD_DIM, 1, cv2.LINE_AA)
+            if HAND_FLIGHT_ENABLED:
+                cv2.putText(img, f"SPEED {gstate.speed_name}", (pad, 100), font, 0.5,
+                            _HUD_DIM, 1, cv2.LINE_AA)
             g = gstate.active_gesture
             if g and g != "None":
                 tag = "*" if gstate.gesture_source == "custom" else ""
@@ -200,7 +206,9 @@ class Visualizer:
                 cv2.putText(img, f"combo: {gstate.sequence_hint}", (pad, 146),
                             font, 0.5, _WARN, 1, cv2.LINE_AA)
 
-        hint = "palm x/y + tilt = fly   Victory=mode  thumbs=speed  point=spin  ILY=home"
+        hint = ("open=takeoff  fist=land  point=orbit  ILY=home  V=mode  thumbs=speed"
+                if HAND_FLIGHT_ENABLED else
+                "open=takeoff  fist=land  point=orbit  ILY=home  (gestures only)")
         cv2.putText(img, hint, (pad, self.h - 150), font, 0.42, _HUD_DIM, 1, cv2.LINE_AA)
 
         bars = [("THR", cmd.throttle, True), ("YAW", cmd.yaw_rate, True),
