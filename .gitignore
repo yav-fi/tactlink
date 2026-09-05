@@ -1,8 +1,11 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
 .venv/
 venv/
+*.egg-info/
+.coverage
 
 # Downloaded models / weights (fetched locally, never committed) ...
 models/*

@@ -1,0 +1,291 @@
+"""Canonical, JSON-serializable integration contracts."""
+
+from __future__ import annotations
+
+from enum import StrEnum
+from math import sqrt
+from typing import Any
+from uuid import uuid4
+
+from pydantic import BaseModel, Field
+
+
+class Vector3(BaseModel):
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+
+    def distance_to(self, other: "Vector3") -> float:
+        return sqrt((self.x - other.x) ** 2 + (self.y - other.y) ** 2 + (self.z - other.z) ** 2)
+
+    def moved(self, velocity: "Vector3", dt: float) -> "Vector3":
+        return Vector3(x=self.x + velocity.x * dt, y=self.y + velocity.y * dt, z=self.z + velocity.z * dt)
+
+
+class DroneState(StrEnum):
+    IDLE = "IDLE"
+    EXECUTING = "EXECUTING"
+    DEGRADED = "DEGRADED"
+    HOLDING = "HOLDING"
+    RETURNING = "RETURNING"
+    LOST = "LOST"
+    OFFLINE = "OFFLINE"
+
+
+class LocalizationMode(StrEnum):
+    GPS = "GPS"
+    DEGRADED_GPS = "DEGRADED_GPS"
+    DEAD_RECKONING = "DEAD_RECKONING"
+    UNKNOWN = "UNKNOWN"
+
+
+class TaskType(StrEnum):
+    GOTO = "GOTO"
+    WATCH = "WATCH"
+    SEARCH = "SEARCH"
+    TRACE = "TRACE"
+    FOLLOW = "FOLLOW"
+    HOLD = "HOLD"
+    RETURN = "RETURN"
+    REGROUP = "REGROUP"
+
+
+class TaskStatus(StrEnum):
+    PENDING = "PENDING"
+    ASSIGNED = "ASSIGNED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    DEGRADED = "DEGRADED"
+    CANCELLED = "CANCELLED"
+
+
+class MessageType(StrEnum):
+    HEARTBEAT = "HEARTBEAT"
+    STATUS = "STATUS"
+    TASK_ASSIGNMENT = "TASK_ASSIGNMENT"
+    TASK_ACK = "TASK_ACK"
+    PEER_STATE = "PEER_STATE"
+    MISSION_STATE = "MISSION_STATE"
+    REPLAN_REQUEST = "REPLAN_REQUEST"
+    POSITION_UPDATE = "POSITION_UPDATE"
+    CAPABILITY_UPDATE = "CAPABILITY_UPDATE"
+    TASK_COMPLETE = "TASK_COMPLETE"
+
+
+class EventCategory(StrEnum):
+    SIMULATION = "SIMULATION"
+    MISSION = "MISSION"
+    NETWORK = "NETWORK"
+    LOCALIZATION = "LOCALIZATION"
+    FAILURE = "FAILURE"
+    AUTONOMY = "AUTONOMY"
+    ALLOCATION = "ALLOCATION"
+
+
+class EventType(StrEnum):
+    SIMULATION_STARTED = "SIMULATION_STARTED"
+    SIMULATION_PAUSED = "SIMULATION_PAUSED"
+    SIMULATION_RESUMED = "SIMULATION_RESUMED"
+    SIMULATION_RESET = "SIMULATION_RESET"
+    NODE_STARTED = "NODE_STARTED"
+    NODE_FAILED = "NODE_FAILED"
+    NODE_RECOVERED = "NODE_RECOVERED"
+    HEARTBEAT_TIMEOUT = "HEARTBEAT_TIMEOUT"
+    GPS_DEGRADED = "GPS_DEGRADED"
+    GPS_LOST = "GPS_LOST"
+    GPS_RECOVERED = "GPS_RECOVERED"
+    LINK_DEGRADED = "LINK_DEGRADED"
+    MESSAGE_DROPPED = "MESSAGE_DROPPED"
+    NETWORK_PARTITION = "NETWORK_PARTITION"
+    NETWORK_RECONNECTED = "NETWORK_RECONNECTED"
+    TASK_CREATED = "TASK_CREATED"
+    TASK_ASSIGNED = "TASK_ASSIGNED"
+    TASK_REASSIGNED = "TASK_REASSIGNED"
+    TASK_COMPLETED = "TASK_COMPLETED"
+    MISSION_CAPABILITY_CHANGED = "MISSION_CAPABILITY_CHANGED"
+    REPLAN_REQUESTED = "REPLAN_REQUESTED"
+    INTERFERENCE_CHANGED = "INTERFERENCE_CHANGED"
+    RANDOM_EVENT = "RANDOM_EVENT"
+
+
+class TrustLevel(StrEnum):
+    UNVERIFIED = "UNVERIFIED"
+    TRUSTED = "TRUSTED"
+
+
+class MissionTarget(BaseModel):
+    point: Vector3 | None = None
+    waypoints: list[Vector3] = Field(default_factory=list)
+    region_id: str | None = None
+    entity_id: str | None = None
+
+
+class MissionCommand(BaseModel):
+    """Canonical command accepted from LLM, UI, mobile, or gesture adapters."""
+
+    type: TaskType
+    target: MissionTarget
+    priority: int = Field(default=50, ge=0, le=100)
+    required_capabilities: set[str] = Field(default_factory=set)
+    desired_units: int = Field(default=1, ge=1)
+    minimum_units: int = Field(default=1, ge=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MissionTask(BaseModel):
+    id: str = Field(default_factory=lambda: f"task-{uuid4().hex[:10]}")
+    type: TaskType
+    target: MissionTarget
+    priority: int = 50
+    required_capabilities: set[str] = Field(default_factory=set)
+    desired_units: int = 1
+    minimum_units: int = 1
+    status: TaskStatus = TaskStatus.PENDING
+    assigned_nodes: list[str] = Field(default_factory=list)
+    progress: float = Field(default=0.0, ge=0.0, le=1.0)
+    capability: float = Field(default=0.0, ge=0.0, le=1.0)
+    created_at: float = 0.0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class GPSMeasurement(BaseModel):
+    timestamp: float
+    position: Vector3
+    accuracy_meters: float
+    available: bool = True
+
+
+class LocalEstimatedState(BaseModel):
+    position: Vector3
+    velocity: Vector3 = Vector3()
+    heading: float = 0.0
+    position_uncertainty: float = 1.5
+    localization_mode: LocalizationMode = LocalizationMode.GPS
+    battery_estimate: float = 1.0
+    sensor_confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class PeerKnowledge(BaseModel):
+    node_id: str
+    last_seen: float
+    estimated_link_quality: float = 1.0
+    last_position: Vector3 | None = None
+    state: DroneState = DroneState.IDLE
+    available: bool = True
+
+
+class NodeIdentity(BaseModel):
+    node_id: str
+    name: str
+    capabilities: set[str] = Field(default_factory=set)
+    public_key: str | None = None
+    trust_level: TrustLevel = TrustLevel.UNVERIFIED
+    authorization_level: str = "simulation"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MotionIntent(BaseModel):
+    target: Vector3 | None = None
+    maximum_speed: float = 0.0
+    hold: bool = False
+
+
+class NetworkMessage(BaseModel):
+    message_id: str = Field(default_factory=lambda: f"msg-{uuid4().hex[:12]}")
+    sender_id: str
+    recipient_id: str | None = None
+    timestamp_sent: float
+    type: MessageType
+    payload: dict[str, Any] = Field(default_factory=dict)
+    sequence_number: int = 0
+    signature: str | None = None
+
+
+class DroneStatusReport(BaseModel):
+    node_id: str
+    timestamp: float
+    state: DroneState
+    estimated: LocalEstimatedState
+    current_task_id: str | None
+    workload: int
+    capabilities: set[str]
+
+
+class DroneTruthState(BaseModel):
+    """Ground truth emitted by World for operator visualization, never node autonomy."""
+
+    node_id: str
+    position: Vector3
+    velocity: Vector3
+    heading: float
+    actual_health: float
+    actual_battery: float
+    online: bool
+
+
+class DronePublicState(BaseModel):
+    identity: NodeIdentity
+    state: DroneState
+    estimated: LocalEstimatedState
+    truth: DroneTruthState
+    current_task_id: str | None
+    task_queue: list[str]
+    task_progress: float
+    peers: dict[str, PeerKnowledge]
+
+
+class LinkState(BaseModel):
+    source_id: str
+    target_id: str
+    available: bool
+    quality: float
+    latency_seconds: float
+    partitioned: bool = False
+
+
+class InterferenceConfig(BaseModel):
+    gps_interference: float = Field(default=0.0, ge=0.0, le=1.0)
+    network_interference: float = Field(default=0.0, ge=0.0, le=1.0)
+    sensor_interference: float = Field(default=0.0, ge=0.0, le=1.0)
+    node_failure_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class ScenarioEvent(BaseModel):
+    id: str = Field(default_factory=lambda: f"scenario-{uuid4().hex[:10]}")
+    timestamp: float
+    type: str
+    affected_nodes: list[str] = Field(default_factory=list)
+    severity: float = Field(default=0.0, ge=0.0, le=1.0)
+    duration: float = Field(default=0.0, ge=0.0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SimulationEvent(BaseModel):
+    sequence: int = 0
+    timestamp: float
+    category: EventCategory
+    event_type: EventType
+    source: str
+    affected_entities: list[str] = Field(default_factory=list)
+    human_readable_summary: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class SimulationSnapshot(BaseModel):
+    type: str = "state"
+    simulation_time: float
+    running: bool
+    scenario: str
+    drones: list[DronePublicState]
+    missions: list[MissionTask]
+    links: list[LinkState]
+    interference: InterferenceConfig
+    mission_capability: float
+    events: list[SimulationEvent] = Field(default_factory=list)
+
+
+class OperatorPositionUpdate(BaseModel):
+    operator_id: str
+    position: Vector3
+    accuracy_meters: float
+    timestamp: float
