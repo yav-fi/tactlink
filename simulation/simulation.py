@@ -7,6 +7,7 @@ from math import exp
 from collections.abc import Callable
 
 from .allocator import TaskAllocator
+from .autonomy import PlanningAutonomy
 from .config import SimulationConfig
 from .drone import DroneNode
 from .events import EventBus
@@ -30,7 +31,7 @@ from .models import (
 )
 from .network import NetworkSimulator
 from .scenarios import PRESET_INTERFERENCE, ScenarioEngine, ScenarioPreset
-from .world import MovingEntity, Region, World, WorldDefinition
+from .world import BoxObstacle, MovingEntity, Region, World, WorldDefinition
 
 
 class SimulationEngine:
@@ -48,6 +49,8 @@ class SimulationEngine:
         self.events = EventBus(self.config.recent_event_limit)
         definition = world_definition or self.default_world_definition()
         self.world = World(definition, self.config.battery_drain_per_meter)
+        # Built once from the STATIC world definition; nodes never see World truth.
+        self.autonomy = PlanningAutonomy.from_world_definition(definition)
         self.interference = InterferenceEngine(PRESET_INTERFERENCE[self.scenario].model_copy(deep=True))
         self.network = NetworkSimulator(
             self.config.network,
@@ -78,6 +81,18 @@ class SimulationEngine:
     @staticmethod
     def default_world_definition() -> WorldDefinition:
         return WorldDefinition(
+            boxes=[
+                BoxObstacle(
+                    id="block-east",
+                    minimum=Vector3(x=10, y=10, z=0),
+                    maximum=Vector3(x=60, y=60, z=60),
+                ),
+                BoxObstacle(
+                    id="block-west",
+                    minimum=Vector3(x=-90, y=20, z=0),
+                    maximum=Vector3(x=-50, y=70, z=50),
+                ),
+            ],
             regions=[
                 Region(id="ALPHA", center=Vector3(x=120, y=70, z=30), radius=35),
                 Region(id="BRAVO", center=Vector3(x=-110, y=100, z=35), radius=55),
@@ -126,6 +141,7 @@ class SimulationEngine:
                 self.config.heartbeat_interval,
                 self.config.status_interval,
                 self.config.peer_timeout,
+                autonomy=self.autonomy,
             )
             self.events.emit(
                 self.time,
