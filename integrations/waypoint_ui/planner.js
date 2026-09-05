@@ -3,6 +3,8 @@ import {prepareAddition} from './command-entry.mjs';
 const $ = id => document.getElementById(id);
 const R = 6378137, rad = Math.PI / 180;
 let lines = [], preview = null, partialPreview = null, revision = 0, timer, zoom = 18;
+let aiProposal=null;
+function discardProposal(){aiProposal=null;$('ai-review').hidden=true;exportState();}
 let center = {lat:38.8895, lon:-77.0353};
 const map = $('map'), svg = $('drawing');
 const number = id => $(id).value.trim() === '' ? NaN : Number($(id).value);
@@ -45,8 +47,9 @@ try {
     center={lat:draft.home.latitude_deg,lon:draft.home.longitude_deg};
   }
 } catch { /* Ignore malformed drafts. */ }
-function exportState() { $('export').disabled = !preview || !validLocation(home()) || !Number.isFinite(home().altitude_msl_m) || !$('home-confirmed').checked; }
+function exportState() { $('export').disabled = !!aiProposal || !preview || !validLocation(home()) || !Number.isFinite(home().altitude_msl_m) || !$('home-confirmed').checked; }
 function changed() {
+  discardProposal();
   revision++; preview=null; partialPreview=null; exportState(); save(); draw(); renderCommands();
   clearTimeout(timer);
   if (!lines.length) { message('Add a takeoff command to begin.'); $('summary').textContent=''; return; }
@@ -90,7 +93,7 @@ function renderCommands() {
       b.disabled=(text==='↑'&&index===0)||(text==='↓'&&index===lines.length-1); head.append(b);
     }
     const input=document.createElement('input'); input.value=line; input.ariaLabel=`Command ${index+1}`;
-    input.oninput=()=>{revision++;preview=null;exportState();draw();clearTimeout(timer);message('Command changed. Press Enter or leave the field to validate.');};
+    input.oninput=()=>{discardProposal();revision++;preview=null;partialPreview=null;exportState();draw();clearTimeout(timer);message('Command changed. Press Enter or leave the field to validate.');};
     input.onchange=()=>{lines[index]=input.value;changed();};
     input.onkeydown=e=>{if(e.key==='Enter')input.blur();}; li.append(head,input); $('commands').append(li);
   });
@@ -135,6 +138,39 @@ function placementFields() {
   $('placement-help').textContent=kind==='orbit'?'Click an orbit center. The orbit keeps the current planned altitude.':kind==='waypoint'?'Click a destination on the map. Add takeoff first.':'Set the value, then add the command.';
 }
 $('action').onchange=placementFields;
+$('instruction').addEventListener('input',()=>{discardProposal();draw();});
+$('insert-position').addEventListener('change',()=>{discardProposal();draw();});
+$('dismiss-ai').onclick=()=>{discardProposal();draw();};
+$('interpret').onclick=async()=>{
+  discardProposal();const current=revision,text=$('instruction').value,position=$('insert-position').value;
+  if(!text.trim()){inputFeedback('Type or speak an instruction first.',true);return;}
+  $('interpret').disabled=true;inputFeedback('Interpreting with OpenAI...');
+  try{
+    const result=await post('/api/planner/interpret',{text,lines:[...lines],position:position==='end'?lines.length:Number(position)});
+    if(current!==revision||text!==$('instruction').value||position!==$('insert-position').value)throw new Error('The instruction or mission changed. Interpret again.');
+    if(result.question){inputFeedback(`${result.question} Update your instruction with the answer, then interpret again.`);return;}
+    aiProposal={...result,revision:current,text,position};
+    $('ai-explanation').textContent=result.explanation;
+    $('ai-lines').textContent=result.lines.map((line,i)=>`${i+1}. ${line}`).join('\n');
+    $('ai-review').hidden=false;exportState();draw();message('AI proposal preview — review before adding to the mission.');
+    inputFeedback('Review the proposed route and commands, then Add reviewed commands.');
+  }catch(error){inputFeedback(error.message,true);}
+  finally{$('interpret').disabled=false;}
+};
+$('accept-ai').onclick=async()=>{
+  const proposal=aiProposal;if(!proposal)return;
+  $('accept-ai').disabled=true;
+  try{
+    if(proposal.revision!==revision||proposal.text!==$('instruction').value||proposal.position!==$('insert-position').value)throw new Error('Proposal is stale. Interpret again.');
+    const result=await prepareAddition([...lines],proposal.lines.join(', '),proposal.position,post);
+    if(aiProposal!==proposal||proposal.revision!==revision)throw new Error('Draft changed. Interpret again.');
+    lines=result.lines;$('instruction').value='';changed();inputFeedback(`Added ${result.count} reviewed commands.`);
+  }catch(error){discardProposal();draw();inputFeedback(error.message,true);}
+  finally{$('accept-ai').disabled=false;}
+};
+fetch('/api/planner/ai/status').then(r=>r.json()).then(s=>{
+  $('ai-status').textContent=s.available?'AI ready. Interpret sends text and mission coordinates to OpenAI; audio stays local.':'AI needs OPENAI_API_KEY on the backend. Explicit commands and local speech still work.';
+}).catch(()=>{$('ai-status').textContent='Cannot reach AI configuration service.';});
 $('add-placement').onclick=()=>{
   const kind=$('action').value;
   const line={takeoff:`take off to ${number('altitude')} meters`,change_altitude:`change altitude to ${number('altitude')} meters`,hover:`hover for ${number('duration')} seconds`,return_home:'return home',land:'land'}[kind];
@@ -195,7 +231,7 @@ function draw() {
   }
   const boundary=Array.from({length:73},(_,i)=>pointPixel({x:200*Math.cos(i*Math.PI/36),y:200*Math.sin(i*Math.PI/36),z:0}));
   element('polyline',{points:boundary.map(p=>`${p.x},${p.y}`).join(' '),fill:'none',stroke:'#809882','stroke-dasharray':'6 6','stroke-width':1.5});
-  const displayed=preview||partialPreview;
+  const displayed=aiProposal?.preview||preview||partialPreview;
   if(displayed){
     const pts=displayed.segments.flatMap(s=>s.points.map(pointPixel));
     element('polyline',{points:pts.map(p=>`${p.x},${p.y}`).join(' '),fill:'none',stroke:'#197350','stroke-width':3,'stroke-linejoin':'round'});

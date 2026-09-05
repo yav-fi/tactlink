@@ -15,6 +15,7 @@ from src.flight_language import MissionError, instruction_lines
 from .ardupilot_link import ArduPilotLink
 from .flight_path import build_preview, mission_planner_file
 from .speech_input import LocalTranscriber, normalize_instruction
+from .natural_planner import NaturalPlanner, interpret
 
 
 class Origin(BaseModel):
@@ -31,11 +32,19 @@ class PreviewRequest(BaseModel):
     sample_spacing_m: float = Field(default=2, ge=0.5, le=10)
 
 
-def create_app(endpoint=None, baud=115200, allowed_origins=(), link_factory=ArduPilotLink, transcriber=None):
+class InterpretRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    text: str = Field(min_length=1, max_length=8000)
+    lines: list[str] = Field(max_length=100)
+    position: int = Field(ge=0, le=100)
+
+
+def create_app(endpoint=None, baud=115200, allowed_origins=(), link_factory=ArduPilotLink, transcriber=None, interpreter=None):
     preview = None
     link = None
     link_error = None
     speech = transcriber or LocalTranscriber()
+    natural = interpreter or NaturalPlanner()
 
     async def read_telemetry():
         nonlocal link_error
@@ -112,6 +121,19 @@ def create_app(endpoint=None, baud=115200, allowed_origins=(), link_factory=Ardu
     @app.get('/api/telemetry')
     async def get_telemetry():
         return telemetry()
+
+    @app.get('/api/planner/ai/status')
+    async def ai_status():
+        return natural.status()
+
+    @app.post('/api/planner/interpret')
+    async def interpret_input(request: InterpretRequest):
+        try:
+            return await asyncio.to_thread(interpret, request.text, request.lines, request.position, natural)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        except RuntimeError as error:
+            raise HTTPException(503, str(error)) from error
 
     @app.post('/api/planner/parse')
     async def parse_input(request: PreviewRequest):

@@ -25,6 +25,12 @@
     <label>Add commands<select id="insert-position"><option value="end">At the end of the mission</option></select></label>
     <div class="buttons"><button id="record" class="secondary">● Hold to speak</button><button id="add-text">Add to mission</button></div>
     <p id="input-feedback" role="status" aria-live="polite" class="muted">Choose where to insert the transcript, then add it.</p>
+    <button id="interpret" class="secondary">Interpret natural language</button>
+    <p id="ai-status" class="muted" role="status">AI sends your text and local mission coordinates to OpenAI. Audio stays local.</p>
+    <section id="ai-review" hidden>
+      <h3>Review AI proposal</h3><p id="ai-explanation"></p><pre id="ai-lines" style="white-space:pre-wrap"></pre>
+      <button id="accept-ai">Add reviewed commands</button><button id="dismiss-ai" class="secondary">Dismiss</button>
+    </section>
     <button id="show-command-error" class="secondary" hidden>Show invalid command</button>
     <p id="speech-status" class="muted" role="status">Checking local speech recognition…</p>
     <details><summary>Command examples</summary><p>take off to 10 meters<br>fly north 20 meters<br>hover for 5 seconds<br>orbit home at radius 20 m clockwise once<br>return home<br>land</p></details>
