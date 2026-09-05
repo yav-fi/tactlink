@@ -1,9 +1,40 @@
 import {worldCoordinates, geographicCoordinates} from './map-math.mjs';
 import {prepareAddition} from './command-entry.mjs';
+import {timeline,sample} from './playback.mjs';
 const $ = id => document.getElementById(id);
 const R = 6378137, rad = Math.PI / 180;
 let lines = [], preview = null, partialPreview = null, revision = 0, timer, zoom = 18;
 let aiProposal=null;
+let playbackTrack=null, playbackSource=null, playbackTime=0, playing=false, playbackLast=0, playbackFrame=0;
+function playbackControls(){
+  const source=aiProposal?null:preview;
+  if(source!==playbackSource){
+    cancelAnimationFrame(playbackFrame);playing=false;playbackTime=0;playbackSource=source;
+    playbackTrack=source?timeline(source.segments):null;
+  }
+  const enabled=!!playbackTrack?.total;
+  $('play-mission').disabled=$('restart-mission').disabled=!enabled;
+  $('play-mission').textContent=playing?'Pause':'Play';
+  const state=enabled?sample(playbackTrack,playbackTime):null;
+  $('play-status').textContent=state?`${playbackTime>=playbackTrack.total?'Complete':playing?'Playing':'Paused'} · ${playbackTime.toFixed(1)} / ${playbackTrack.total.toFixed(1)} s · Command ${state.command+1} · Altitude ${state.point.z.toFixed(1)} m`:'Validate a mission to enable playback.';
+  [...$('commands').children].forEach((row,i)=>{row.style.outline=state?.command===i?'2px solid #da8a16':'';});
+  return state;
+}
+function playbackTick(now){
+  if(!playing)return;
+  playbackTime=Math.min(playbackTrack.total,playbackTime+(now-playbackLast)/1000*Number($('play-speed').value));
+  playbackLast=now;
+  if(playbackTime>=playbackTrack.total)playing=false;
+  draw();if(playing)playbackFrame=requestAnimationFrame(playbackTick);
+}
+$('play-mission').onclick=()=>{
+  if(!playbackTrack?.total)return;
+  if(playing){playing=false;cancelAnimationFrame(playbackFrame);draw();return;}
+  if(playbackTime>=playbackTrack.total)playbackTime=0;
+  playing=true;playbackLast=performance.now();draw();playbackFrame=requestAnimationFrame(playbackTick);
+};
+$('restart-mission').onclick=()=>{playing=false;cancelAnimationFrame(playbackFrame);playbackTime=0;draw();};
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&playing){playing=false;cancelAnimationFrame(playbackFrame);draw();}});
 function discardProposal(){aiProposal=null;$('ai-review').hidden=true;exportState();}
 let center = {lat:38.8895, lon:-77.0353};
 const map = $('map'), svg = $('drawing');
@@ -222,6 +253,7 @@ function geoPoint(point) {const h=home();return{lat:h.latitude_deg+point.y/R/rad
 function pointPixel(point){const g=geoPoint(point);return pixel(g.lat,g.lon);}
 function element(type,attributes,text){const e=document.createElementNS('http://www.w3.org/2000/svg',type);for(const[k,v]of Object.entries(attributes))e.setAttribute(k,v);if(text!==undefined)e.textContent=text;svg.append(e);return e;}
 function draw() {
+  const playback=playbackControls();
   svg.replaceChildren(); const h=home();if(!validLocation(h))return;
   const w=map.clientWidth,ht=map.clientHeight;svg.setAttribute('viewBox',`0 0 ${w} ${ht}`);
   for(let n=-500;n<=500;n+=50){
@@ -243,6 +275,7 @@ function draw() {
     for(const[index,point]of endpoints){const p=pointPixel(point);element('circle',{cx:p.x,cy:p.y,r:11,fill:'#197350',stroke:'white','stroke-width':2});element('text',{x:p.x,y:p.y+4,'text-anchor':'middle',fill:'white','font-size':10,'font-weight':700},index+1);}
   }
   const p=pointPixel({x:0,y:0,z:0});element('rect',{x:p.x-10,y:p.y-10,width:20,height:20,rx:5,fill:'#fff',stroke:'#345c45','stroke-width':2});element('text',{x:p.x,y:p.y+4,'text-anchor':'middle',fill:'#345c45','font-size':11,'font-weight':700},'H');
+  if(playback){const p=pointPixel(playback.point);element('circle',{cx:p.x,cy:p.y,r:8,fill:'#f6a623',stroke:'#513500','stroke-width':2});element('text',{x:p.x+12,y:p.y-12,fill:'#513500','font-size':12},`Drone · ${playback.point.z.toFixed(1)} m`);}
   drawTiles();
 }
 function drawTiles(){

@@ -68,10 +68,10 @@ def test_swing_resets_if_pose_lost():
     assert r.fired == []
 
 
-def test_three_fingers_sideways_fires_forward_once():
+def test_three_fingers_held_fires_forward_once():
     d = ThreeFingerForward()
     t, fired = 0.0, []
-    for _ in range(16):                       # ~0.8 s held sideways
+    for _ in range(16):                       # ~0.8 s held
         t += 0.05
         fired += d.update(_three_hand(0.98, 0.05), t)
     assert fired == ["fly_forward"]
@@ -81,12 +81,22 @@ def test_three_fingers_sideways_fires_forward_once():
     assert fired == ["fly_forward"]
 
 
-def test_three_fingers_vertical_does_not_fire():
+def test_three_fingers_orientation_does_not_matter():
+    # direction comes from the operator's facing, not the fingers
     d = ThreeFingerForward()
     t, fired = 0.0, []
-    for _ in range(20):
+    for _ in range(16):
         t += 0.05
-        fired += d.update(_three_hand(0.02, -0.99), t)
+        fired += d.update(_three_hand(0.02, -0.99), t)   # fingers pointing up
+    assert fired == ["fly_forward"]
+
+
+def test_three_fingers_brief_flash_does_not_fire():
+    d = ThreeFingerForward()
+    t, fired = 0.0, []
+    for _ in range(5):                        # only ~0.25 s, below the hold time
+        t += 0.05
+        fired += d.update(_three_hand(0.98, 0.05), t)
     assert fired == []
 
 

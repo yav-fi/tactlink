@@ -46,6 +46,11 @@
   </div>
   <div class="map-footer"><span><i class="dot"></i> Planned path</span><span>Dashed boundary: 200 m from home</span><span id="cursor">East / north · meters</span></div>
   <div id="status" role="status">Add a takeoff command to begin.</div>
+  <div class="buttons"><button id="play-mission" disabled>Play</button><button id="restart-mission" class="secondary" disabled>Restart</button>
+    <label>Playback speed<select id="play-speed"><option value="1">1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option></select></label>
+  </div>
+  <p id="play-status">Validate a mission to enable playback.</p>
+  <p class="muted">Visual simulation: 5 m/s travel, 2 m/s climb/descent. Hover uses its planned duration. No aircraft connection.</p>
   <button id="fresh-start" class="secondary">Start fresh with takeoff (keep backup)</button>
   <button id="restore-draft" class="secondary" hidden>Restore previous draft</button>
   <p class="footnote">Plan and export only. This page does not upload, arm, or start an aircraft. Map imagery does not establish obstacle clearance.</p>

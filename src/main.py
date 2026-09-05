@@ -265,15 +265,13 @@ def run(args: argparse.Namespace) -> int:
                     event_log.append(f"{elapsed:6.1f}s  {ev}")
                     print(f"[{elapsed:6.1f}s] {ev}")
                 if hand.present and int(elapsed * 2) != int((elapsed - dt) * 2):
-                    from finger_swing import (_is_sideways, _orientation,
-                                              _three_fingers, _two_fingers)
+                    from finger_swing import _orientation, _three_fingers, _two_fingers
                     fs = "".join("TIMRP"[i] if u else "-"
                                  for i, u in enumerate(hand.fingers))
                     print(f"  hand: fingers={fs} pointdir=({hand.point_dir[0]:+.2f},"
                           f"{hand.point_dir[1]:+.2f}) orient={_orientation(hand.point_dir)}"
                           f" | gesture={hand.gesture}({hand.gesture_source})"
-                          f" 3finger={_three_fingers(hand)} sideways={_is_sideways(hand.point_dir)}"
-                          f" 2finger={_two_fingers(hand)}")
+                          f" 3finger={_three_fingers(hand)} 2finger={_two_fingers(hand)}")
                 side_frame = _gesture_check_panel(hand, gstate, event_log)
             elif runtime_mode:
                 gesture = hand.gesture if hand.present else "None"
