@@ -94,3 +94,12 @@ git clone https://github.com/kaarelkaarelson/mlx-bench.git ~/mlx-bench
 ./scripts/ask.sh "question"      # ask it something (no arg = interactive chat)
 ./scripts/benchmark.sh           # thermally-gated tok/s benchmark
 ```
+
+## Performance
+
+| Hardware | Model | Decode tok/s |
+| --- | --- | --- |
+| MacBook Pro, Apple M3 Max, 48GB | mlx-community/Qwen3.8-27B-4bit + w4:gs64 DFlash2 draft + LibraSpec | 72.3 |
+
+Measured with `./scripts/benchmark.sh`, thermally gated (GPU cooled to 37.4°C, fans
+verified at max RPM before/after) — see `benchmark_result.json` for the full receipt.
