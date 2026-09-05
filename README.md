@@ -22,6 +22,19 @@ This repo hosts five hackathon workstreams:
 - **[Cesium 3D mapping](#cesium-3d-mapping)** — browser-based fleet deployment,
   piloting, and deterministic local missions (`3d-mapping/`).
 
+## One-command demo
+
+Run this from the repository root:
+
+```sh
+./start
+```
+
+It creates/installs missing local dependencies, starts the Python runtime and
+3D frontend, and opens the flight sandbox. The **Backend runtime** link switches
+to the distributed mission view. Press `Ctrl+C` once to stop everything it
+started. Use `./start --no-open` when you do not want it to open a browser.
+
 ---
 
 # Local LLM chat + benchmark
