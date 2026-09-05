@@ -21,6 +21,10 @@
           <h2>Distributed runtime</h2>
           <p id="runtime-status" class="status">Connecting to backend…</p>
           <dl id="runtime-metrics" class="state metrics"></dl>
+          <h3>Network history</h3>
+          <svg id="network-history" viewBox="0 0 300 60" role="img" aria-label="Network health history"></svg>
+          <h3>Mission timeline</h3>
+          <div id="runtime-timeline" class="timeline" aria-live="polite"></div>
           <label for="runtime-preset">Scenario preset</label>
           <select id="runtime-preset">
             <option>NORMAL</option><option>DEGRADED</option><option>CONTESTED</option><option>CHAOS</option>

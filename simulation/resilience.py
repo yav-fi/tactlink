@@ -77,15 +77,15 @@ class NetworkResilienceManager:
         eligible = sorted(node for node in relay_nodes if world.is_online(node))
         if not unhealthy or not eligible or len(strong_components) < 2:
             return None
-        first, second = strong_components[0], strong_components[1]
-        first_center = self._centroid(world, first)
-        second_center = self._centroid(world, second)
-        target = Vector3(
-            x=(first_center.x + second_center.x) / 2.0,
-            y=(first_center.y + second_center.y) / 2.0,
-            z=max(30.0, (first_center.z + second_center.z) / 2.0),
-        )
-        target = self._free_relay_target(world, target)
+        first = strong_components[0]
+        relay_count = min(len(eligible), len(strong_components) - 1)
+        targets: list[Vector3] = []
+        for component in strong_components[1 : relay_count + 1]:
+            target = self._score_relay_target(network, world, first, component, eligible)
+            if all(target.distance_to(existing) >= 15.0 for existing in targets):
+                targets.append(target)
+        if not targets:
+            return None
         threatened_priority = max(
             (task.priority for task in tasks if task.type != TaskType.RELAY and task.status not in {TaskStatus.COMPLETED, TaskStatus.CANCELLED}),
             default=70,
@@ -95,16 +95,17 @@ class NetworkResilienceManager:
         self._relay_repositioning = False
         return MissionCommand(
             type=TaskType.RELAY,
-            target=MissionTarget(point=target),
+            target=MissionTarget(point=targets[0]),
             priority=min(100, threatened_priority + 1),
             required_capabilities={"relay"},
-            desired_units=1,
+            desired_units=len(targets),
             minimum_units=1,
             metadata={
                 "network_support": True,
                 "components": strong_components,
+                "relay_targets": [target.model_dump(mode="json") for target in targets],
                 "baseline_network_health": round(metrics.network_health, 4),
-                "policy": "midpoint-between-two-largest-weak-components",
+                "policy": "deterministic-candidate-connectivity-score",
             },
         )
 
@@ -112,7 +113,7 @@ class NetworkResilienceManager:
         self.active_task_id = task.id
         self.events.emit(
             now, EventCategory.NETWORK, EventType.RELAY_TASK_CREATED, "network-resilience",
-            f"Created relay task {task.id} at the midpoint of weak network groups",
+            f"Created relay task {task.id} with {task.desired_units} scored relay station(s)",
             [task.id], {"target": task.target.model_dump(mode="json"), **task.metadata},
         )
 
@@ -139,6 +140,38 @@ class NetworkResilienceManager:
             y=min(world.definition.maximum.y, max(world.definition.minimum.y, target.y)),
             z=min(world.definition.maximum.z, max(world.definition.minimum.z, altitude)),
         )
+
+    @classmethod
+    def _score_relay_target(
+        cls,
+        network: NetworkSimulator,
+        world: World,
+        first: list[str],
+        second: list[str],
+        relay_nodes: list[str],
+    ) -> Vector3:
+        left, right = cls._centroid(world, first), cls._centroid(world, second)
+        candidates = [
+            cls._free_relay_target(world, Vector3(
+                x=left.x + (right.x - left.x) * fraction,
+                y=left.y + (right.y - left.y) * fraction,
+                z=max(30.0, left.z + (right.z - left.z) * fraction),
+            ))
+            for fraction in (0.30, 0.40, 0.50, 0.60, 0.70)
+        ]
+
+        def quality(distance: float) -> float:
+            return 1.0 / (1.0 + (distance / network.config.reference_range_m) ** network.config.distance_falloff_power)
+
+        def score(point: Vector3) -> tuple[float, float, float, float]:
+            left_quality = quality(point.distance_to(left))
+            right_quality = quality(point.distance_to(right))
+            travel = min(world.truth(node).position.distance_to(point) for node in relay_nodes)
+            # Connectivity dominates, then balanced links, then travel cost.
+            value = 2.0 * min(left_quality, right_quality) + left_quality + right_quality - travel / 1000.0
+            return (value, -travel, -point.x, -point.y)
+
+        return max(candidates, key=score)
 
     @staticmethod
     def _components_at_quality(network: NetworkSimulator, now: float, quality: float) -> list[list[str]]:

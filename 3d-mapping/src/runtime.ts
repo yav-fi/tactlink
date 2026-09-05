@@ -11,6 +11,9 @@ type RuntimeDrone = {
   task_progress: number;
   peers: Record<string, { available: boolean; estimated_link_quality: number }>;
   current_plan: LocalVector[];
+  observation_count: number;
+  known_cells: Record<string, number>;
+  last_world_reconciliation: number | null;
 };
 type RuntimeLink = {
   source_id: string; target_id: string; available: boolean; quality: number;
@@ -19,18 +22,27 @@ type RuntimeLink = {
 type RuntimeTask = {
   id: string; type: string; status: string; priority: number; assigned_nodes: string[];
   target: { point: LocalVector | null; waypoints: LocalVector[] };
+  effectiveness: number;
+  effectiveness_components: Record<string, number>;
 };
+type CoverageCell = { cell_id: string; center: LocalVector; size_m: number; last_observed: number | null; confidence: number; freshness: number; observed_by: string | null };
+type RuntimeEvent = { sequence: number; timestamp: number; event_type: string; human_readable_summary: string; payload: Record<string, unknown> };
 export type RuntimeSnapshot = {
   simulation_time: number; running: boolean; scenario: string; control_available: boolean;
   origin_lat: number; origin_lon: number; origin_alt: number;
   mission_capability: number;
+  mission_effectiveness: number;
+  world_knowledge: {
+    regions: { region_id: string; coverage: number; fresh_coverage: number; mean_confidence: number; cells: CoverageCell[] }[];
+    observation_count: number; mean_observation_confidence: number; world_model_sync_lag: number; duplicate_task_execution_count: number;
+  };
   network: {
     network_health: number; connected_components: string[][]; largest_component_fraction: number;
     mean_link_quality: number; packet_loss_recent: number; active_nodes: number;
     degraded_nodes: number; relay_nodes: string[]; gps_degraded_count: number;
   };
   interference: Record<"gps_interference" | "network_interference" | "sensor_interference" | "node_failure_rate", number>;
-  drones: RuntimeDrone[]; links: RuntimeLink[]; missions: RuntimeTask[];
+  drones: RuntimeDrone[]; links: RuntimeLink[]; missions: RuntimeTask[]; events: RuntimeEvent[];
 };
 
 const percent = (value: number): string => `${Math.round(value * 100)}%`;
@@ -42,7 +54,10 @@ export function startRuntimeMode(viewer: Cesium.Viewer): void {
   const runtimeStatus = document.querySelector<HTMLElement>("#runtime-status")!;
   const metrics = document.querySelector<HTMLDListElement>("#runtime-metrics")!;
   const detail = document.querySelector<HTMLDListElement>("#drone-state")!;
+  const timeline = document.querySelector<HTMLElement>("#runtime-timeline")!;
+  const historyChart = document.querySelector<SVGElement>("#network-history")!;
   const drones = new Map<string, RuntimeDrone>();
+  const networkHistory: number[] = [];
   let latest: RuntimeSnapshot | undefined;
   let stopped = false;
 
@@ -90,17 +105,61 @@ export function startRuntimeMode(viewer: Cesium.Viewer): void {
     }
     renderLinks(snapshot.links);
     renderTasks(snapshot.missions);
+    renderCoverage(snapshot);
+    renderTimeline(snapshot.events);
+    networkHistory.push(snapshot.network.network_health);
+    if (networkHistory.length > 120) networkHistory.shift();
+    renderNetworkHistory();
     metrics.innerHTML = [
-      ["Mission", percent(snapshot.mission_capability)], ["Network", percent(snapshot.network.network_health)],
+      ["Capability", percent(snapshot.mission_capability)], ["Effectiveness", percent(snapshot.mission_effectiveness)],
+      ["Network", percent(snapshot.network.network_health)],
       ["Control", snapshot.control_available ? "ONLINE" : "OFFLINE"], ["Cloud", "NOT REQUIRED"],
       ["Nodes", `${snapshot.network.active_nodes} / ${snapshot.drones.length}`],
       ["Components", String(snapshot.network.connected_components.length)], ["Mean link", percent(snapshot.network.mean_link_quality)],
       ["Packet loss", percent(snapshot.network.packet_loss_recent)], ["GPS degraded", String(snapshot.network.gps_degraded_count)],
+      ["Observations", String(snapshot.world_knowledge.observation_count)], ["Mean confidence", percent(snapshot.world_knowledge.mean_observation_confidence)],
       ["Relay", snapshot.network.relay_nodes.join(", ") || "—"], ["Clock", `${snapshot.simulation_time.toFixed(1)} s ${snapshot.running ? "RUNNING" : "PAUSED"}`],
     ].map(([key, value]) => `<dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd>`).join("");
     runtimeStatus.textContent = `CONNECTED · ${snapshot.scenario} · backend simulation authoritative`;
     runtimeStatus.className = "status connected";
     syncControls(snapshot);
+  }
+
+  function renderCoverage(snapshot: RuntimeSnapshot): void {
+    const active = new Set<string>();
+    for (const region of snapshot.world_knowledge.regions) {
+      for (const cell of region.cells) {
+        const id = `runtime-coverage-${cell.cell_id}`;
+        active.add(id);
+        const entity = viewer.entities.getById(id) ?? viewer.entities.add({
+          id,
+          box: { dimensions: new Cesium.Cartesian3(cell.size_m * .9, cell.size_m * .9, .5) },
+        });
+        entity.position = new Cesium.ConstantPositionProperty(position({ ...cell.center, z: Math.max(1, cell.center.z - 2) }));
+        const color = cell.last_observed === null
+          ? Cesium.Color.DARKGRAY.withAlpha(.12)
+          : cell.freshness >= .5
+            ? Cesium.Color.LIME.withAlpha(.18 + .42 * cell.confidence)
+            : Cesium.Color.ORANGE.withAlpha(.18 + .35 * cell.confidence);
+        if (entity.box) entity.box.material = new Cesium.ColorMaterialProperty(color);
+        entity.show = true;
+        entity.name = `${region.region_id} · ${cell.last_observed === null ? "unknown" : cell.freshness >= .5 ? "fresh" : "stale"}`;
+      }
+    }
+    for (const entity of viewer.entities.values.filter((item) => item.id.startsWith("runtime-coverage-"))) if (!active.has(entity.id)) entity.show = false;
+  }
+
+  function renderTimeline(events: RuntimeEvent[]): void {
+    const ignored = new Set(["MESSAGE_DROPPED", "LINK_QUALITY_CHANGED", "OBSERVATION_SHARED"]);
+    timeline.innerHTML = events.filter((event) => !ignored.has(event.event_type)).slice(-18).reverse().map((event) =>
+      `<div><b>${event.timestamp.toFixed(1)} ${escapeHtml(event.event_type)}</b><br>${escapeHtml(event.human_readable_summary)}</div>`
+    ).join("");
+  }
+
+  function renderNetworkHistory(): void {
+    if (networkHistory.length < 2) return;
+    const points = networkHistory.map((value, index) => `${index * 300 / (networkHistory.length - 1)},${56 - value * 52}`).join(" ");
+    historyChart.innerHTML = `<polyline points="${points}" fill="none" stroke="#52d8ff" stroke-width="2" vector-effect="non-scaling-stroke"/><line x1="0" y1="30" x2="300" y2="30" stroke="#31516d" stroke-dasharray="3 3"/>`;
   }
 
   function renderLinks(links: RuntimeLink[]): void {
@@ -128,7 +187,7 @@ export function startRuntimeMode(viewer: Cesium.Viewer): void {
       active.add(id);
       const entity = viewer.entities.getById(id) ?? viewer.entities.add({ id, point: { pixelSize: 9, color: Cesium.Color.AQUA }, label: { font: "12px system-ui", pixelOffset: new Cesium.Cartesian2(0, -18), showBackground: true } });
       entity.position = new Cesium.ConstantPositionProperty(position(task.target.point));
-      if (entity.label) entity.label.text = new Cesium.ConstantProperty(`${task.type} · P${task.priority}\n${task.assigned_nodes.join(", ") || "AUCTION"}`);
+      if (entity.label) entity.label.text = new Cesium.ConstantProperty(`${task.type} · P${task.priority} · ${percent(task.effectiveness)}\n${task.assigned_nodes.join(", ") || "AUCTION"}`);
       entity.show = true;
     }
     for (const entity of viewer.entities.values.filter((item) => item.id.startsWith("runtime-task-"))) if (!active.has(entity.id)) entity.show = false;
@@ -143,6 +202,7 @@ export function startRuntimeMode(viewer: Cesium.Viewer): void {
       ["Task", drone.current_task_id ?? "—"], ["Battery", percent(drone.truth.actual_battery)],
       ["GPS", drone.estimated.localization_mode], ["Uncertainty", `${drone.estimated.position_uncertainty.toFixed(1)} m`],
       ["Peers", `${reachable} / ${Object.keys(drone.peers).length}`], ["Capabilities", drone.identity.capabilities.join(", ")],
+      ["Belief", `${drone.observation_count} observations`], ["Known cells", Object.entries(drone.known_cells).map(([region, count]) => `${region} ${count}`).join(", ") || "none"],
       ["Local xyz", `${drone.truth.position.x.toFixed(1)}, ${drone.truth.position.y.toFixed(1)}, ${drone.truth.position.z.toFixed(1)}`],
     ].map(([key, value]) => `<dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd>`).join("");
   }

@@ -152,6 +152,16 @@ def create_app(engine: SimulationEngine | None = None, start_runner: bool = True
             raise HTTPException(404, f"unknown drone: {node_id}") from exc
         return {"node_id": node_id, "status": "online"}
 
+    @app.post("/api/workers/{node_id}/connect")
+    async def connect_worker(node_id: str, uri: str = Query(..., pattern=r"^wss?://")) -> dict[str, str]:
+        try:
+            runtime.attach_external_worker(node_id, uri)
+        except KeyError as exc:
+            raise HTTPException(404, f"unknown drone: {node_id}") from exc
+        except (OSError, RuntimeError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"node_id": node_id, "worker": uri, "status": "connected"}
+
     @app.post("/api/control/fail")
     async def fail_control() -> dict[str, str]:
         runtime.fail_control()

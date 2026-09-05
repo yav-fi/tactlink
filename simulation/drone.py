@@ -22,11 +22,18 @@ from .models import (
     MotionIntent,
     NetworkMessage,
     NodeIdentity,
+    Observation,
+    ObservationType,
     PeerKnowledge,
+    PolicyResult,
     TaskStatus,
+    TaskLease,
     TaskType,
     Vector3,
 )
+from .world_model import CoverageGrid, WorldBelief
+from .authentication import MessageAuthenticator
+from .policy import LocalPolicyEngine
 
 
 WAYPOINT_CAPTURE_RADIUS = 6.0
@@ -49,6 +56,10 @@ class DroneNode:
         allocator: TaskAllocator | None = None,
         auction_window: float = 0.8,
         auction_rebroadcast: float = 0.25,
+        coverage_grids: list[CoverageGrid] | None = None,
+        distributed_coordination: bool = True,
+        lease_seconds: float = 4.0,
+        authenticator: MessageAuthenticator | None = None,
     ) -> None:
         self.identity = identity
         self.estimated = LocalEstimatedState(position=initial_estimate.model_copy(deep=True))
@@ -57,6 +68,7 @@ class DroneNode:
         self.task_queue: deque[MissionTask] = deque()
         self.task_progress = 0.0
         self.peers: dict[str, PeerKnowledge] = {}
+        self.world_belief = WorldBelief(coverage_grids or [])
         self.known_obstacles: list[dict[str, Any]] = []
         self.known_entities: dict[str, Vector3] = {}
         self.local_mission_state: dict[str, dict[str, Any]] = {}
@@ -88,6 +100,15 @@ class DroneNode:
         self._waypoint_index = 0
         self._recently_completed: list[str] = []
         self._home = initial_estimate.model_copy(deep=True)
+        self._observation_sequence = 0
+        self._world_update_dirty = False
+        self._distributed_coordination = distributed_coordination
+        self._lease_seconds = lease_seconds
+        self.task_leases: dict[str, dict[str, TaskLease]] = {}
+        self._authenticator = authenticator
+        self.rejected_signature_count = 0
+        self._policy = LocalPolicyEngine()
+        self.last_policy_result = PolicyResult()
 
     def update_battery_measurement(self, battery: float) -> None:
         self.estimated.battery_estimate += (battery - self.estimated.battery_estimate) * 0.25
@@ -105,6 +126,41 @@ class DroneNode:
 
     def update_entity_measurement(self, entity_id: str, position: Vector3) -> None:
         self.known_entities[entity_id] = position.model_copy(deep=True)
+
+    def create_observation(
+        self,
+        now: float,
+        observation_type: ObservationType,
+        domain_key: str,
+        geometry: dict[str, Any],
+        confidence: float,
+        uncertainty: float,
+        metadata: dict[str, Any] | None = None,
+    ) -> Observation:
+        """Incorporate a simulator-produced sensor observation locally."""
+        self._observation_sequence += 1
+        observation = Observation(
+            observation_id=f"obs-{self.identity.node_id}-{self._observation_sequence:08d}",
+            source_node_id=self.identity.node_id,
+            timestamp=now,
+            observation_type=observation_type,
+            domain_key=domain_key,
+            geometry=geometry,
+            confidence=confidence,
+            uncertainty=uncertainty,
+            metadata=metadata or {},
+        )
+        if self.world_belief.incorporate(observation):
+            self._world_update_dirty = True
+            self._sync_legacy_belief_views(observation)
+        return observation
+
+    def _sync_legacy_belief_views(self, observation: Observation) -> None:
+        """Keep planner-facing entity fields compatible during the transition."""
+        entity_id = str(observation.metadata.get("entity_id", ""))
+        position = observation.geometry.get("position")
+        if entity_id and position:
+            self.known_entities[entity_id] = Vector3.model_validate(position)
 
     def update_localization(self, measurement: GPSMeasurement | None, dt: float) -> tuple[LocalizationMode, LocalizationMode]:
         previous = self.estimated.localization_mode
@@ -143,6 +199,9 @@ class DroneNode:
 
     def handle_message(self, message: NetworkMessage, now: float) -> list[NetworkMessage]:
         replies: list[NetworkMessage] = []
+        if self._authenticator is not None and not self._authenticator.verify(message):
+            self.rejected_signature_count += 1
+            return replies
         if message.type in {MessageType.HEARTBEAT, MessageType.STATUS, MessageType.POSITION_UPDATE}:
             payload = message.payload
             position_data = payload.get("estimated_position")
@@ -196,6 +255,13 @@ class DroneNode:
                 self.known_tasks[task_id].progress = 1.0
         elif message.type == MessageType.MISSION_SYNC:
             self._merge_mission_sync(message.payload, now)
+        elif message.type == MessageType.WORLD_UPDATE:
+            incoming = [Observation.model_validate(item) for item in message.payload.get("observations", [])]
+            changed = self.world_belief.merge(incoming, now)
+            if changed:
+                self._world_update_dirty = True
+                for observation in changed:
+                    self._sync_legacy_belief_views(observation)
         return replies
 
     def _accept_task(self, task: MissionTask) -> None:
@@ -222,7 +288,8 @@ class DroneNode:
             "status": TaskStatus.PENDING,
             "assigned_nodes": [],
         }
-        self._start_auction(task.id, now)
+        if self._distributed_coordination:
+            self._start_auction(task.id, now)
         self._mission_revision += 1
         return True
 
@@ -268,20 +335,23 @@ class DroneNode:
         winners = sorted({str(node) for node in payload.get("winners", [])})
         if task_id not in self.known_tasks or round_number < self._auction_rounds.get(task_id, 0):
             return
+        incoming_leases = {
+            lease.owner: lease
+            for lease in (TaskLease.model_validate(item) for item in payload.get("leases", []))
+            if lease.task_id == task_id and lease.owner in winners
+        }
         current = self.task_assignments.get(task_id)
-        if (
-            current
-            and self.identity.node_id in current
-            and self.identity.node_id not in winners
-            and self.current_task is not None
-            and self.current_task.id == task_id
-        ):
-            return
         if round_number == self._auction_rounds.get(task_id, 0) and current:
-            winners = list(min(tuple(current), tuple(winners)))
+            current_leases = self.task_leases.get(task_id, {})
+            incoming_expiry = max((lease.lease_expires for lease in incoming_leases.values()), default=0.0)
+            current_expiry = max((lease.lease_expires for lease in current_leases.values()), default=0.0)
+            if incoming_expiry < current_expiry or (
+                incoming_expiry == current_expiry and tuple(winners) >= tuple(current)
+            ):
+                return
         self._auction_rounds[task_id] = round_number
         self._auction_deadlines.pop(task_id, None)
-        self._apply_assignment(task_id, winners)
+        self._apply_assignment(task_id, winners, incoming_leases or self._new_leases(task_id, winners, round_number, now))
 
     def _merge_mission_sync(self, payload: dict[str, Any], now: float) -> None:
         for record in payload.get("tasks", []):
@@ -295,9 +365,12 @@ class DroneNode:
                 continue
             round_number = int(record.get("round", 0))
             if round_number >= self._auction_rounds.get(task_id, 0) and record.get("winners"):
-                self._record_award(
-                    {"task_id": task_id, "round": round_number, "winners": record.get("winners", [])}, now
-                )
+                self._record_award({
+                    "task_id": task_id,
+                    "round": round_number,
+                    "winners": record.get("winners", []),
+                    "leases": record.get("leases", []),
+                }, now)
 
     def _auction_messages(self, now: float) -> list[NetworkMessage]:
         messages: list[NetworkMessage] = []
@@ -317,7 +390,8 @@ class DroneNode:
                 continue
             eligible = [score for score in bids.values() if score.components.get("capability_mismatch", 1.0) == 0.0]
             winners = [score.node_id for score in sorted(eligible, key=lambda score: (score.cost, score.node_id))[: task.desired_units]]
-            self._apply_assignment(task_id, winners)
+            leases = self._new_leases(task_id, winners, round_number, now)
+            self._apply_assignment(task_id, winners, leases)
             messages.append(
                 self._message(
                     now,
@@ -327,6 +401,7 @@ class DroneNode:
                         "round": round_number,
                         "winners": winners,
                         "bids": [self._bid_payload(task_id, round_number, score) for score in sorted(eligible, key=lambda item: item.node_id)],
+                        "leases": [lease.model_dump(mode="json") for lease in leases.values()],
                     },
                 )
             )
@@ -344,14 +419,38 @@ class DroneNode:
             "details": score.details,
         }
 
-    def _apply_assignment(self, task_id: str, winners: list[str]) -> None:
+    def _new_leases(self, task_id: str, winners: list[str], revision: int, now: float) -> dict[str, TaskLease]:
+        return {
+            owner: TaskLease(
+                task_id=task_id,
+                owner=owner,
+                lease_id=f"lease-{task_id}-{revision}-{owner}",
+                lease_expires=round(now + self._lease_seconds, 6),
+                revision=revision,
+            )
+            for owner in winners
+        }
+
+    def _apply_assignment(
+        self,
+        task_id: str,
+        winners: list[str],
+        leases: dict[str, TaskLease] | None = None,
+    ) -> None:
         if task_id in self.completed_tasks:
             return
         winners = sorted(dict.fromkeys(winners))
         changed = winners != self.task_assignments.get(task_id)
         self.task_assignments[task_id] = winners
+        if leases is not None:
+            self.task_leases[task_id] = leases
         task = self.known_tasks[task_id].model_copy(deep=True)
         task.assigned_nodes = winners
+        task.leases = list(self.task_leases.get(task_id, {}).values())
+        relay_targets = task.metadata.get("relay_targets", [])
+        if task.type == TaskType.RELAY and self.identity.node_id in winners and relay_targets:
+            index = winners.index(self.identity.node_id) % len(relay_targets)
+            task.target.point = Vector3.model_validate(relay_targets[index])
         task.status = TaskStatus.ASSIGNED if winners else TaskStatus.PENDING
         self.known_tasks[task_id] = task
         state = self.local_mission_state.setdefault(task_id, {"task_id": task_id})
@@ -373,8 +472,42 @@ class DroneNode:
             self.task_progress = 0.0
         self.task_queue = deque(task for task in self.task_queue if task.id != task_id)
 
+    def _expire_and_renew_leases(self, now: float) -> list[NetworkMessage]:
+        if not self._distributed_coordination:
+            return []
+        messages: list[NetworkMessage] = []
+        for task_id, winners in list(self.task_assignments.items()):
+            if self.identity.node_id not in winners or task_id in self.completed_tasks:
+                continue
+            lease = self.task_leases.get(task_id, {}).get(self.identity.node_id)
+            if lease is None or lease.lease_expires <= now:
+                self._release_task(task_id)
+                self.task_assignments[task_id] = [owner for owner in winners if owner != self.identity.node_id]
+                self._start_auction(task_id, now, fast=True)
+                messages.append(self._message(now, MessageType.TASK_RELEASE, {
+                    "task_id": task_id,
+                    "node_id": self.identity.node_id,
+                    "round": self._auction_rounds.get(task_id, 0),
+                    "reason": "lease_expired",
+                    "lease_id": lease.lease_id if lease else None,
+                }))
+                continue
+            if lease.lease_expires - now <= self._lease_seconds / 2 and any(peer.available for peer in self.peers.values()):
+                renewed = lease.model_copy(update={"lease_expires": round(now + self._lease_seconds, 6)})
+                self.task_leases[task_id][self.identity.node_id] = renewed
+                messages.append(self._message(now, MessageType.TASK_AWARD, {
+                    "task_id": task_id,
+                    "round": lease.revision,
+                    "winners": winners,
+                    "leases": [item.model_dump(mode="json") for item in self.task_leases[task_id].values()],
+                    "renewal": True,
+                }))
+        return messages
+
     def _release_lost_peer(self, peer_id: str, now: float) -> list[NetworkMessage]:
         messages: list[NetworkMessage] = []
+        if not self._distributed_coordination:
+            return messages
         for task_id, winners in sorted(self.task_assignments.items()):
             if peer_id not in winners or task_id in self.completed_tasks:
                 continue
@@ -417,6 +550,10 @@ class DroneNode:
                         {"winners": self.task_assignments[task_id]}
                         if self.task_assignments.get(task_id) else {}
                     ),
+                    "leases": [
+                        lease.model_dump(mode="json")
+                        for lease in self.task_leases.get(task_id, {}).values()
+                    ],
                 }
                 for task_id, task in sorted(self.known_tasks.items())
             ],
@@ -430,12 +567,29 @@ class DroneNode:
         self._pending_messages.clear()
         for peer_id in timed_out:
             messages.extend(self._release_lost_peer(peer_id, now))
+        messages.extend(self._expire_and_renew_leases(now))
         if now - self._last_heartbeat >= self._heartbeat_interval - 1e-9:
             messages.append(self._status_message(now, MessageType.HEARTBEAT))
             self._last_heartbeat = now
         if now - self._last_status >= self._status_interval - 1e-9:
             messages.append(self._status_message(now, MessageType.STATUS))
             messages.append(self._message(now, MessageType.MISSION_SYNC, self._mission_sync_payload()))
+            # Periodic anti-entropy makes beliefs converge after a healed
+            # partition even when the original observation packet was lost.
+            if self.world_belief.domain_latest:
+                messages.append(
+                    self._message(
+                        now,
+                        MessageType.WORLD_UPDATE,
+                        {
+                            "observations": [
+                                item.model_dump(mode="json")
+                                for _, item in sorted(self.world_belief.domain_latest.items())
+                            ]
+                        },
+                    )
+                )
+                self._world_update_dirty = False
             self._last_status = now
         messages.extend(self._auction_messages(now))
         if self.estimated.position_uncertainty > 25.0:
@@ -473,6 +627,11 @@ class DroneNode:
         task = self.current_task
         if task is None:
             self.plan = None
+            self.last_policy_result = PolicyResult()
+            return MotionIntent(hold=True)
+        self.last_policy_result = self._policy.evaluate(self.estimated, task, self._home)
+        if not self.last_policy_result.allowed:
+            self.state = DroneState.DEGRADED
             return MotionIntent(hold=True)
         if self._planner is not None:
             intent = self._planned_action(now, dt, task)
@@ -531,10 +690,8 @@ class DroneNode:
         if task.type == TaskType.SEARCH:
             coverage = float(plan.metadata.get("coverage_fraction", 0.0))
             self.task_progress = max(self.task_progress, min(0.99, coverage))
-            if str(plan.phase) == "COMPLETE":
-                self.task_progress = 1.0
-                self._finish_planned_task(task)
-                return True
+            # Planner lane completion is not mission completion. SEARCH remains
+            # active until the outcome evaluator sees actual sensed coverage.
             return False
         if task.type in {TaskType.GOTO, TaskType.RETURN, TaskType.TRACE}:
             if at_final:
@@ -642,7 +799,7 @@ class DroneNode:
         recipient_id: str | None = None,
     ) -> NetworkMessage:
         self._sequence += 1
-        return NetworkMessage(
+        message = NetworkMessage(
             sender_id=self.identity.node_id,
             recipient_id=recipient_id,
             timestamp_sent=now,
@@ -650,6 +807,7 @@ class DroneNode:
             payload=payload,
             sequence_number=self._sequence,
         )
+        return self._authenticator.sign(message) if self._authenticator is not None else message
 
     def fail(self) -> None:
         self.online = False

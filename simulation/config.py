@@ -36,6 +36,18 @@ class LocalizationConfig(BaseModel):
     convergence_rate: float = 0.35
 
 
+class SensingConfig(BaseModel):
+    observation_radius_m: float = Field(default=32.0, gt=0)
+    cell_size_m: float = Field(default=12.0, gt=0)
+    update_interval_seconds: float = Field(default=0.8, gt=0)
+    confidence_falloff: float = Field(default=0.55, ge=0.0, le=1.0)
+    freshness_half_life_seconds: float = Field(default=18.0, gt=0)
+
+
+class SecurityConfig(BaseModel):
+    enabled: bool = False
+
+
 class SimulationConfig(BaseModel):
     seed: int = 49281
     tick_rate_hz: float = Field(default=20.0, gt=0)
@@ -48,11 +60,14 @@ class SimulationConfig(BaseModel):
     battery_drain_per_meter: float = 0.00008
     auction_window_seconds: float = Field(default=0.8, gt=0)
     auction_rebroadcast_seconds: float = Field(default=0.25, gt=0)
+    task_lease_seconds: float = Field(default=4.0, gt=0)
     relay_evaluation_seconds: float = Field(default=1.0, gt=0)
     relay_health_threshold: float = Field(default=0.58, ge=0.0, le=1.0)
     allocator: AllocatorWeights = AllocatorWeights()
     network: NetworkConfig = NetworkConfig()
     localization: LocalizationConfig = LocalizationConfig()
+    sensing: SensingConfig = SensingConfig()
+    security: SecurityConfig = SecurityConfig()
 
     @property
     def tick_seconds(self) -> float:

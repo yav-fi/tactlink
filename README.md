@@ -321,3 +321,83 @@ completion, and re-auction after local heartbeat timeouts. `MissionManager`
 accepts commands and maintains an operator projection; it no longer assigns
 tasks. The Python host remains a centralized simulation clock/world and is not
 claimed to be a physically distributed simulator.
+
+## World knowledge and mission effectiveness
+
+Every `DroneNode` now owns a separate `WorldBelief`. The simulator generates
+typed observations only when a capable node is physically within sensor range;
+the observation enters that node's belief first and reaches peers only through
+normal delayed, lossy `WORLD_UPDATE` messages. Periodic anti-entropy converges
+newer/high-confidence cell and entity records after partitions heal. The
+operator snapshot exposes both the aggregate view and per-node known-cell
+counts without making simulator truth available to autonomy.
+
+SEARCH regions are deterministic circular grids. Their progress and
+effectiveness come from observed cells rather than planned-waypoint completion:
+45% coverage, 35% fresh coverage, and 20% mean confidence. WATCH uses 75%
+freshness and 25% confidence from the most recent region observation; FOLLOW
+uses entity freshness times confidence; RELAY uses measured network health;
+other motion tasks use actual task progress. Freshness decays by half every
+`sensing.freshness_half_life_seconds`. Priority-weighted effectiveness is
+reported separately from assignment/resource capability.
+
+Fabric awards carry deterministic task leases (`owner`, `lease_id`, expiry,
+revision). Reachable owners renew them, expired owners stop, and equal-revision
+partition conflicts resolve by later expiry and then node ID. The local policy
+layer holds motion when position uncertainty is excessive or battery reserve is
+required. `NodeIdentity.resources` provides the first generic mobility,
+compute, sensing, communications, power, relay, and storage abstraction while
+preserving the legacy capability set.
+
+## Record, replay, and compare
+
+The integrated 55-second demo writes a JSONL timeline containing the seed,
+configuration, commands, disturbances, events, state, network history,
+coverage, and effectiveness:
+
+```sh
+.venv/bin/python -m simulation.demo --seed 49281
+.venv/bin/python -m simulation.replay runs/demo-49281.jsonl
+```
+
+Run the same initial state and disturbance schedule in the reasonable
+centralized baseline and resilient fabric modes. The table and JSON output are
+computed from the two simulations; no result is hardcoded:
+
+```sh
+.venv/bin/python -m simulation.benchmark --seed 49281
+```
+
+Artifacts are written under `runs/` and intentionally ignored by Git.
+
+## External DroneNode worker
+
+An autonomy core can run in another local process or on a LAN host over a
+reliable WebSocket transport. The worker receives only measurements, locally
+generated sensor observations, messages that survived the simulated network,
+mission data carried in those messages, and simulation timing. It returns
+`MotionIntent`, outbound messages, timeouts, and public node state; world truth
+and physics remain in the host.
+
+```sh
+# Process / laptop 1
+.venv/bin/python -m simulation.worker --node-id drone-3 --host 0.0.0.0 --port 8765
+
+# Before the first simulation tick, attach through Python:
+engine.attach_external_worker("drone-3", "ws://127.0.0.1:8765")
+
+# Or against a paused/not-yet-ticked FastAPI engine:
+curl -X POST 'http://127.0.0.1:8000/api/workers/drone-3/connect?uri=ws://127.0.0.1:8765'
+```
+
+In-process autonomy remains the default. A worker disconnect causes a HOLD and
+a `WORKER_DISCONNECTED` event. Set `SimulationConfig.security.enabled=True` to
+derive local seeded Ed25519 development identities, sign node messages, and
+reject unknown, missing, or invalid node signatures. Security is disabled by
+default and is simulation authentication, not a production PKI.
+
+Connected Cesium mode renders unknown/fresh/stale coverage cells, coverage and
+confidence metrics, node-local belief counts, objective effectiveness, a
+filtered mission timeline, auction/lease events, and a compact network-health
+history in addition to the existing truth/debug, localization, route, link,
+relay, and task layers.

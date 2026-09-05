@@ -19,6 +19,7 @@ data/
 *.png
 flight.png
 benchmark_result.json
+runs/
 .env
 .env.local
 3d-mapping/node_modules/

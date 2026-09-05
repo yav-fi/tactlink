@@ -138,7 +138,9 @@ class NetworkSimulator:
         heapq.heappush(self._pending, _Delivery(deliver_at, self._counter, recipient, message.model_copy(deep=True)))
 
     def _drop(self, message: NetworkMessage, recipient: str, now: float, reason: str) -> None:
-        if message.type.value not in {"HEARTBEAT", "STATUS", "MISSION_SYNC", "TASK_BID"}:
+        noisy_control_plane = message.type.value in {"HEARTBEAT", "STATUS", "MISSION_SYNC", "TASK_BID", "WORLD_UPDATE"}
+        noisy_renewal = message.type.value == "TASK_AWARD" and message.payload.get("renewal")
+        if not noisy_control_plane and not noisy_renewal:
             self.events.emit(
                 now, EventCategory.NETWORK, EventType.MESSAGE_DROPPED, message.sender_id,
                 f"{message.type} message to {recipient} dropped ({reason})",

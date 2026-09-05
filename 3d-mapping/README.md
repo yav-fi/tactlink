@@ -25,6 +25,12 @@ The WebSocket snapshot is authoritative. The browser creates/upgrades Cesium
 entities from backend truth and does not run `DroneController.update` for them.
 It renders estimated position separately, uncertainty ellipses, current plan,
 mission points, usable/unavailable links, relay roles, and topology metrics.
+It also renders the backend's SEARCH grid as unknown, fresh, or stale cells;
+shows coverage, observation confidence, capability and outcome effectiveness;
+and includes a filtered event timeline plus compact network-health history.
+Selecting a drone shows how many observations and cells that node knows, making
+belief divergence during a partition visible without exposing truth to node
+autonomy.
 Backend local metres are converted in one helper using Cesium's east-north-up
 fixed frame around the snapshot's `origin_lat`, `origin_lon`, and `origin_alt`.
 

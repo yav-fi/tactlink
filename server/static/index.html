@@ -35,7 +35,7 @@
   </header>
   <main>
     <section><h2>Drones</h2><table><thead><tr><th>Node</th><th>State/task</th><th>True position</th><th>Estimated position</th><th>Uncertainty</th><th>Battery</th><th>Peers</th></tr></thead><tbody id="drones"></tbody></table></section>
-    <section><h2>Missions — overall <span class="metric" id="capability"></span></h2><div id="missions"></div><h2 style="margin-top:18px">Links</h2><div id="links"></div></section>
+    <section><h2>Missions — capability <span class="metric" id="capability"></span> · effectiveness <span class="metric" id="effectiveness"></span></h2><div id="knowledge"></div><div id="missions"></div><h2 style="margin-top:18px">Links</h2><div id="links"></div></section>
     <section class="controls"><h2>Interference and presets</h2><div id="sliders"></div><button onclick="preset('NORMAL')">Normal</button> <button onclick="preset('DEGRADED')">Degraded</button> <button onclick="preset('CONTESTED')">Contested</button> <button onclick="preset('CHAOS')">Chaos</button></section>
     <section style="grid-column:1/-1"><h2>Recent events</h2><div class="events" id="events"></div></section>
   </main>
@@ -51,8 +51,10 @@
     function render(s) {
       latest=s; document.getElementById('clock').textContent=`t=${s.simulation_time.toFixed(1)}s ${s.running?'RUNNING':'PAUSED'} ${s.scenario}`;
       document.getElementById('capability').textContent=(s.mission_capability*100).toFixed(0)+'%';
+      document.getElementById('effectiveness').textContent=(s.mission_effectiveness*100).toFixed(0)+'%';
+      document.getElementById('knowledge').innerHTML=`${s.world_knowledge.observation_count} observations · ${s.world_knowledge.regions.map(r=>`${r.region_id} ${(r.coverage*100).toFixed(0)}% / fresh ${(r.fresh_coverage*100).toFixed(0)}%`).join(' · ')}<br><br>`;
       document.getElementById('drones').innerHTML=s.drones.map(d=>`<tr><td>${d.identity.name}</td><td>${d.state}<br>${d.current_task_id||'—'}</td><td>${pos(d.truth.position)}</td><td>${pos(d.estimated.position)}</td><td>${d.estimated.position_uncertainty.toFixed(1)}m<br>${d.estimated.localization_mode}</td><td>${(d.truth.actual_battery*100).toFixed(0)}%</td><td>${Object.values(d.peers).map(p=>p.node_id+': '+(s.simulation_time-p.last_seen).toFixed(1)+'s').join('<br>')||'—'}</td></tr>`).join('');
-      document.getElementById('missions').innerHTML=s.missions.map(m=>`<div>${m.id} ${m.type} <b>${(m.capability*100).toFixed(0)}%</b><br>${m.status}: ${m.assigned_nodes.join(', ')||'unassigned'}</div>`).join('<br>')||'No missions';
+      document.getElementById('missions').innerHTML=s.missions.map(m=>`<div>${m.id} ${m.type} <b>cap ${(m.capability*100).toFixed(0)}% · effective ${(m.effectiveness*100).toFixed(0)}%</b><br>${m.status}: ${m.assigned_nodes.join(', ')||'unassigned'}</div>`).join('<br>')||'No missions';
       document.getElementById('links').innerHTML=s.links.map(l=>`${l.source_id} ↔ ${l.target_id}: ${l.available?'up':'down'} ${(l.quality*100).toFixed(0)}%`).join('<br>');
       document.getElementById('events').innerHTML=[...s.events].reverse().map(e=>`<div class="event">${e.timestamp.toFixed(1)} <b>${e.event_type}</b> ${e.human_readable_summary}</div>`).join('');
       fields.forEach(f=>{ if(document.activeElement.id!==f) document.getElementById(f).value=s.interference[f]; document.getElementById(f+'-value').textContent=Number(s.interference[f]).toFixed(2); });
