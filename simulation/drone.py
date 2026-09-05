@@ -206,7 +206,7 @@ class DroneNode:
         return lost
 
     def choose_action(self, now: float, dt: float) -> MotionIntent:
-        """Planner-driven motion, with the direct implementation as fallback."""
+        """Use planner-driven motion when configured, otherwise fly directly."""
 
         task = self.current_task
         if task is None:
@@ -216,10 +216,11 @@ class DroneNode:
             intent = self._planned_action(now, dt, task)
             if intent is not None:
                 return intent
+            return MotionIntent(hold=True)
         return self._direct_action(dt, task)
 
     def _planned_action(self, now: float, dt: float, task: MissionTask) -> MotionIntent | None:
-        """Ask MissionPlanner where to go; ``None`` means fall back to direct flight."""
+        """Ask MissionPlanner where to go; ``None`` means planning failed."""
 
         try:
             context = self._autonomy.build_context(self, now)

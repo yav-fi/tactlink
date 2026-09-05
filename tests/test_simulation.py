@@ -232,6 +232,23 @@ def test_planner_drives_motion_and_routes_around_obstacles() -> None:
     assert node.task_progress == 1.0
 
 
+def test_planner_exception_holds_instead_of_flying_directly(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = engine_for_test()
+    task = assign_single_task(engine, Vector3(x=100, y=100, z=30))
+    node = engine.drones[task.assigned_nodes[0]]
+    node.plan = None
+
+    def fail_planning(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("planner unavailable")
+
+    monkeypatch.setattr(node._planner, "plan", fail_planning)
+
+    intent = node.choose_action(engine.time, 0.1)
+
+    assert intent.hold
+    assert intent.target is None
+
+
 def test_every_task_type_plans_without_crashing() -> None:
     commands = [
         (TaskType.WATCH, MissionTarget(region_id="ALPHA")),
