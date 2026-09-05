@@ -1,6 +1,7 @@
 import * as Cesium from "cesium";
 import type { Coordinates, MissionCommand, MissionStep } from "./mission";
 import { movementBlocked } from "./collision";
+import { sampleSurvey, surfaceHit, SURVEY_RAYS } from "./survey-surface";
 
 export type DroneSnapshot = Coordinates & { state: string; currentStep: number; totalSteps: number };
 
@@ -62,7 +63,11 @@ export class DroneController {
   private replayPoints: Cesium.Cartesian3[] = [];
   private replayDistances: number[] = [];
   private replaySpeed = 0;
-  private readonly surveyCone?: Cesium.Entity;
+  private surveySides: Cesium.Entity[] = [];
+  private surveyEnds: Cesium.Cartesian3[] = [];
+  private surveyOrigin = new Cesium.Cartesian3();
+  private surveySampleTime = -Infinity;
+  private surveyCoveragePending = false;
   private readonly crashIndicator: Cesium.Entity;
   private crashUntil = 0;
   private crashPosition = new Cesium.Cartesian3();
@@ -91,24 +96,29 @@ export class DroneController {
     this.setColor(data.color); this.updateTrailArrows();
   }
 
-  private recordCoverage(): void {
-    if (this.droneType !== "survey") return;
+  private recordCoverage(): void { this.surveyCoveragePending = true; }
+
+  updateSurvey(now: number): void {
+    if (this.droneType !== "survey" || now - this.surveySampleTime < 500) return;
+    this.surveySampleTime = now;
+    this.surveyOrigin = Cesium.Matrix4.multiplyByPoint(Cesium.Transforms.eastNorthUpToFixedFrame(this.visualPosition()), new Cesium.Cartesian3(0, 0, -2), new Cesium.Cartesian3());
+    const sample = sampleSurvey(this.surveyOrigin, this.viewDirection(), ray => surfaceHit(this.viewer, ray));
+    this.surveyEnds = sample.hits.map(item => item.end);
+    if (!this.surveyCoveragePending || !sample.centerHit) return;
     const position = this.visualPosition();
     if (this.lastCoveragePosition && Cesium.Cartesian3.distance(position, this.lastCoveragePosition) < 10) return;
     this.lastCoveragePosition = Cesium.Cartesian3.clone(position);
-    // Approximate footprint: project the cone's far rim onto the map, without visibility analysis.
-    const direction = this.viewDirection();
-    const right = Cesium.Cartesian3.normalize(Cesium.Cartesian3.cross(direction, Cesium.Cartesian3.mostOrthogonalAxis(direction, new Cesium.Cartesian3()), new Cesium.Cartesian3()), new Cesium.Cartesian3());
-    const up = Cesium.Cartesian3.cross(direction, right, new Cesium.Cartesian3());
-    const center = Cesium.Cartesian3.add(position, Cesium.Cartesian3.multiplyByScalar(direction, 80, new Cesium.Cartesian3()), new Cesium.Cartesian3());
-    const points = Array.from({ length: 24 }, (_, i) => {
-      const angle = i / 24 * Math.PI * 2;
-      const rim = Cesium.Cartesian3.add(center, Cesium.Cartesian3.add(Cesium.Cartesian3.multiplyByScalar(right, 30 * Math.cos(angle), new Cesium.Cartesian3()), Cesium.Cartesian3.multiplyByScalar(up, 30 * Math.sin(angle), new Cesium.Cartesian3()), new Cesium.Cartesian3()), new Cesium.Cartesian3());
-      const geo = Cesium.Cartographic.fromCartesian(rim);
-      return Cesium.Cartesian3.fromRadians(geo.longitude, geo.latitude);
-    });
-    this.coverage.push(this.viewer.entities.add({ id: `${this.id}_coverage_${++this.coverageNumber}`, polygon: { hierarchy: points, material: this.color.withAlpha(0.15), classificationType: Cesium.ClassificationType.BOTH } }));
-    if (this.coverage.length > 500) this.viewer.entities.remove(this.coverage.shift()!);
+    this.surveyCoveragePending = false;
+    for (let i = 0; i < sample.hits.length; i++) {
+      const a = sample.hits[i].hit, b = sample.hits[(i + 1) % sample.hits.length].hit;
+      if (!a || !b) continue;
+      // Only mark triangles whose sampled vertices actually met map surfaces.
+      this.coverage.push(this.viewer.entities.add({ id: `${this.id}_coverage_${++this.coverageNumber}`, polygon: {
+        hierarchy: [sample.centerHit, a, b], perPositionHeight: true,
+        material: this.color.withAlpha(0.22),
+      } }));
+      if (this.coverage.length > 500) this.viewer.entities.remove(this.coverage.shift()!);
+    }
   }
 
   constructor(private readonly viewer: Cesium.Viewer, home: Coordinates, private color = Cesium.Color.fromCssColorString("#35e8ff"), readonly id = "drone_1", readonly droneType: DroneType = "normal") {
@@ -159,20 +169,17 @@ export class DroneController {
       label: { show: new Cesium.CallbackProperty(() => Date.now() < this.crashUntil, false), text: "⚠ COLLISION — STOPPED", font: "600 13px system-ui", fillColor: Cesium.Color.ORANGERED, showBackground: true, pixelOffset: new Cesium.Cartesian2(0, -48), disableDepthTestDistance: Infinity },
     });
     if (droneType === "survey") {
-      this.surveyCone = viewer.entities.add({
-        id: `${id}_survey_cone`,
-        position: new Cesium.CallbackPositionProperty(() => {
-          const mount = Cesium.Matrix4.multiplyByPoint(Cesium.Transforms.eastNorthUpToFixedFrame(this.visualPosition()), new Cesium.Cartesian3(0, 0, -2), new Cesium.Cartesian3());
-          return Cesium.Cartesian3.add(mount, Cesium.Cartesian3.multiplyByScalar(this.viewDirection(), 40, new Cesium.Cartesian3()), new Cesium.Cartesian3());
-        }, false),
-        orientation: new Cesium.CallbackProperty(() => {
-          const direction = this.viewDirection();
-          const axis = Cesium.Cartesian3.cross(Cesium.Cartesian3.UNIT_Z, direction, new Cesium.Cartesian3());
-          if (Cesium.Cartesian3.magnitudeSquared(axis) < 1e-12) return direction.z > 0 ? Cesium.Quaternion.IDENTITY : Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_X, Math.PI);
-          return Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.normalize(axis, axis), Math.acos(Cesium.Math.clamp(direction.z, -1, 1)));
-        }, false),
-        cylinder: { length: 80, bottomRadius: 0, topRadius: 30, material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => this.color.withAlpha(0.16), false)), outline: true, outlineColor: new Cesium.CallbackProperty(() => this.color.withAlpha(0.5), false), numberOfVerticalLines: 8 },
-      });
+      for (let i = 0; i < SURVEY_RAYS; i++) {
+        this.surveySides.push(viewer.entities.add({
+          id: `${id}_survey_cone_${i}`,
+          polygon: {
+            show: new Cesium.CallbackProperty(() => this.surveyEnds.length > 0, false),
+            hierarchy: new Cesium.CallbackProperty(() => new Cesium.PolygonHierarchy(this.surveyEnds.length ? [Cesium.Matrix4.multiplyByPoint(Cesium.Transforms.eastNorthUpToFixedFrame(this.visualPosition()), new Cesium.Cartesian3(0, 0, -2), new Cesium.Cartesian3()), this.surveyEnds[i], this.surveyEnds[(i + 1) % SURVEY_RAYS]] : []), false),
+            perPositionHeight: true,
+            material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => this.color.withAlpha(0.12), false)),
+          },
+        }));
+      }
     }
   }
 
@@ -289,7 +296,7 @@ export class DroneController {
     this.viewer.entities.remove(this.originEntity);
     this.viewer.entities.remove(this.trailEntity);
     this.viewer.entities.remove(this.crashIndicator);
-    if (this.surveyCone) this.viewer.entities.remove(this.surveyCone);
+    for (const side of this.surveySides) this.viewer.entities.remove(side);
   }
 
   moveManually(east: number, north: number, up: number, seconds: number, heading = 0): void {
@@ -323,6 +330,7 @@ export class DroneController {
   reset(): void {
     for (const patch of this.coverage) this.viewer.entities.remove(patch);
     this.coverage = []; this.lastCoveragePosition = undefined; this.coverageNumber = 0;
+    this.surveyEnds = []; this.surveyCoveragePending = false; this.surveySampleTime = -Infinity;
     this.crashUntil = 0;
     this.collisionBlocked = this.replayBlocked = false;
     this.hideReplay();

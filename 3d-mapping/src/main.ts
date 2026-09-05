@@ -582,6 +582,7 @@ undoButton.addEventListener("click", () => {
 });
 pauseButton.addEventListener("click", () => { fleet.togglePause(performance.now() / 1000); refreshFleet(); });
 let overviewTime = 0;
+let surveyUpdateIndex = 0;
 function updateOverview(now: number): void {
   undoButton.disabled = !fleet.undoLabel;
   undoButton.textContent = fleet.undoLabel ? `Undo ${fleet.undoLabel}` : "Undo last action";
@@ -616,6 +617,8 @@ viewer.clock.onTick.addEventListener((clock) => {
   updateFreeCamera(Math.min(0.1, Math.max(0, (cameraTime - previousCameraTime) / 1000)));
   previousCameraTime = cameraTime;
   updateOverview(cameraTime);
+  const surveys = [...fleet.drones.values()].filter(member => member.droneType === "survey");
+  if (surveys.length) surveys[surveyUpdateIndex++ % surveys.length].updateSurvey(cameraTime);
   const snapshot = drone?.snapshot();
   if (controllingDrone) {
     commandStatus.textContent = drone?.collisionBlocked

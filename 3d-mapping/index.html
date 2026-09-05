@@ -69,7 +69,7 @@
             <div id="drone-type-fields">
             <label for="drone-type">Drone type</label>
             <select id="drone-type"><option value="normal">Normal</option><option value="survey">Survey · camera cone</option></select>
-            <p class="hint">Survey cones show camera direction and field of view; they do not detect objects or account for occlusion. Both types show a collision indicator when stopped by an obstacle.</p>
+            <p class="hint">Survey cones extend to sampled map surfaces. Missing surfaces create no coverage; unmatched rays display up to 10 km. Both types show a collision indicator when stopped by an obstacle.</p>
             </div>
             <p id="deployment-status" class="hint" role="status">Click a starting point on the map.</p>
             <label for="deployment-height">Height above picked surface (m)</label>
@@ -111,7 +111,7 @@
         </section>
         <section>
           <h2>Fleet overview</h2>
-          <p class="hint">Survey shading is approximate projected coverage, not confirmed visibility. Up to 500 patches per Survey drone are retained.</p>
+          <p class="hint">Survey shading joins sampled surface hits. Small obstacles between rays may be missed. Up to 500 surface triangles per Survey drone are retained.</p>
           <div id="fleet-overview" aria-label="Fleet overview"></div>
           <h2>Selected drone details</h2>
           <dl id="drone-state" class="state"></dl>

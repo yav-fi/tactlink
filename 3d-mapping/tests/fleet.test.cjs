@@ -30,7 +30,7 @@ test("undo restores deployed types, paths, coverage, groups and release markers 
   fleet.releaseBatch();
   fleet.saveGroup("A", [drone.id]);
   const before = drone.capture();
-  assert(before.coverage.length > 1);
+  assert.equal(before.coverage.length, 0); // No map surfaces in this controller-only fixture.
   fleet.checkpoint("reset all");
   fleet.clear(); assert.equal(entities.values.length, 0);
   assert.equal(fleet.undo(), "reset all");
@@ -69,41 +69,42 @@ test("pause freezes playback position and elapsed time and resume excludes pause
   assert.equal(fleet.replay.running, false);
 });
 
-test("Survey cone stays attached, turns with heading, follows color and cleans up", () => {
+test("Survey rays extend to first surfaces and leave uncovered rays unmarked", () => {
+  const { sampleSurvey, SURVEY_MAX_RANGE } = loadSource("survey-surface");
+  const origin = new Cesium.Cartesian3(0, 0, 100);
+  const result = sampleSurvey(origin, new Cesium.Cartesian3(0, 0, -1), ray => Cesium.Ray.getPoint(ray, -ray.origin.z / ray.direction.z));
+  assert.equal(result.hits.length, 12);
+  for (const sample of result.hits) assert(Math.abs(sample.hit.z) < 1e-6);
+  const empty = sampleSurvey(origin, new Cesium.Cartesian3(0, 0, -1), () => undefined);
+  assert.equal(empty.centerHit, undefined);
+  assert(empty.hits.every(item => !item.hit && Math.abs(Cesium.Cartesian3.distance(origin, item.end) - SURVEY_MAX_RANGE) < 1e-6));
+});
+
+test("Survey mesh uses underside mount and records only surface hits", () => {
   const entities = new Cesium.EntityCollection();
-  const fleet = new Fleet({ entities });
-  const normal = fleet.deploy(home);
+  let hits = false;
+  const viewer = { entities, scene: { globe: { show: false }, pickFromRay: (ray, excluded, width) => {
+    assert.equal(excluded, entities.values);
+    return width === 0.1 && hits ? { position: Cesium.Ray.getPoint(ray, 120) } : undefined;
+  } } };
+  const fleet = new Fleet(viewer);
   const survey = fleet.deploy(home, "survey");
-  assert.equal(normal.droneType, "normal");
-  assert.equal(entities.getById(`${normal.id}_survey_cone`), undefined);
-  const cone = entities.getById(`${survey.id}_survey_cone`);
-  survey.setManualControl(true);
-  for (const heading of [0, Math.PI / 2, Math.PI]) {
-    survey.moveManually(0, 0, 0, 0.1, heading);
-    const body = entities.getById(survey.id).position.getValue();
-    const rotation = Cesium.Matrix3.fromQuaternion(cone.orientation.getValue());
-    const direction = Cesium.Matrix3.multiplyByVector(rotation, Cesium.Cartesian3.UNIT_Z, new Cesium.Cartesian3());
-    const apex = Cesium.Cartesian3.subtract(cone.position.getValue(), Cesium.Cartesian3.multiplyByScalar(direction, 40, new Cesium.Cartesian3()), new Cesium.Cartesian3());
-    const mount = Cesium.Matrix4.multiplyByPoint(Cesium.Transforms.eastNorthUpToFixedFrame(body), new Cesium.Cartesian3(0, 0, -2), new Cesium.Cartesian3());
-    assert(Cesium.Cartesian3.distance(apex, mount) < 1e-6);
-    const expected = Cesium.Matrix4.multiplyByPointAsVector(Cesium.Transforms.eastNorthUpToFixedFrame(body), new Cesium.Cartesian3(Math.sin(heading) * 0.5, Math.cos(heading) * 0.5, -Math.sqrt(3) / 2), new Cesium.Cartesian3());
-    assert(Cesium.Cartesian3.distance(direction, expected) < 1e-6);
-  }
+  survey.setManualControl(true); survey.moveManually(0, 1, 0, 0.1);
+  survey.updateSurvey(0);
+  assert.equal(survey.coverageCount, 0);
+  hits = true; survey.updateSurvey(500);
+  assert.equal(survey.coverageCount, 12);
+  const side = entities.getById(`${survey.id}_survey_cone_0`);
+  const points = side.polygon.hierarchy.getValue().positions;
+  const body = entities.getById(survey.id).position.getValue();
+  const mount = Cesium.Matrix4.multiplyByPoint(Cesium.Transforms.eastNorthUpToFixedFrame(body), new Cesium.Cartesian3(0, 0, -2), new Cesium.Cartesian3());
+  assert(Cesium.Cartesian3.distance(points[0], mount) < 1e-6);
+  assert(Math.abs(Cesium.Cartesian3.distance(points[0], points[1]) - 120) < 1e-6);
   survey.setColor("#ff6666");
-  const pitches = [];
-  for (const up of [-1, 0, 1]) {
-    survey.stopManualMotion();
-    survey.moveManually(0, 1, up, 0.1, 0);
-    const body = entities.getById(survey.id).position.getValue();
-    const worldDirection = Cesium.Matrix3.multiplyByVector(Cesium.Matrix3.fromQuaternion(cone.orientation.getValue()), Cesium.Cartesian3.UNIT_Z, new Cesium.Cartesian3());
-    const localDirection = Cesium.Matrix4.multiplyByPointAsVector(Cesium.Matrix4.inverseTransformation(Cesium.Transforms.eastNorthUpToFixedFrame(body), new Cesium.Matrix4()), worldDirection, new Cesium.Cartesian3());
-    const pitch = Math.asin(localDirection.z);
-    pitches.push(pitch);
-    assert(pitch + Math.atan2(30, 80) < 0, "entire cone must stay below its underside mount");
-  }
-  assert(pitches[0] < pitches[1] && pitches[1] < pitches[2], "descent and ascent change camera pitch");
-  assert.equal(cone.cylinder.material.color.getValue().withAlpha(1).toCssHexString(), "#ff6666");
-  assert(fleet.deployBulk(home, 2, 30, "survey").every(d => d.droneType === "survey"));
+  assert.equal(side.polygon.material.color.getValue().withAlpha(1).toCssHexString(), "#ff6666");
+  fleet.checkpoint("reset coverage");
+  fleet.clear(); fleet.undo();
+  assert.equal(fleet.drones.get(survey.id).coverageCount, 12);
   fleet.clear(); assert.equal(entities.values.length, 0);
 });
 
