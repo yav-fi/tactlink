@@ -55,6 +55,30 @@ class MissionManager:
         )
         return task
 
+    def cancel_task(self, task_id: str, now: float, reason: str = "operator amendment") -> MissionTask | None:
+        """Withdraw a task from central allocation at the operator's request.
+
+        Nodes already executing it keep their current leg until their lease
+        lapses; mission control stops allocating to it immediately.
+        """
+        task = self.tasks.get(task_id)
+        if task is None or task.status in {TaskStatus.COMPLETED, TaskStatus.CANCELLED}:
+            return task
+        released = list(task.assigned_nodes)
+        task.status = TaskStatus.CANCELLED
+        task.assigned_nodes = []
+        self.pending_replan = True
+        self.events.emit(
+            now,
+            EventCategory.MISSION,
+            EventType.TASK_RELEASED,
+            "mission-control",
+            f"Cancelled {task.id} ({reason})",
+            [task.id, *released],
+            {"reason": reason, "released_nodes": released},
+        )
+        return task
+
     def announcement(self, task: MissionTask, now: float, sender_id: str = "mission-control") -> NetworkMessage:
         self._sequence += 1
         return NetworkMessage(
@@ -187,6 +211,8 @@ class MissionManager:
             )
         self.unavailable.update(observed_unavailable)
         for task_id, task in self.tasks.items():
+            if task.status == TaskStatus.CANCELLED:
+                continue
             previous_assignment = list(task.assigned_nodes)
             claims: dict[tuple[str, ...], int] = {}
             completed = False

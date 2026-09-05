@@ -8,4 +8,5 @@ __all__ = [
     "gesture_mission",
     "llm_mission",
     "mission_client",
+    "mission_compiler",
 ]
