@@ -528,12 +528,13 @@ viewer.clock.onTick.addEventListener((clock) => {
   fleet.updateReplay(cameraTime / 1000);
   replayTime.textContent = `Elapsed: ${fleet.replay.elapsed.toFixed(2)} s`;
   if (fleet.replay.total) {
-    replayStatus.textContent = `${fleet.replay.arrived} / ${fleet.replay.total} arrived${fleet.replay.running ? " · Playing at assigned speeds" : " · All paths complete"}`;
+    replayStatus.textContent = `${fleet.replay.arrived} / ${fleet.replay.total} arrived${fleet.blockedCount ? ` · ${fleet.blockedCount} blocked by obstacles` : ""}${fleet.replay.running ? " · Playing at assigned speeds" : fleet.blockedCount ? " · Playback stopped" : " · All paths complete"}`;
   }
   if (wasPlaying && !fleet.replay.running) refreshFleet();
   updateFreeCamera(Math.min(0.1, Math.max(0, (cameraTime - previousCameraTime) / 1000)));
   previousCameraTime = cameraTime;
   const snapshot = drone?.snapshot();
+  if (controllingDrone && drone?.collisionBlocked) commandStatus.textContent = "Obstacle ahead: movement stopped. Steer away or climb to continue.";
   if (!snapshot) { stateElement.innerHTML = "<dt>Fleet</dt><dd>No drones deployed</dd>"; return; }
   stateElement.innerHTML = [
     ["State", snapshot.state], ["Position", `${snapshot.latitude.toFixed(5)}, ${snapshot.longitude.toFixed(5)}`], ["Altitude", `${snapshot.altitude.toFixed(0)} m`], ["Step", snapshot.totalSteps ? `${snapshot.currentStep} / ${snapshot.totalSteps}` : "—"],

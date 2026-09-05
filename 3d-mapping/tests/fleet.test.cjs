@@ -20,6 +20,49 @@ function loadSource(name) {
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
 
+test("wall and ground checks block manual motion, batches, missions and replay", () => {
+  const entities = new Cesium.EntityCollection();
+  let obstacle = false;
+  const viewer = { entities, scene: {
+    globe: { getHeight: () => 0, pick: () => undefined },
+    pickFromRay(ray, excluded, width) {
+      assert.equal(excluded, entities.values);
+      assert.equal(width, 20);
+      return obstacle ? { position: Cesium.Ray.getPoint(ray, 1) } : undefined;
+    },
+  } };
+  const fleet = new Fleet(viewer);
+  const members = fleet.deployBulk(home, 2, 30);
+  fleet.takeBatch(members.map(d => d.id), 1000);
+  const before = members.map(d => d.snapshot());
+  obstacle = true;
+  fleet.moveBatch(1, 0, 0, 0.1, 0);
+  members.forEach((d, i) => { assert.deepEqual(d.snapshot(), before[i]); assert(d.collisionBlocked); });
+  obstacle = false;
+  fleet.moveBatch(-1, 0, 0, 0.1, 0);
+  assert(members[0].snapshot().longitude < before[0].longitude);
+  fleet.releaseBatch();
+  const drone = members[0];
+  const parked = drone.snapshot();
+  obstacle = true;
+  const destination = { ...home, longitude: home.longitude + 0.01 };
+  drone.run({ drone_id: drone.id, mission: [{ action: "goto", ...destination, speed_mps: 10000 }] });
+  drone.update(0.1);
+  assert.equal(drone.snapshot().state, "BLOCKED");
+  assert.equal(drone.snapshot().longitude, parked.longitude);
+  fleet.commandGroup([drone.id], destination, 30, 0);
+  fleet.updateReplay(1000);
+  assert.equal(fleet.blockedCount, 1);
+  assert.equal(fleet.replay.arrived, 0);
+  assert.equal(fleet.replay.running, false);
+  assert.equal(drone.snapshot().longitude, parked.longitude);
+  obstacle = false;
+  viewer.scene.globe.getHeight = () => 75;
+  drone.setManualControl(true);
+  drone.moveManually(0, 0, -1, 0.1);
+  assert.equal(drone.collisionBlocked, true);
+});
+
 test("batch control shares speed and movement, releases markers and resumes preserved paths", () => {
   const entities = new Cesium.EntityCollection();
   const fleet = new Fleet({ entities });

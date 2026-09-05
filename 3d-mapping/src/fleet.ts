@@ -72,8 +72,15 @@ export class Fleet {
   }
 
   moveBatch(east: number, north: number, up: number, seconds: number, heading: number): void {
-    for (const member of this.manualBatch) member.moveManually(east, north, up, seconds, heading);
+    const moves = this.manualBatch.map(member => member.prepareManualMove(east, north, up, seconds, heading));
+    if (moves.some(move => !move)) {
+      for (const member of this.manualBatch) { member.stopManualMotion(); member.collisionBlocked = true; }
+      return;
+    }
+    this.manualBatch.forEach((member, i) => member.applyManualMove(moves[i]!));
   }
+
+  get blockedCount(): number { return this.replayFlights.filter(flight => flight.drone.replayBlocked).length; }
 
   releaseBatch(): void {
     if (!this.manualBatch.length) return;
@@ -143,9 +150,9 @@ export class Fleet {
     this.replay.arrived = 0;
     for (const flight of this.replayFlights) {
       flight.drone.replayAt(this.replay.elapsed, this.groupFlight);
-      if (this.replay.elapsed >= flight.duration) this.replay.arrived++;
+      if (!flight.drone.replayBlocked && this.replay.elapsed >= flight.duration) this.replay.arrived++;
     }
-    this.replay.running = this.replay.elapsed < this.replay.duration;
+    this.replay.running = this.replay.arrived + this.blockedCount < this.replay.total;
   }
 
   stopReplay(): void {

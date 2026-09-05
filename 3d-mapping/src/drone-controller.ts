@@ -1,5 +1,6 @@
 import * as Cesium from "cesium";
 import type { Coordinates, MissionCommand, MissionStep } from "./mission";
+import { movementBlocked } from "./collision";
 
 export type DroneSnapshot = Coordinates & { state: string; currentStep: number; totalSteps: number };
 
@@ -32,6 +33,9 @@ function interpolate(a: Coordinates, b: Coordinates, fraction: number): Coordina
 }
 
 export class DroneController {
+  collisionBlocked = false;
+  replayBlocked = false;
+  private replayDistance = 0;
   private readonly home: Coordinates;
   private position: Coordinates;
   private mission: MissionCommand | null = null;
@@ -102,6 +106,7 @@ export class DroneController {
   }
 
   run(command: MissionCommand): void {
+    this.collisionBlocked = false;
     this.hideReplay();
     this.mission = command;
     this.stepIndex = 0;
@@ -192,18 +197,35 @@ export class DroneController {
   }
 
   moveManually(east: number, north: number, up: number, seconds: number, heading = 0): void {
+    const next = this.prepareManualMove(east, north, up, seconds, heading);
+    if (next) this.applyManualMove(next);
+  }
+
+  prepareManualMove(east: number, north: number, up: number, seconds: number, heading = 0): Coordinates | undefined {
     if (this.state !== "MANUAL") return;
     this.manualHeading = heading;
     const scale = this.configuredSpeedMph * METERS_PER_SECOND_PER_MPH / Math.max(1, Math.hypot(east, north, up));
     const target = new Cesium.Cartesian3(east * scale, north * scale, up * scale);
     const damping = target.equals(Cesium.Cartesian3.ZERO) ? 16 : 10;
     Cesium.Cartesian3.lerp(this.manualVelocity, target, 1 - Math.exp(-damping * seconds), this.manualVelocity);
-    this.position = destinationPoint(this.position, this.manualVelocity.x * seconds, this.manualVelocity.y * seconds);
-    this.position.altitude += this.manualVelocity.z * seconds;
+    const next = destinationPoint(this.position, this.manualVelocity.x * seconds, this.manualVelocity.y * seconds);
+    next.altitude += this.manualVelocity.z * seconds;
+    this.collisionBlocked = this.blocksMove(this.position, next);
+    if (this.collisionBlocked) { this.stopManualMotion(); return; }
+    return next;
+  }
+
+  applyManualMove(next: Coordinates): void {
+    this.position = next;
     this.syncEntity();
   }
 
+  private blocksMove(from: Coordinates, to: Coordinates): boolean {
+    return movementBlocked(this.viewer, Cesium.Cartesian3.fromDegrees(from.longitude, from.latitude, from.altitude), Cesium.Cartesian3.fromDegrees(to.longitude, to.latitude, to.altitude));
+  }
+
   reset(): void {
+    this.collisionBlocked = this.replayBlocked = false;
     this.hideReplay();
     this.lastRenderedPosition = undefined;
     this.travelDirection = undefined;
@@ -234,6 +256,9 @@ export class DroneController {
   }
 
   beginReplay(): number | null {
+    this.replayBlocked = false;
+    this.collisionBlocked = false;
+    this.replayDistance = 0;
     this.hideReplay();
     this.stopManualMotion();
     this.mission = null;
@@ -257,7 +282,7 @@ export class DroneController {
   }
 
   replayAt(elapsedSeconds: number, moveDrone = false): void {
-    if (!this.replayEntity) return;
+    if (!this.replayEntity || this.replayBlocked) return;
     const length = this.replayDistances.at(-1)!;
     const distance = elapsedSeconds >= length / this.replaySpeed ? length : Math.max(0, elapsedSeconds) * this.replaySpeed;
     let low = 1, high = this.replayDistances.length - 1;
@@ -267,7 +292,19 @@ export class DroneController {
     }
     const start = this.replayDistances[low - 1];
     const span = this.replayDistances[low] - start;
-    this.replayPosition = Cesium.Cartesian3.lerp(this.replayPoints[low - 1], this.replayPoints[low], span > 0 ? (distance - start) / span : 0, new Cesium.Cartesian3());
+    const next = Cesium.Cartesian3.lerp(this.replayPoints[low - 1], this.replayPoints[low], span > 0 ? (distance - start) / span : 0, new Cesium.Cartesian3());
+    let previous = this.replayPosition;
+    const crossed = this.replayPoints.filter((_, i) => this.replayDistances[i] > this.replayDistance && this.replayDistances[i] < distance);
+    for (const point of [...crossed, next]) {
+      if (movementBlocked(this.viewer, previous, point)) {
+        this.replayBlocked = this.collisionBlocked = true;
+        this.state = "BLOCKED";
+        return;
+      }
+      previous = point;
+    }
+    this.replayPosition = next;
+    this.replayDistance = distance;
     if (moveDrone) {
       const geographic = Cesium.Cartographic.fromCartesian(this.replayPosition);
       this.position = { latitude: Cesium.Math.toDegrees(geographic.latitude), longitude: Cesium.Math.toDegrees(geographic.longitude), altitude: geographic.height };
@@ -283,6 +320,7 @@ export class DroneController {
   }
 
   private updateStep(step: MissionStep, deltaSeconds: number): void {
+    const previous = { ...this.position };
     if (step.action === "goto" || step.action === "return_home") {
       const target = step.action === "goto" ? step : this.home;
       const speed = step.speed_mps ?? this.configuredSpeedMph * METERS_PER_SECOND_PER_MPH;
@@ -303,6 +341,13 @@ export class DroneController {
       const angle = direction * ((this.stepElapsed / step.duration_s) * Cesium.Math.TWO_PI);
       this.position = destinationPoint(this.orbitCenter, Math.cos(angle) * step.radius_m, Math.sin(angle) * step.radius_m);
       if (this.stepElapsed >= step.duration_s) this.advance();
+    }
+    this.collisionBlocked = this.blocksMove(previous, this.position);
+    if (this.collisionBlocked) {
+      this.position = previous;
+      this.mission = null;
+      this.state = "BLOCKED";
+      this.stopManualMotion();
     }
     this.syncEntity();
   }
