@@ -45,8 +45,10 @@ export class DroneController {
   private trailDistances: number[] = [];
   private readonly arrows: Cesium.Entity[] = [];
   private readonly releases: Cesium.Entity[] = [];
+  private lastRenderedPosition: Cesium.Cartesian3 | undefined;
+  private travelDirection: Cesium.Cartesian3 | undefined;
 
-  constructor(private readonly viewer: Cesium.Viewer, home: Coordinates) {
+  constructor(private readonly viewer: Cesium.Viewer, home: Coordinates, private readonly color = Cesium.Color.fromCssColorString("#35e8ff")) {
     this.home = { ...home };
     this.position = { ...home };
     this.entity = viewer.entities.add({
@@ -54,13 +56,14 @@ export class DroneController {
       name: "Drone 1",
       position: new Cesium.CallbackPositionProperty((_time, result) => Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude, undefined, result), false),
       orientation: new Cesium.CallbackProperty(() => this.orientationAt(this.position), false),
-      box: {
-        dimensions: new Cesium.Cartesian3(16, 10, 4),
-        material: Cesium.Color.fromCssColorString("#35e8ff"),
-        outline: true,
-        outlineColor: Cesium.Color.WHITE,
+      polyline: {
+        positions: new Cesium.CallbackProperty(() => this.leaderPositions(), false),
+        width: 28,
+        material: new Cesium.PolylineArrowMaterialProperty(this.color),
+        arcType: Cesium.ArcType.NONE,
+        clampToGround: false,
       },
-      label: { text: "DRONE 1", font: "600 13px system-ui", fillColor: Cesium.Color.WHITE, showBackground: true, backgroundColor: Cesium.Color.fromAlpha(Cesium.Color.BLACK, 0.7), pixelOffset: new Cesium.Cartesian2(0, -28) },
+      label: { text: "DRONE 1", font: "600 13px system-ui", fillColor: this.color, showBackground: true, backgroundColor: Cesium.Color.fromAlpha(Cesium.Color.BLACK, 0.7), pixelOffset: new Cesium.Cartesian2(0, -28) },
     });
     this.originEntity = viewer.entities.add({
       id: "drone_1_origin",
@@ -68,11 +71,11 @@ export class DroneController {
       show: false,
       box: {
         dimensions: new Cesium.Cartesian3(16, 10, 4),
-        material: Cesium.Color.ORANGE.withAlpha(0.3),
+        material: this.color.withAlpha(0.3),
         outline: true,
-        outlineColor: Cesium.Color.ORANGE,
+        outlineColor: this.color,
       },
-      label: { text: "START", font: "600 13px system-ui", fillColor: Cesium.Color.ORANGE, showBackground: true, pixelOffset: new Cesium.Cartesian2(0, 28) },
+      label: { text: "START", font: "600 13px system-ui", fillColor: this.color, showBackground: true, pixelOffset: new Cesium.Cartesian2(0, 28) },
     });
     this.trailEntity = viewer.entities.add({
       id: "drone_1_trail",
@@ -80,11 +83,12 @@ export class DroneController {
       polyline: {
         positions: new Cesium.CallbackProperty(() => this.trailPoints, false),
         width: 3,
-        material: Cesium.Color.fromCssColorString("#35e8ff"),
+        material: this.color,
         arcType: Cesium.ArcType.NONE,
         clampToGround: false,
       },
     });
+    this.lastRenderedPosition = Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, home.altitude);
   }
 
   run(command: MissionCommand): void {
@@ -101,8 +105,8 @@ export class DroneController {
       this.releases.push(this.viewer.entities.add({
         id: `drone_1_release_${number}`,
         position: Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude),
-        ellipsoid: { radii: new Cesium.Cartesian3(6, 6, 6), material: Cesium.Color.ORANGE.withAlpha(0.8), outline: true, outlineColor: Cesium.Color.WHITE },
-        label: { text: `RELEASE ${number}`, font: "600 12px system-ui", fillColor: Cesium.Color.ORANGE, showBackground: true, pixelOffset: new Cesium.Cartesian2(0, 22) },
+        ellipsoid: { radii: new Cesium.Cartesian3(6, 6, 6), material: this.color.withAlpha(0.8), outline: true, outlineColor: this.color },
+        label: { text: `RELEASE ${number}`, font: "600 12px system-ui", fillColor: this.color, showBackground: true, pixelOffset: new Cesium.Cartesian2(0, 22) },
       }));
     }
     if (enabled && this.trailPoints.length === 0) {
@@ -138,6 +142,8 @@ export class DroneController {
   }
 
   reset(): void {
+    this.lastRenderedPosition = undefined;
+    this.travelDirection = undefined;
     for (const marker of [...this.releases, ...this.arrows]) this.viewer.entities.remove(marker);
     this.releases.length = 0;
     this.arrows.length = 0;
@@ -198,6 +204,10 @@ export class DroneController {
 
   private syncEntity(): void {
     const current = Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude);
+    if (this.lastRenderedPosition && Cesium.Cartesian3.distance(current, this.lastRenderedPosition) > 0.001) {
+      this.travelDirection = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(current, this.lastRenderedPosition, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+    }
+    this.lastRenderedPosition = Cesium.Cartesian3.clone(current);
     if (this.trailPoints.length >= 2) {
       // Keep an exact live endpoint, sampling the route at two-meter intervals.
       this.trailPoints[this.trailPoints.length - 1] = current;
@@ -227,7 +237,7 @@ export class DroneController {
         polyline: {
           positions: new Cesium.CallbackProperty(() => this.arrowPositions(index), false),
           width: 12,
-          material: new Cesium.PolylineArrowMaterialProperty(Cesium.Color.WHITE),
+          material: new Cesium.PolylineArrowMaterialProperty(this.color),
           arcType: Cesium.ArcType.NONE,
           clampToGround: false,
         },
@@ -244,6 +254,13 @@ export class DroneController {
     const tail = Math.max(0, head - Math.min(10, spacing * 0.45));
     if (head - tail < 0.1) return [];
     return [this.pointAlongTrail(tail), this.pointAlongTrail((head + tail) / 2), this.pointAlongTrail(head)];
+  }
+
+  private leaderPositions(): Cesium.Cartesian3[] {
+    const head = Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude);
+    const direction = this.travelDirection ?? Cesium.Matrix4.multiplyByPointAsVector(Cesium.Transforms.eastNorthUpToFixedFrame(head), new Cesium.Cartesian3(Math.sin(this.manualHeading), Math.cos(this.manualHeading), 0), new Cesium.Cartesian3());
+    const tail = Cesium.Cartesian3.subtract(head, Cesium.Cartesian3.multiplyByScalar(direction, 22, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+    return [tail, head];
   }
 
   private pointAlongTrail(distance: number): Cesium.Cartesian3 {
