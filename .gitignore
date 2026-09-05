@@ -4,9 +4,10 @@ __pycache__/
 .venv/
 venv/
 
-# Downloaded model bundles (fetched on first run)
+# Downloaded models / weights (fetched locally, never committed)
 models/
 
-# Rendered output
+# Local artifacts / rendered output
 *.png
 flight.png
+benchmark_result.json

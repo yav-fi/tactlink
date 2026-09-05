@@ -1,0 +1,1 @@
+Explain how binary search works, step by step, then write a Python implementation of it with comments explaining each part.
