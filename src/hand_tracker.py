@@ -180,12 +180,23 @@ class HandTracker:
 
     @staticmethod
     def _finger_states(pts: np.ndarray) -> tuple:
-        """(thumb, index, middle, ring, pinky) extended? - orientation agnostic."""
+        """(thumb, index, middle, ring, pinky) extended? - orientation agnostic.
+
+        A finger is extended when its two segments (mcp->pip, pip->tip) point
+        roughly the same way (straight, not curled back) and the tip sits past
+        the pip. Angle-based, so it works whatever way the hand is turned.
+        """
         wrist = pts[0]
         d = lambda i: float(np.linalg.norm(pts[i] - wrist))
+
+        def straight(mcp, pip, tip):
+            v1, v2 = pts[pip] - pts[mcp], pts[tip] - pts[pip]
+            cos = float(np.dot(v1, v2)) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-6)
+            return cos > 0.35 and d(tip) > d(pip) * 1.02
+
         thumb = (d(4) > d(2) * 1.05 and np.linalg.norm(pts[4] - pts[5]) >
                  np.linalg.norm(pts[3] - pts[5]) * 1.1)
-        rest = tuple(d(tip) > d(pip) * 1.08 and d(tip) > d(mcp) * 1.15
+        rest = tuple(straight(mcp, pip, tip)
                      for tip, pip, mcp in zip(_FINGER_TIPS[1:], _FINGER_PIPS[1:],
                                               (5, 9, 13, 17)))
         return (thumb,) + rest

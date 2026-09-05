@@ -142,9 +142,18 @@ def _gesture_check_panel(hand, gstate, log, width: int = 640, height: int = 720)
         cv2.putText(panel, f"combo: {gstate.sequence_hint}", (24, 168), font, 0.6,
                     (90, 200, 255), 1, cv2.LINE_AA)
 
-    cv2.putText(panel, "fired:", (24, 220), font, 0.55, (150, 150, 150), 1, cv2.LINE_AA)
-    for i, line in enumerate(list(log)[-14:]):
-        cv2.putText(panel, line, (24, 248 + i * 26), font, 0.55, (235, 235, 235), 1,
+    # Finger / orientation debug for the geometric detectors.
+    from finger_swing import _orientation
+    names = "TIMRP"
+    fs = "".join(names[i] if up else "-" for i, up in enumerate(hand.fingers)) \
+        if hand.present else "-----"
+    orient = _orientation(hand.point_dir) or "?" if hand.present else "-"
+    cv2.putText(panel, f"fingers {fs}   orient {orient}", (24, 196), font, 0.55,
+                (200, 200, 120), 1, cv2.LINE_AA)
+
+    cv2.putText(panel, "fired:", (24, 232), font, 0.55, (150, 150, 150), 1, cv2.LINE_AA)
+    for i, line in enumerate(list(log)[-13:]):
+        cv2.putText(panel, line, (24, 258 + i * 26), font, 0.55, (235, 235, 235), 1,
                     cv2.LINE_AA)
     return panel
 
