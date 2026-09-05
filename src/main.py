@@ -32,14 +32,20 @@ from gestures import GestureInterpreter
 from simulator import QuadSimulator
 from visualizer import Visualizer
 
-# ``python src/main.py`` puts src/ rather than the repository root on sys.path.
-# Add the root only for importing the sibling integration package.
-_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
 
-from integrations.gesture_mission import GestureMissionAdapter
-from integrations.mission_client import MissionClient, MissionClientError
+def _load_mission_integration():
+    """Import the mission-runtime adapters lazily.
+
+    They pull in the ``simulation`` package (pydantic etc.), so the standalone
+    simulator/demo path must not import them - only ``--mission-url`` needs them.
+    """
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    from integrations.gesture_mission import GestureMissionAdapter
+    from integrations.mission_client import MissionClient, MissionClientError
+
+    return GestureMissionAdapter, MissionClient, MissionClientError
 
 # (start, end) seconds -> gesture held during the demo timeline.
 _DEMO_GESTURES = [
@@ -107,8 +113,11 @@ def run(args: argparse.Namespace) -> int:
     runtime_mode = bool(args.mission_url)
     sim = None if runtime_mode else QuadSimulator()
     viz = None if runtime_mode else Visualizer()
-    mission_adapter = GestureMissionAdapter() if args.mission_url else None
-    mission_client = MissionClient(args.mission_url) if args.mission_url else None
+    mission_adapter = mission_client = mission_error_cls = None
+    if runtime_mode:
+        adapter_cls, client_cls, mission_error_cls = _load_mission_integration()
+        mission_adapter = adapter_cls()
+        mission_client = client_cls(args.mission_url)
     runtime_status = f"connected: {args.mission_url}" if runtime_mode else ""
 
     tracker = None
@@ -176,7 +185,7 @@ def run(args: argparse.Namespace) -> int:
                         mission_id = created.get("id", mission.type)
                         runtime_status = f"submitted: {mission_id}"
                         print(f"runtime mission: {mission_id}")
-                    except MissionClientError as exc:
+                    except mission_error_cls as exc:
                         runtime_status = f"submission rejected: {exc}"
                         print(f"runtime mission rejected: {exc}")
 
