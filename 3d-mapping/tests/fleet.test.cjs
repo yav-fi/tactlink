@@ -20,6 +20,55 @@ function loadSource(name) {
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
 
+test("undo restores deployed types, paths, coverage, groups and release markers after reset", () => {
+  const entities = new Cesium.EntityCollection();
+  const fleet = new Fleet({ entities });
+  fleet.checkpoint("deployment");
+  const drone = fleet.deploy(home, "survey");
+  fleet.takeBatch([drone.id], 75);
+  for (let i = 0; i < 120; i++) fleet.moveBatch(1, 0, 0, 1 / 60, 0);
+  fleet.releaseBatch();
+  fleet.saveGroup("A", [drone.id]);
+  const before = drone.capture();
+  assert(before.coverage.length > 1);
+  fleet.checkpoint("reset all");
+  fleet.clear(); assert.equal(entities.values.length, 0);
+  assert.equal(fleet.undo(), "reset all");
+  const restored = fleet.drones.get(drone.id);
+  assert.equal(restored.droneType, "survey");
+  assert.equal(restored.speedMph, 75);
+  assert.deepEqual(restored.capture().points, before.points);
+  assert.deepEqual(restored.capture().position, before.position);
+  assert.equal(restored.coverageCount, before.coverage.length);
+  assert(entities.getById(`${drone.id}_release_1`));
+  assert.equal(fleet.batchMarkers.size, 1);
+  assert.deepEqual(fleet.groups.get("A").ids, [drone.id]);
+  fleet.checkpoint("speed"); restored.speedMph = 10;
+  fleet.undo(); assert.equal(fleet.drones.get(drone.id).speedMph, 75);
+  fleet.undo(); assert.equal(fleet.drones.size, 0);
+  assert.equal(entities.values.length, 0);
+});
+
+test("pause freezes playback position and elapsed time and resume excludes paused time", () => {
+  const entities = new Cesium.EntityCollection();
+  const fleet = new Fleet({ entities });
+  const drone = fleet.deploy(home);
+  fleet.commandGroup([drone.id], { ...home, longitude: home.longitude + 0.01 }, 30, 100);
+  fleet.togglePause(101);
+  assert.equal(fleet.paused, true);
+  const before = drone.snapshot();
+  fleet.updateReplay(1000);
+  assert.equal(fleet.replay.elapsed, 1);
+  assert.deepEqual(drone.snapshot(), before);
+  fleet.togglePause(1000);
+  fleet.updateReplay(1001);
+  assert.equal(fleet.replay.elapsed, 2);
+  assert.notEqual(drone.snapshot().longitude, before.longitude);
+  fleet.togglePause(1001); fleet.stopReplay();
+  assert.equal(fleet.paused, false);
+  assert.equal(fleet.replay.running, false);
+});
+
 test("Survey cone stays attached, turns with heading, follows color and cleans up", () => {
   const entities = new Cesium.EntityCollection();
   const fleet = new Fleet({ entities });

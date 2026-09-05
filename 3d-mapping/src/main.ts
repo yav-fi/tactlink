@@ -80,6 +80,7 @@ speedInput.addEventListener("input", () => {
     return;
   }
   speedInput.removeAttribute("aria-invalid");
+  if (drone.speedMph !== value) fleet.checkpoint("speed change");
   drone.speedMph = value;
   speedStatus.textContent = `${value} mph · ${(value * 0.44704).toFixed(2)} m/s`;
 });
@@ -260,6 +261,7 @@ function beginBatchControl(ids: string[]): void {
   const speed = batchSpeedInput.valueAsNumber;
   if (!Number.isFinite(speed) || speed <= 0) { batchStatus.textContent = "Enter a positive batch speed in mph."; return; }
   flyToFreeCameraOverview();
+  fleet.checkpoint("batch flight");
   fleet.takeBatch(ids, speed);
   drone = fleet.manualBatch[0];
   selectedIds.clear(); for (const id of ids) selectedIds.add(id);
@@ -277,6 +279,8 @@ batchControlButton.addEventListener("click", () => {
 });
 document.querySelector<HTMLButtonElement>("#apply-batch-speed")!.addEventListener("click", () => {
   try {
+    if (!Number.isFinite(batchSpeedInput.valueAsNumber) || batchSpeedInput.valueAsNumber <= 0) throw new Error("Enter a positive speed.");
+    fleet.checkpoint("batch speed change");
     fleet.setBatchSpeed(fleet.manualBatch.length ? fleet.manualBatch.map(d => d.id) : [...selectedIds], batchSpeedInput.valueAsNumber);
     refreshFleet(); batchStatus.textContent = `Batch speed set to ${batchSpeedInput.value} mph.`;
   } catch (error) { batchStatus.textContent = error instanceof Error ? error.message : "Invalid speed."; }
@@ -287,6 +291,8 @@ savedGroups.addEventListener("change", () => { selectedIds.clear(); for (const i
 document.querySelector<HTMLButtonElement>("#save-group")!.addEventListener("click", () => {
   try {
     const name = document.querySelector<HTMLInputElement>("#group-name")!.value.trim();
+    if (!name || !selectedIds.size) throw new Error("Select drones and enter a group name.");
+    fleet.checkpoint("save group");
     fleet.saveGroup(name, [...selectedIds]); refreshFleet(); savedGroups.value = name;
     groupStatus.textContent = `${name} saved. Its drones now share a color.`;
   } catch (error) { groupStatus.textContent = error instanceof Error ? error.message : "Unable to save group."; }
@@ -402,6 +408,7 @@ cameraHandler.setInputAction((event: { position: Cesium.Cartesian2 }) => {
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 confirmDeployment.addEventListener("click", () => {
   if (!deploying || !pickedSurface || confirmDeployment.disabled) return;
+  fleet.checkpoint(placementMode === "command" ? "destination command" : "deployment");
   const center = { latitude: Cesium.Math.toDegrees(pickedSurface.latitude), longitude: Cesium.Math.toDegrees(pickedSurface.longitude), altitude: pickedSurface.height + heightInput.valueAsNumber };
   if (placementMode === "command") {
     fleet.commandGroup(pendingIds, center, spacingInput.valueAsNumber, performance.now() / 1000, pendingGroup);
@@ -433,6 +440,7 @@ function selectDrone(id: string): void {
 }
 droneSelect.addEventListener("change", () => selectDrone(droneSelect.value));
 document.querySelector<HTMLButtonElement>("#reset-all")!.addEventListener("click", () => {
+  fleet.checkpoint("reset all");
   flyToFreeCameraOverview();
   cancelDeployment();
   fleet.clear();
@@ -466,6 +474,7 @@ document.querySelector<HTMLButtonElement>("#run-mission")!.addEventListener("cli
     const target = fleet.drones.get(mission.drone_id);
     if (!target) throw new Error(`Deploy ${mission.drone_id} before sending it a mission.`);
     if (controllingDrone) flyToFreeCameraOverview();
+    fleet.checkpoint("mission");
     target.run(mission);
     commandStatus.textContent = "Mission accepted.";
   } catch (error) {
@@ -473,6 +482,7 @@ document.querySelector<HTMLButtonElement>("#run-mission")!.addEventListener("cli
   }
 });
 document.querySelector<HTMLButtonElement>("#reset-mission")!.addEventListener("click", () => {
+  fleet.checkpoint("reset drone");
   if (controllingDrone) flyToFreeCameraOverview();
   drone?.reset();
   commandStatus.textContent = "Drone reset to its home coordinate.";
@@ -492,6 +502,7 @@ controlDroneButton.addEventListener("click", () => {
   }
   flyToFreeCameraOverview();
   controllingDrone = true;
+  fleet.checkpoint("manual flight");
   drone.setManualControl(true);
   viewer.scene.screenSpaceCameraController.enableInputs = false;
   controlDroneButton.textContent = "Release drone";
@@ -559,6 +570,36 @@ function updateFreeCamera(deltaSeconds: number): void {
 }
 
 let previousTime = Cesium.JulianDate.clone(viewer.clock.currentTime);
+const undoButton = document.querySelector<HTMLButtonElement>("#undo-action")!;
+const pauseButton = document.querySelector<HTMLButtonElement>("#pause-paths")!;
+undoButton.addEventListener("click", () => {
+  const id = drone?.id;
+  flyToFreeCameraOverview(); cancelDeployment();
+  const label = fleet.undo();
+  drone = fleet.drones.get(id ?? "") ?? fleet.drones.values().next().value;
+  for (const selected of selectedIds) if (!fleet.drones.has(selected)) selectedIds.delete(selected);
+  refreshFleet(); commandStatus.textContent = label ? `Undid ${label}. Drones restored at rest.` : "Nothing to undo.";
+});
+pauseButton.addEventListener("click", () => { fleet.togglePause(performance.now() / 1000); refreshFleet(); });
+let overviewTime = 0;
+function updateOverview(now: number): void {
+  undoButton.disabled = !fleet.undoLabel;
+  undoButton.textContent = fleet.undoLabel ? `Undo ${fleet.undoLabel}` : "Undo last action";
+  pauseButton.disabled = !fleet.replay.running;
+  pauseButton.textContent = fleet.paused ? "Resume playback" : "Pause playback";
+  if (now - overviewTime < 250) return;
+  overviewTime = now;
+  const container = document.querySelector<HTMLDivElement>("#fleet-overview")!;
+  container.replaceChildren();
+  for (const member of fleet.drones.values()) {
+    const card = document.createElement("div"); card.className = "fleet-card"; card.style.borderLeftColor = member.colorHex;
+    const title = document.createElement("strong"); title.textContent = `${member.id.replace("_", " ")} · ${member.droneType}`;
+    const detail = document.createElement("p");
+    const route = member.routeLength;
+    detail.textContent = `${member.collisionBlocked ? "Obstacle stopped" : member.snapshot().state} · ${member.speedMph} mph · ${route.toFixed(0)} m route · ${(route / (member.speedMph * 0.44704)).toFixed(1)} s estimated${member.droneType === "survey" ? ` · ${member.coverageCount} coverage patches` : ""}`;
+    card.append(title, detail); container.append(card);
+  }
+}
 let previousCameraTime = performance.now();
 viewer.clock.onTick.addEventListener((clock) => {
   const deltaSeconds = Math.max(0, Math.min(0.1, Cesium.JulianDate.secondsDifference(clock.currentTime, previousTime)));
@@ -569,11 +610,12 @@ viewer.clock.onTick.addEventListener((clock) => {
   fleet.updateReplay(cameraTime / 1000);
   replayTime.textContent = `Elapsed: ${fleet.replay.elapsed.toFixed(2)} s`;
   if (fleet.replay.total) {
-    replayStatus.textContent = `${fleet.replay.arrived} / ${fleet.replay.total} arrived${fleet.blockedCount ? ` · ${fleet.blockedCount} blocked by obstacles` : ""}${fleet.replay.running ? " · Playing at assigned speeds" : fleet.blockedCount ? " · Playback stopped" : " · All paths complete"}`;
+    replayStatus.textContent = `${fleet.replay.arrived} / ${fleet.replay.total} arrived${fleet.blockedCount ? ` · ${fleet.blockedCount} blocked by obstacles` : ""}${fleet.paused ? " · Paused" : fleet.replay.running ? " · Playing at assigned speeds" : fleet.blockedCount ? " · Playback stopped" : " · All paths complete"}`;
   }
   if (wasPlaying && !fleet.replay.running) refreshFleet();
   updateFreeCamera(Math.min(0.1, Math.max(0, (cameraTime - previousCameraTime) / 1000)));
   previousCameraTime = cameraTime;
+  updateOverview(cameraTime);
   const snapshot = drone?.snapshot();
   if (controllingDrone) {
     commandStatus.textContent = drone?.collisionBlocked

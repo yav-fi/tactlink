@@ -19,6 +19,10 @@ To load Google Photorealistic 3D Tiles, create a Cesium ion token with that data
 
 ## Mission contract
 
+**Undo** restores up to 20 recent deployment, speed, group, mission, reset or manual-flight edits. A flight session is one undo action; restored drones are parked, with their paths, release markers and Survey patches preserved. Undo does not resume an interrupted mission or playback. **Pause playback / Resume playback** freezes and continues both recorded-path playback and destination-command flights without counting paused time.
+
+Survey flights leave approximate ground shading from projected cone-rim footprints, sampled every 10 m and capped at 500 patches per drone (oldest patches are removed). This is not confirmed visibility or terrain-occlusion analysis. Reset clears patches; undo can restore them. The **Fleet overview** lists drone type, state, assigned speed, route distance, estimated route duration and Survey patch count. Duration estimates exclude acceleration, stops and obstacle detours.
+
 Choose **Normal** or **Survey** during single or bulk deployment. Normal drones retain the existing controls. Survey drones add a translucent camera cone mounted 2 m underneath the drone, pitched 60° down in level flight and adjusted for ascent/descent (limited to 30–85° down) (80 m long, 30 m radius at its far end) that follows heading, movement, playback and drone color. It is a field-of-view illustration, not object detection or visibility/occlusion analysis. Both types show a four-second orange **COLLISION — STOPPED** marker at the stopped position when an obstacle blocks movement; reset clears it. Drones remain controllable after manual collisions.
 
 Photorealistic-map collisions use the tile mesh, not the hidden fallback globe: valid flight positions can have negative ellipsoid heights. Failed geometry queries display a warning rather than freezing movement; building protection is unavailable while those queries fail. Fallback-globe ground checks still run independently, and drones starting inside the clearance margin can climb out.

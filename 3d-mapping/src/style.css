@@ -10,6 +10,10 @@
 .mission-panel > section { border-top: 1px solid #294359; margin-top: 16px; padding-top: 2px; }
 .actions > button { flex: 1 1 auto; }
 #panel-batches > button { width: 100%; }
+#undo-action { margin-top: 12px; width: 100%; }
+#fleet-overview { max-height: 240px; overflow-y: auto; }
+.fleet-card { border-left: 3px solid; padding: 8px 10px; margin-bottom: 8px; background: #102438; border-radius: 5px; font-size: .78rem; }
+.fleet-card p { margin: 5px 0 0; color: #b6cadf; }
 #apply-batch-speed, #control-batch { margin-top: 8px; }
 label { display: block; margin: 8px 0 5px; font-size: .82rem; }
 input:not([type="checkbox"]), select { width: 100%; padding: 8px; color: #edf6ff; background: #203c56; border: 1px solid #31516d; border-radius: 8px; }

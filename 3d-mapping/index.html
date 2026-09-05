@@ -13,6 +13,7 @@
         <p class="eyebrow">DNHacks 2026</p>
         <h1>Drone mission control</h1>
         <p id="world-status" class="status">Starting map…</p>
+        <button id="undo-action" class="secondary" type="button" disabled>Undo last action</button>
         <div class="panel-tabs" role="tablist" aria-label="Drone controls">
           <button id="tab-drone" type="button" role="tab" aria-selected="true" aria-controls="panel-drone">Individual drone</button>
           <button id="tab-batches" type="button" role="tab" aria-selected="false" aria-controls="panel-batches" tabindex="-1">Batches</button>
@@ -102,13 +103,17 @@
           <div class="actions">
             <button id="run-all-paths" type="button">Run all paths</button>
             <button id="stop-paths" type="button" class="secondary" disabled>Stop playback</button>
+            <button id="pause-paths" type="button" class="secondary" disabled>Pause playback</button>
           </div>
           <p id="playback-time" class="hint" role="timer">Elapsed: 0.00 s</p>
           <p id="playback-status" class="hint" role="status">Record paths by piloting drones, then run them together.</p>
           <button id="reset-all" type="button" class="secondary">Reset all drones</button>
         </section>
         <section>
-          <h2>Drone state</h2>
+          <h2>Fleet overview</h2>
+          <p class="hint">Survey shading is approximate projected coverage, not confirmed visibility. Up to 500 patches per Survey drone are retained.</p>
+          <div id="fleet-overview" aria-label="Fleet overview"></div>
+          <h2>Selected drone details</h2>
           <dl id="drone-state" class="state"></dl>
         </section>
         <details class="advanced-controls"><summary>Keyboard &amp; mouse controls</summary><p class="hint">WASD moves; R/F changes height. When piloting, Q/E turns and Esc releases. In free camera, Ctrl + drag rotates. Orbit monument: drag to circle, scroll to zoom.</p></details>

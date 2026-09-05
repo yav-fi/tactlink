@@ -19,6 +19,30 @@ export class Fleet {
   readonly drones = new Map<string, DroneController>();
   private nextNumber = 1;
   private replayStart = 0;
+  paused = false;
+  private history: { label: string; drones: ReturnType<DroneController["capture"]>[]; groups: [string, { ids: string[]; color: string }][]; markers: { entity: Cesium.Entity; ids: string[] }[]; nextNumber: number; markerNumber: number }[] = [];
+  get undoLabel(): string | undefined { return this.history.at(-1)?.label; }
+  checkpoint(label: string): void {
+    this.history.push({ label, drones: [...this.drones.values()].map(d => d.capture()), groups: [...this.groups].map(([name, g]) => [name, { ...g, ids: [...g.ids] }]), markers: [...this.batchMarkers].map(([id, ids]) => ({ entity: this.viewer.entities.getById(id)!, ids: [...ids] })), nextNumber: this.nextNumber, markerNumber: this.batchMarkerNumber });
+    if (this.history.length > 20) this.history.shift();
+  }
+  undo(): string | undefined {
+    const entry = this.history.pop(); if (!entry) return;
+    this.clear();
+    for (const data of entry.drones) {
+      const drone = new DroneController(this.viewer, data.home, Cesium.Color.fromCssColorString(data.color), data.id, data.type);
+      drone.restore(data); this.drones.set(data.id, drone);
+    }
+    for (const [name, group] of entry.groups) this.groups.set(name, group);
+    for (const marker of entry.markers) { this.viewer.entities.add(marker.entity); this.batchMarkers.set(marker.entity.id, marker.ids); }
+    this.nextNumber = entry.nextNumber; this.batchMarkerNumber = entry.markerNumber;
+    return entry.label;
+  }
+  togglePause(now: number): void {
+    if (!this.replay.running) return;
+    if (this.paused) { this.replayStart = now - this.replay.elapsed; this.paused = false; }
+    else { this.updateReplay(now); this.paused = this.replay.running; }
+  }
   private groupFlight = false;
   readonly groups = new Map<string, { ids: string[]; color: string }>();
   manualBatch: DroneController[] = [];
@@ -146,7 +170,7 @@ export class Fleet {
   }
 
   updateReplay(nowSeconds: number): void {
-    if (!this.replay.running) return;
+    if (!this.replay.running || this.paused) return;
     this.replay.elapsed = Math.min(this.replay.duration, Math.max(0, nowSeconds - this.replayStart));
     this.replay.arrived = 0;
     for (const flight of this.replayFlights) {
@@ -157,6 +181,7 @@ export class Fleet {
   }
 
   stopReplay(): void {
+    this.paused = false;
     if (this.groupFlight) for (const flight of this.replayFlights) flight.drone.stopCommand();
     this.groupFlight = false;
     for (const drone of this.drones.values()) drone.hideReplay();

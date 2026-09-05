@@ -66,6 +66,50 @@ export class DroneController {
   private readonly crashIndicator: Cesium.Entity;
   private crashUntil = 0;
   private crashPosition = new Cesium.Cartesian3();
+  private coverage: Cesium.Entity[] = [];
+  private lastCoveragePosition?: Cesium.Cartesian3;
+  private coverageNumber = 0;
+
+  get routeLength(): number {
+    return this.trailPoints.slice(1).reduce((sum, p, i) => sum + Cesium.Cartesian3.distance(this.trailPoints[i], p), 0);
+  }
+  get coverageCount(): number { return this.coverage.length; }
+  capture() {
+    return { id: this.id, home: this.homeCoordinates, type: this.droneType, position: { ...this.position }, heading: this.manualHeading, color: this.colorHex, speed: this.speedMph,
+      points: this.trailPoints.map(p => Cesium.Cartesian3.clone(p)), releases: [...this.releases], coverage: [...this.coverage], coverageNumber: this.coverageNumber };
+  }
+  restore(data: ReturnType<DroneController["capture"]>): void {
+    this.position = { ...data.position }; this.manualHeading = data.heading; this.speedMph = data.speed;
+    this.trailPoints = data.points.map(p => Cesium.Cartesian3.clone(p));
+    for (const entity of data.releases) this.releases.push(this.viewer.entities.add(entity));
+    for (const entity of data.coverage) this.coverage.push(this.viewer.entities.add(entity));
+    this.coverageNumber = data.coverageNumber;
+    this.originEntity.position = new Cesium.ConstantPositionProperty(this.trailPoints[0]);
+    this.originEntity.show = this.trailEntity.show = this.trailPoints.length > 0;
+    this.lastRenderedPosition = this.visualPosition(); this.lastCoveragePosition = this.visualPosition();
+    this.state = "HOVERING"; this.preserveTrailEndpoint = true;
+    this.setColor(data.color); this.updateTrailArrows();
+  }
+
+  private recordCoverage(): void {
+    if (this.droneType !== "survey") return;
+    const position = this.visualPosition();
+    if (this.lastCoveragePosition && Cesium.Cartesian3.distance(position, this.lastCoveragePosition) < 10) return;
+    this.lastCoveragePosition = Cesium.Cartesian3.clone(position);
+    // Approximate footprint: project the cone's far rim onto the map, without visibility analysis.
+    const direction = this.viewDirection();
+    const right = Cesium.Cartesian3.normalize(Cesium.Cartesian3.cross(direction, Cesium.Cartesian3.mostOrthogonalAxis(direction, new Cesium.Cartesian3()), new Cesium.Cartesian3()), new Cesium.Cartesian3());
+    const up = Cesium.Cartesian3.cross(direction, right, new Cesium.Cartesian3());
+    const center = Cesium.Cartesian3.add(position, Cesium.Cartesian3.multiplyByScalar(direction, 80, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+    const points = Array.from({ length: 24 }, (_, i) => {
+      const angle = i / 24 * Math.PI * 2;
+      const rim = Cesium.Cartesian3.add(center, Cesium.Cartesian3.add(Cesium.Cartesian3.multiplyByScalar(right, 30 * Math.cos(angle), new Cesium.Cartesian3()), Cesium.Cartesian3.multiplyByScalar(up, 30 * Math.sin(angle), new Cesium.Cartesian3()), new Cesium.Cartesian3()), new Cesium.Cartesian3());
+      const geo = Cesium.Cartographic.fromCartesian(rim);
+      return Cesium.Cartesian3.fromRadians(geo.longitude, geo.latitude);
+    });
+    this.coverage.push(this.viewer.entities.add({ id: `${this.id}_coverage_${++this.coverageNumber}`, polygon: { hierarchy: points, material: this.color.withAlpha(0.15), classificationType: Cesium.ClassificationType.BOTH } }));
+    if (this.coverage.length > 500) this.viewer.entities.remove(this.coverage.shift()!);
+  }
 
   constructor(private readonly viewer: Cesium.Viewer, home: Coordinates, private color = Cesium.Color.fromCssColorString("#35e8ff"), readonly id = "drone_1", readonly droneType: DroneType = "normal") {
     this.home = { ...home };
@@ -204,6 +248,7 @@ export class DroneController {
     const color = Cesium.Color.fromCssColorString(hex);
     if (!color) throw new Error("Invalid drone color.");
     this.color = color;
+    for (const patch of this.coverage) patch.polygon!.material = new Cesium.ColorMaterialProperty(color.withAlpha(0.15));
     this.entity.polyline!.material = new Cesium.PolylineArrowMaterialProperty(color);
     this.trailEntity.polyline!.material = new Cesium.ColorMaterialProperty(color);
     for (const item of [this.entity, this.originEntity, ...this.releases, ...this.arrows, ...(this.replayEntity ? [this.replayEntity] : [])]) {
@@ -276,6 +321,8 @@ export class DroneController {
   }
 
   reset(): void {
+    for (const patch of this.coverage) this.viewer.entities.remove(patch);
+    this.coverage = []; this.lastCoveragePosition = undefined; this.coverageNumber = 0;
     this.crashUntil = 0;
     this.collisionBlocked = this.replayBlocked = false;
     this.hideReplay();
@@ -358,6 +405,7 @@ export class DroneController {
     }
     if (Cesium.Cartesian3.distance(this.replayPosition, next) > 0.001) this.travelDirection = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(next, this.replayPosition, new Cesium.Cartesian3()), new Cesium.Cartesian3());
     this.replayPosition = next;
+    if (distance > this.replayDistance) this.recordCoverage();
     this.replayDistance = distance;
     if (moveDrone) {
       const geographic = Cesium.Cartographic.fromCartesian(this.replayPosition);
@@ -415,6 +463,7 @@ export class DroneController {
   }
 
   private syncEntity(): void {
+    if (this.state === "MANUAL" || this.mission) this.recordCoverage();
     const current = Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude);
     if (this.lastRenderedPosition && Cesium.Cartesian3.distance(current, this.lastRenderedPosition) > 0.001) {
       this.travelDirection = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(current, this.lastRenderedPosition, new Cesium.Cartesian3()), new Cesium.Cartesian3());
