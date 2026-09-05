@@ -1,17 +1,35 @@
 #!/usr/bin/env bash
-# Downloads the project's Qwen3.8-27B-4bit MLX weights into models/.
+# Downloads a target model's MLX weights into models/.
 # Each team member runs this locally; the weights are gitignored and never committed.
+#
+# Usage: ./scripts/download_model.sh [--model qwen3.5-9b|qwen3.8-27b]
+# Default: qwen3.5-9b
 set -euo pipefail
 
-REPO_ID="mlx-community/Qwen3.8-27B-4bit"
-TARGET_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/models/qwen3.8-27b-4bit"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/model_registry.sh"
 
-if ! command -v hf >/dev/null 2>&1; then
-  echo "huggingface-cli not found. Install it with: pip install -U huggingface_hub" >&2
+MODEL="qwen3.5-9b"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --model) MODEL="$2"; shift 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+resolve_model "$MODEL"
+TARGET_DIR="$PROJECT_ROOT/$TARGET_DIR"
+
+if command -v hf >/dev/null 2>&1; then
+  DL=(hf download)
+elif command -v huggingface-cli >/dev/null 2>&1; then
+  DL=(huggingface-cli download)
+else
+  echo "hf/huggingface-cli not found. Install it with: pip install -U huggingface_hub" >&2
   exit 1
 fi
 
 mkdir -p "$TARGET_DIR"
-hf download "$REPO_ID" --local-dir "$TARGET_DIR"
+"${DL[@]}" "$TARGET_REPO" --local-dir "$TARGET_DIR"
 
-echo "Model downloaded to $TARGET_DIR"
+echo "Model ($MODEL) downloaded to $TARGET_DIR"

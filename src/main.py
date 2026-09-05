@@ -55,7 +55,11 @@ _DEMO_GESTURES = [
     (16.5, 17.2, "Open_Palm"),    # combo: open ->
     (17.6, 18.3, "Closed_Fist"),  #        fist ->
     (18.7, 19.4, "Open_Palm"),    #        open  => return home (within 3 s)
-    (25.0, 27.0, "Closed_Fist"),  # land
+    (22.0, 22.8, "Victory"),      # wiper combo: V up ->
+    (23.2, 24.0, "v_flat"),       #        V flat ->
+    (24.4, 25.2, "Victory"),      #        V up ->
+    (25.6, 26.4, "v_flat"),       #        V flat  => fly pointed (east)
+    (31.0, 33.0, "Closed_Fist"),  # land
 ]
 
 
@@ -67,16 +71,22 @@ def _demo_hand(t: float) -> HandState:
     for a, b, g in _DEMO_GESTURES:
         if a <= t < b:
             gesture = g
+    # v_flat points horizontally (-> fly_east); Victory points up.
+    point_dir = (0.9, 0.1) if gesture == "v_flat" else (0.1, -0.9)
+    source = "custom" if gesture == "v_flat" else (
+        "canned" if gesture != "None" else "none")
     return HandState(
         present=True,
         palm_x=0.5 + 0.26 * math.sin(t * 0.7),
         palm_y=0.5 - 0.28 * math.sin(t * 0.5),
         roll_angle=0.5 * math.sin(t * 0.9),
         pinch=max(0.0, 0.6 * math.sin(t * 0.4)),
-        fingers_up=5 if gesture in ("None", "Open_Palm") else 1,
+        fingers_up=2 if gesture in ("Victory", "v_flat") else
+        (5 if gesture in ("None", "Open_Palm") else 1),
+        point_dir=point_dir,
         gesture=gesture,
         gesture_score=0.9,
-        gesture_source="canned" if gesture != "None" else "none",
+        gesture_source=source,
     )
 
 
@@ -202,7 +212,7 @@ def run(args: argparse.Namespace) -> int:
                 cam_frame = frame
 
             gstate = interp.update(hand.gesture if hand.present else "None",
-                                   hand.gesture_source)
+                                   hand.gesture_source, hand=hand)
             if kbd_event:
                 gstate.events.append(kbd_event)
                 kbd_event = None

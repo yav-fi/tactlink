@@ -6,6 +6,8 @@ import { Fleet, DRONE_COLORS } from "./fleet";
 import { formationSlots } from "./formation";
 import { collisionWarning } from "./collision";
 import { parseMission, sampleMission } from "./mission";
+import { startRuntimeMode } from "./runtime";
+import { previewCoordinate, previewMission, type FlightPreview } from "./flight-preview";
 
 const home = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
 const token = import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined;
@@ -13,6 +15,8 @@ const status = document.querySelector<HTMLParagraphElement>("#world-status")!;
 const commandStatus = document.querySelector<HTMLParagraphElement>("#command-status")!;
 const missionInput = document.querySelector<HTMLTextAreaElement>("#mission-json")!;
 const stateElement = document.querySelector<HTMLDListElement>("#drone-state")!;
+const runtimeMode = new URLSearchParams(window.location.search).get("mode") === "runtime";
+document.body.classList.toggle("runtime-mode", runtimeMode);
 
 const panelTabs = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
 function showControlTab(name: "drone" | "batches"): void {
@@ -58,10 +62,15 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
   sceneModePicker: false,
   selectionIndicator: false,
   timeline: false,
-  baseLayer: false,
+  baseLayer: new Cesium.ImageryLayer(new Cesium.GridImageryProvider({
+    cells: 16,
+    color: Cesium.Color.fromCssColorString("#6b9c88"),
+    backgroundColor: Cesium.Color.fromCssColorString("#233d34"),
+  })),
 });
+if (runtimeMode) startRuntimeMode(viewer);
 
-viewer.scene.globe.enableLighting = true;
+viewer.scene.globe.enableLighting = false;
 const fleet = new Fleet(viewer);
 const replayButton = document.querySelector<HTMLButtonElement>("#run-all-paths")!;
 const stopReplayButton = document.querySelector<HTMLButtonElement>("#stop-paths")!;
@@ -451,10 +460,10 @@ if (token) {
     status.textContent = "Google Photorealistic 3D Tiles connected.";
   } catch (error) {
     console.error(error);
-    status.textContent = "Google tiles could not load; showing the fallback globe.";
+    status.textContent = "Google tiles could not load; showing the offline grid globe.";
   }
 } else {
-  status.textContent = "Fallback globe active — add a Cesium ion token for the 3D city.";
+  status.textContent = "Offline grid globe active. No token needed to simulate; an ion token enables the 3D city.";
 }
 }
 void loadWorld();
@@ -595,7 +604,7 @@ let previousCameraTime = performance.now();
 viewer.clock.onTick.addEventListener((clock) => {
   const deltaSeconds = Math.max(0, Math.min(0.1, Cesium.JulianDate.secondsDifference(clock.currentTime, previousTime)));
   previousTime = Cesium.JulianDate.clone(clock.currentTime, previousTime);
-  for (const item of fleet.drones.values()) item.update(deltaSeconds);
+  if (!runtimeMode) for (const item of fleet.drones.values()) item.update(deltaSeconds);
   const cameraTime = performance.now();
   const wasPlaying = fleet.replay.running;
   fleet.updateReplay(cameraTime / 1000);
@@ -609,6 +618,7 @@ viewer.clock.onTick.addEventListener((clock) => {
   updateOverview(cameraTime);
   const surveys = [...fleet.drones.values()].filter(member => member.droneType === "survey");
   if (surveys.length) surveys[surveyUpdateIndex++ % surveys.length].updateSurvey(cameraTime);
+  if (runtimeMode) return;
   const snapshot = drone?.snapshot();
   if (controllingDrone) {
     commandStatus.textContent = drone?.collisionBlocked

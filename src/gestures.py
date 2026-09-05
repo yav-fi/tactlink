@@ -38,6 +38,7 @@ HOLD_SEC = 0.40           # steady-hold time before a gesture fires
 RELEASE_SEC = 0.15        # time at rest before the same gesture may fire again
 SEGMENT_SEC = 0.18        # hold time before a gesture counts as a combo token
 COMBO_GRACE_SEC = 0.9     # keep holding pending singles this long after a combo pose
+_POINT_HORIZONTAL = 0.55  # |image dx| above which a point counts as left/right
 
 _DEFAULT_ACTION = {
     "Open_Palm": "takeoff",
@@ -97,15 +98,18 @@ class GestureInterpreter:
         self._token_gesture = ""   # last gesture emitted as a combo token
         self._pending: list[dict] = []  # single-gesture actions waiting out single_delay
         self._combo_touch = -1e9   # last time a combo-member gesture was held
+        self._point_dir = (0.0, 0.0)  # latest finger-pointing vector, for fly_pointed
 
     @property
     def mode(self) -> FlightMode:
         return _MODE_CYCLE[self._mode_idx]
 
     def update(self, gesture: str, source: str = "canned",
-               now: float | None = None) -> GestureState:
+               now: float | None = None, hand=None) -> GestureState:
         now = time.monotonic() if now is None else now
         events: list[str] = []
+        if hand is not None and getattr(hand, "present", False):
+            self._point_dir = tuple(hand.point_dir)
 
         if gesture != self._held:
             self._held = gesture
@@ -132,6 +136,8 @@ class GestureInterpreter:
         elif held_for >= SEGMENT_SEC and gesture != self._token_gesture:
             self._token_gesture = gesture
             for action in self._matcher.feed(gesture, now):
+                if action == "fly_pointed":
+                    action = self._resolve_fly_pointed()
                 events.append(self._apply(action))
                 self._pending.clear()
                 self._fired_gesture = gesture   # don't also fire this pose as a single
@@ -169,6 +175,18 @@ class GestureInterpreter:
             sequence_hint=hint,
             events=events,
         )
+
+    def _resolve_fly_pointed(self) -> str:
+        """Turn the finger-pointing vector into a compass fly command.
+
+        Only left/right is reliable from a (near-)horizontal two-finger pose;
+        anything else - vertical, angled, toward the camera - falls back north.
+        The webcam feed is mirrored, so image +x is the user's right = east.
+        """
+        dx, dy = self._point_dir
+        if abs(dx) >= _POINT_HORIZONTAL and abs(dx) >= abs(dy):
+            return "fly_east" if dx > 0 else "fly_west"
+        return "fly_north"
 
     def _apply(self, action: str) -> str:
         if action == "cycle_mode":

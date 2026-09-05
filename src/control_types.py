@@ -27,6 +27,9 @@ class HandState:
     roll_angle: float = 0.0  # radians, hand tilt about the view axis (+ = right side down)
     pinch: float = 0.0       # 0 = fingers apart, 1 = thumb and index touching
     fingers_up: int = 0      # count of extended fingers, 0..5
+    # Direction the index + middle fingers point, as an image-space unit vector
+    # (x right, y down). (0, 0) when it can't be measured.
+    point_dir: tuple = (0.0, 0.0)
     gesture: str = "None"    # active gesture name (custom model or MediaPipe canned), or "None"
     gesture_score: float = 0.0
     gesture_source: str = "none"  # "custom", "canned", or "none"

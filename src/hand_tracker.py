@@ -131,6 +131,12 @@ class HandTracker:
         pinch_dist = float(np.linalg.norm(pts[4] - pts[8])) / hand_size
         pinch = float(np.clip(1.0 - (pinch_dist - 0.15) / 0.85, 0.0, 1.0))
 
+        # Pointing direction: index (MCP 5 -> tip 8) and middle (9 -> 12) averaged,
+        # as an image-space unit vector (x right, y down).
+        point = (pts[8] - pts[5]) + (pts[12] - pts[9])
+        pnorm = float(np.linalg.norm(point))
+        point_dir = (float(point[0] / pnorm), float(point[1] / pnorm)) if pnorm > 1e-6 else (0.0, 0.0)
+
         return HandState(
             present=True,
             palm_x=float(np.clip(palm[0], 0.0, 1.0)),
@@ -138,6 +144,7 @@ class HandTracker:
             roll_angle=roll_angle,
             pinch=pinch,
             fingers_up=self._count_fingers(pts),
+            point_dir=point_dir,
             gesture=gesture,
             gesture_score=score,
             gesture_source=source,

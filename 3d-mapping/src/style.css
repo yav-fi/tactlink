@@ -21,6 +21,19 @@ input:not([type="checkbox"]), select { width: 100%; padding: 8px; color: #edf6ff
 .member-row { display: flex; align-items: center; gap: 8px; }
 .member-swatch { width: 10px; height: 10px; border-radius: 50%; }
 #save-group, #choose-destination { margin-top: 8px; }
+.runtime-only { display: none; }
+.runtime-mode .runtime-only { display: block; }
+.runtime-mode .local-only { display: none; }
+.mode-switch { display: flex; gap: 8px; margin-top: 12px; }
+.mode-switch a { flex: 1; padding: 7px 9px; border: 1px solid #31516d; border-radius: 8px; color: #bfefff; text-align: center; text-decoration: none; font-size: .75rem; }
+.runtime-mode .mode-switch a:first-child, body:not(.runtime-mode) .mode-switch a:last-child { border-color: #52d8ff; background: #173b50; }
+.connected { color: #69f0ae; } .disconnected { color: #ff8a80; }
+.metrics { margin-top: 12px; grid-template-columns: 110px 1fr; }
+.sliders { display: grid; gap: 9px; margin-top: 12px; }
+.sliders label { display: grid; grid-template-columns: 125px 1fr; align-items: center; gap: 8px; color: #b6cadf; font-size: .74rem; }
+.sliders input { width: 100%; }
+#runtime-preset { width: 100%; padding: 8px; color: #edf6ff; background: #203c56; border: 1px solid #31516d; border-radius: 8px; }
+button.danger { color: white; background: #9b2f3f; }
 button:disabled { opacity: .45; cursor: default; }
 .mission-panel { max-height: calc(100vh - 36px); overflow-y: auto; }
 #deployment { padding: 10px; margin-top: 10px; background: #132b40; border-radius: 8px; }
@@ -42,3 +55,6 @@ textarea { width: 100%; min-height: 190px; resize: vertical; padding: 10px; bord
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; } button { padding: 9px 11px; border: 0; border-radius: 8px; color: #052033; background: #52d8ff; cursor: pointer; font-weight: 750; } button.secondary { color: #dcefff; background: #203c56; }
 .state { display: grid; grid-template-columns: 95px 1fr; gap: 5px 10px; margin: 0; font-size: .82rem; } dt { color: #9db1c5; } dd { margin: 0; font-variant-numeric: tabular-nums; }
 @media (max-width: 600px) { .mission-panel { max-height: calc(100vh - 36px); overflow-y: auto; } }
+.timeline { max-height: 150px; overflow-y: auto; padding: 6px 8px; border: 1px solid #203c56; border-radius: 8px; font: 11px/1.45 ui-monospace, monospace; color: #b6cadf; }
+.timeline div { padding: 3px 0; border-bottom: 1px solid rgba(49, 81, 109, .45); }
+#network-history { width: 100%; height: 60px; border: 1px solid #203c56; border-radius: 8px; background: rgba(7, 17, 31, .7); }
