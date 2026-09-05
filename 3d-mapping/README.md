@@ -19,6 +19,8 @@ To load Google Photorealistic 3D Tiles, create a Cesium ion token with that data
 
 ## Mission contract
 
+All four propeller assemblies spin continuously, with adjacent rotors turning in opposite directions. Pilot camera choices are fixed third-person and fixed first-person; the separate Free camera button releases pilot control.
+
 Live flight markers and playback bodies use a compact quadcopter: a 36 × 24 × 12 cm center body, four arms and four crossed-blade rotor assemblies, under one meter across. Parts follow the drone's pose and color for both Normal and Survey types. Single-drone third-person view defaults to 8 m away; batch framing still fits the formation. Start/release prisms and path direction arrows remain route markers.
 
 Survey visuals weaken with distance: full base opacity through 100 m, 60% through 250 m, 30% through 500 m and 12% beyond that. Cone faces are split into those range bands. Coverage triangles use their farthest sampled vertex's range when recorded, and keep that strength through group color changes and undo. This is visual attenuation, not a calibrated detection probability.

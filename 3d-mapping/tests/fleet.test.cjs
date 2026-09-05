@@ -20,6 +20,20 @@ function loadSource(name) {
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
 
+test("propeller blades rotate over time while hubs stay fixed", () => {
+  const { addQuadcopterParts } = loadSource("quadcopter");
+  let time = 0;
+  const parts = addQuadcopterParts({ entities: new Cesium.EntityCollection() }, "test", () => Cesium.Cartesian3.ZERO, () => Cesium.Quaternion.IDENTITY, () => Cesium.Color.CYAN, () => time);
+  const blades = parts.filter(p => p.id.includes("_prop_"));
+  const fixed = parts.filter(p => !p.id.includes("_prop_"));
+  const before = parts.map(p => p.orientation.getValue());
+  const centers = blades.map(p => p.position.getValue());
+  time = 0.02;
+  for (const part of blades) assert(!Cesium.Quaternion.equals(part.orientation.getValue(), before[parts.indexOf(part)]));
+  for (const part of fixed) assert(Cesium.Quaternion.equals(part.orientation.getValue(), before[parts.indexOf(part)]));
+  blades.forEach((part, i) => assert.deepEqual(part.position.getValue(), centers[i]));
+});
+
 test("four-rotor geometry follows body during flight and playback and shares color", () => {
   const entities = new Cesium.EntityCollection();
   const fleet = new Fleet({ entities });

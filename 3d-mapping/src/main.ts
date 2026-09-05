@@ -106,10 +106,9 @@ let pendingGroup = "";
 const activeCameraKeys = new Set<string>();
 const controlDroneButton = document.querySelector<HTMLButtonElement>("#control-drone")!;
 let controllingDrone = false;
-const pilotView = { heading: 0, pitch: Cesium.Math.toRadians(-18), range: 8 };
+const pilotView = { heading: 0 };
 const pilotCameraSelect = document.querySelector<HTMLSelectElement>("#pilot-camera")!;
 let pilotCameraMode = "third";
-let freeOrbitHeading = 0;
 pilotCameraSelect.addEventListener("change", () => {
   pilotCameraMode = pilotCameraSelect.value;
   clearInput();
@@ -177,12 +176,7 @@ cameraHandler.setInputAction(() => { isOrbitDragging = false; steering = false; 
 window.addEventListener("pointerup", () => { steering = false; isOrbitDragging = false; });
 cameraHandler.setInputAction((movement: { startPosition: Cesium.Cartesian2; endPosition: Cesium.Cartesian2 }) => {
   if (controllingDrone && steering) {
-    if (pilotCameraMode === "free") {
-      freeOrbitHeading += (movement.endPosition.x - movement.startPosition.x) * 0.005;
-      pilotView.pitch = Cesium.Math.clamp(pilotView.pitch + (movement.endPosition.y - movement.startPosition.y) * 0.004, -1.2, -0.05);
-    } else {
-      pilotView.heading += (movement.endPosition.x - movement.startPosition.x) * 0.005;
-    }
+    pilotView.heading += (movement.endPosition.x - movement.startPosition.x) * 0.005;
     return;
   }
   if (!isOrbitDragging || cameraMode !== "orbit") return;
@@ -191,10 +185,7 @@ cameraHandler.setInputAction((movement: { startPosition: Cesium.Cartesian2; endP
   applyOrbitCamera();
 }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 cameraHandler.setInputAction((delta: number) => {
-  if (controllingDrone) {
-    if (pilotCameraMode === "free") pilotView.range = Cesium.Math.clamp(pilotView.range - delta * 0.05, 3, 180);
-    return;
-  }
+  if (controllingDrone) return;
   if (cameraMode !== "orbit") return;
   orbitCamera.range = Cesium.Math.clamp(orbitCamera.range + delta * 0.22, 80, 4_000);
   applyOrbitCamera();
@@ -554,8 +545,7 @@ function updateFreeCamera(deltaSeconds: number): void {
       viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
       viewer.camera.setView({ destination: mount, orientation: { heading: pilotView.heading, pitch: 0, roll: 0 } });
     } else {
-      const free = pilotCameraMode === "free";
-      viewer.camera.lookAt(center, new Cesium.HeadingPitchRange(pilotView.heading + (free ? freeOrbitHeading : 0), free ? pilotView.pitch : Cesium.Math.toRadians(-18), free ? Math.max(pilotView.range, batchRange) : batchRange));
+      viewer.camera.lookAt(center, new Cesium.HeadingPitchRange(pilotView.heading, Cesium.Math.toRadians(-18), batchRange));
     }
     return;
   }
