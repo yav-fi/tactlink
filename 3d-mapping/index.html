@@ -13,85 +13,312 @@
         <p class="eyebrow">DNHacks 2026</p>
         <h1>Drone mission control</h1>
         <p id="world-status" class="status">Starting map…</p>
-        <nav class="mode-switch" aria-label="Runtime mode">
-          <a href="?mode=runtime">Backend runtime</a>
-          <a href="?mode=local">Local sandbox</a>
-        </nav>
-        <section class="runtime-only">
-          <h2>Distributed runtime</h2>
-          <p id="runtime-status" class="status">Connecting to backend…</p>
-          <dl id="runtime-metrics" class="state metrics"></dl>
-          <h3>Network history</h3>
-          <svg id="network-history" viewBox="0 0 300 60" role="img" aria-label="Network health history"></svg>
-          <h3>Mission timeline</h3>
-          <div id="runtime-timeline" class="timeline" aria-live="polite"></div>
-          <label for="runtime-preset">Scenario preset</label>
-          <select id="runtime-preset">
-            <option>NORMAL</option><option>DEGRADED</option><option>CONTESTED</option><option>CHAOS</option>
-          </select>
-          <div class="sliders">
-            <label for="gps-interference">GPS interference <input id="gps-interference" type="range" min="0" max="1" step="0.05" value="0" /></label>
-            <label for="network-interference">Network interference <input id="network-interference" type="range" min="0" max="1" step="0.05" value="0" /></label>
-            <label for="sensor-interference">Sensor interference <input id="sensor-interference" type="range" min="0" max="1" step="0.05" value="0" /></label>
-            <label for="node-failure-rate">Node failure rate <input id="node-failure-rate" type="range" min="0" max="0.2" step="0.005" value="0" /></label>
-          </div>
-          <div class="actions">
-            <button id="runtime-fail-drone" type="button">Fail random drone</button>
-            <button id="runtime-fail-control" type="button" class="danger">Fail control</button>
-            <button id="runtime-pause" type="button" class="secondary">Pause / resume</button>
-            <button id="runtime-reset" type="button" class="secondary">Reset</button>
-          </div>
-          <p class="hint">Click a drone for its task, battery, localization, peer, and capability details. Solid links are usable; red dashed links are unavailable.</p>
-        </section>
-        <section class="local-only">
-          <h2>Drone fleet</h2>
+<p id="world-status" class="status">Starting map…</p>
+
+<nav class="mode-switch" aria-label="Runtime mode">
+  <a href="?mode=runtime">Backend runtime</a>
+  <a href="?mode=local">Local sandbox</a>
+</nav>
+
+<section class="runtime-only">
+  <h2>Distributed runtime</h2>
+  <p id="runtime-status" class="status">Connecting to backend…</p>
+  <dl id="runtime-metrics" class="state metrics"></dl>
+
+  <h3>Network history</h3>
+  <svg
+    id="network-history"
+    viewBox="0 0 300 60"
+    role="img"
+    aria-label="Network health history"
+  ></svg>
+
+  <h3>Mission timeline</h3>
+  <div id="runtime-timeline" class="timeline" aria-live="polite"></div>
+
+  <label for="runtime-preset">Scenario preset</label>
+  <select id="runtime-preset">
+    <option>NORMAL</option>
+    <option>DEGRADED</option>
+    <option>CONTESTED</option>
+    <option>CHAOS</option>
+  </select>
+
+  <div class="sliders">
+    <label for="gps-interference">
+      GPS interference
+      <input
+        id="gps-interference"
+        type="range"
+        min="0"
+        max="1"
+        step="0.05"
+        value="0"
+      />
+    </label>
+
+    <label for="network-interference">
+      Network interference
+      <input
+        id="network-interference"
+        type="range"
+        min="0"
+        max="1"
+        step="0.05"
+        value="0"
+      />
+    </label>
+
+    <label for="sensor-interference">
+      Sensor interference
+      <input
+        id="sensor-interference"
+        type="range"
+        min="0"
+        max="1"
+        step="0.05"
+        value="0"
+      />
+    </label>
+
+    <label for="node-failure-rate">
+      Node failure rate
+      <input
+        id="node-failure-rate"
+        type="range"
+        min="0"
+        max="0.2"
+        step="0.005"
+        value="0"
+      />
+    </label>
+  </div>
+
+  <div class="actions">
+    <button id="runtime-fail-drone" type="button">
+      Fail random drone
+    </button>
+    <button id="runtime-fail-control" type="button" class="danger">
+      Fail control
+    </button>
+    <button id="runtime-pause" type="button" class="secondary">
+      Pause / resume
+    </button>
+    <button id="runtime-reset" type="button" class="secondary">
+      Reset
+    </button>
+  </div>
+
+  <p class="hint">
+    Click a drone for its task, battery, localization, peer, and capability details.
+    Solid links are usable; red dashed links are unavailable.
+  </p>
+</section>
+
+<section class="local-only">
+
+  <button
+    id="undo-action"
+    class="secondary"
+    type="button"
+    disabled
+  >
+    Undo last action
+  </button>
+
+  <div
+    class="panel-tabs"
+    role="tablist"
+    aria-label="Drone controls"
+  >
+    <button
+      id="tab-drone"
+      type="button"
+      role="tab"
+      aria-selected="true"
+      aria-controls="panel-drone"
+    >
+      Individual drone
+    </button>
+
+    <button
+      id="tab-batches"
+      type="button"
+      role="tab"
+      aria-selected="false"
+      aria-controls="panel-batches"
+      tabindex="-1"
+    >
+      Batches
+    </button>
+  </div>
+
+  <div
+    id="panel-drone"
+    role="tabpanel"
+    aria-labelledby="tab-drone"
+  >
+    <section>
+      <h2>Deploy &amp; select</h2>
           <div class="actions">
             <button id="deploy-drone" type="button">Deploy a new drone</button>
-            <button id="reset-all" type="button" class="secondary">Reset all drones</button>
-          </div>
-          <div id="deployment" hidden>
-            <p id="deployment-status" class="hint" role="status">Click a starting point on the map.</p>
-            <label for="deployment-height">Height above picked surface (m)</label>
-            <input id="deployment-height" type="number" min="5" max="1000" value="20" step="5" />
-            <div class="actions">
-              <button id="confirm-deployment" type="button" disabled>Deploy here</button>
-              <button id="cancel-deployment" type="button" class="secondary">Cancel</button>
-            </div>
           </div>
           <label for="selected-drone">Selected drone</label>
           <select id="selected-drone" disabled><option>No drones deployed</option></select>
           <label for="drone-speed">Selected drone speed (mph)</label>
           <input id="drone-speed" type="number" min="0.1" step="any" value="60" disabled />
           <p id="speed-status" class="hint" role="status">Default: 60 mph · 26.82 m/s</p>
+          <div class="actions">            <button id="control-drone" type="button" aria-pressed="false" disabled>Control drone</button>            <button id="reset-mission" type="button" class="secondary" disabled>Reset selected drone</button></div>
         </section>
-        <section class="local-only">
-          <h2>Mission command</h2>
-          <label for="flight-text">Flight instruction</label>
-          <textarea id="flight-text" aria-label="Flight instruction">take off to 10 meters, orbit home at a radius of 20 meters clockwise once, then land</textarea>
-          <button id="preview-flight" type="button">Preview text path</button>
-          <p id="preview-status" class="hint" role="status">Deploy a drone first. Preview height is relative to its deployment point.</p>
+        <details class="advanced-controls">
+          <summary>Advanced · mission JSON</summary>
           <textarea id="mission-json" spellcheck="false" aria-label="Mission command JSON"></textarea>
           <div class="actions">
             <button id="run-mission" type="button" disabled>Run mission</button>
-            <button id="reset-mission" type="button" class="secondary" disabled>Reset selected drone</button>
-            <button id="orbit-monument" type="button" class="secondary">Orbit monument</button>
+          </div>
+        </details>
+      </div>
+      <div id="panel-batches" role="tabpanel" aria-labelledby="tab-batches" hidden>
+        <button id="bulk-deploy" type="button">Deploy a batch</button>
+        <section>
+          <h2>Select a batch</h2>
+          <label for="saved-groups">Saved groups</label>
+          <select id="saved-groups"><option value="">Custom selection</option></select>
+          <div class="actions">
+            <button id="select-all" type="button" class="secondary">Select all</button>
+            <button id="select-none" type="button" class="secondary">Clear selection</button>
+          </div>
+          <div id="group-members" aria-label="Drones for group command"></div>
+          <label for="group-name">Group name</label>
+          <input id="group-name" placeholder="Group A" maxlength="60" />
+          <button id="save-group" type="button">Save group</button>
+
+          <h2>Batch controls</h2>
+          <label for="batch-speed">Batch speed (mph)</label>
+          <input id="batch-speed" type="number" min="0.01" step="any" value="60" />
+          <button id="apply-batch-speed" type="button" disabled>Apply speed to selection</button>
+          <button id="control-batch" type="button" aria-pressed="false" disabled>Control selected batch</button>
+          <p id="batch-status" class="hint" role="status">WASD moves the batch; R/F or Space/Shift changes height. Release leaves pickup markers and preserves every route.</p>
+          <button id="choose-destination" type="button" disabled>Choose destination</button>
+          <p id="group-status" class="hint" role="status">Select drones above or click their markers on the map.</p>
+          <details class="advanced-controls"><summary>Destination behavior</summary><p class="hint">Sending a destination replaces selected routes. Drones use spaced arrival slots and stop at detected obstacles; routes do not automatically reroute.</p></details>
+        </section>
+      </div>
+          <div id="deployment" hidden>
+            <div id="drone-type-fields">
+            <label for="drone-type">Drone type</label>
+            <select id="drone-type"><option value="normal">Normal</option><option value="survey">Survey · camera cone</option></select>
+            <p class="hint">Survey cones extend to sampled map surfaces. Missing surfaces create no coverage; unmatched rays display up to 10 km. Both types show a collision indicator when stopped by an obstacle.</p>
+            </div>
+            <p id="deployment-status" class="hint" role="status">Click a starting point on the map.</p>
+            <label for="deployment-height">Height above picked surface (m)</label>
+            <input id="deployment-height" type="number" min="15" max="1000" value="20" step="5" />
+            <label for="batch-count">Number of drones</label>
+            <input id="batch-count" type="number" min="1" max="100" step="1" value="10" />
+            <label for="formation-spacing">Spacing (meters)</label>
+            <input id="formation-spacing" type="number" min="20" max="1000" step="any" value="30" />
+            <div class="actions">
+              <button id="confirm-deployment" type="button" disabled>Deploy here</button>
+              <button id="cancel-deployment" type="button" class="secondary">Cancel</button>
+            </div>
+          </div>
+<label for="selected-drone">Selected drone</label>
+<select id="selected-drone" disabled>
+  <option>No drones deployed</option>
+</select>
+
+<label for="drone-speed">Selected drone speed (mph)</label>
+<input
+  id="drone-speed"
+  type="number"
+  min="0.1"
+  step="any"
+  value="60"
+  disabled
+/>
+<p id="speed-status" class="hint" role="status">
+  Default: 60 mph · 26.82 m/s
+</p>
+
+<section>
+  <h2>Camera</h2>
+
+  <div class="actions">
+    <button id="free-camera" type="button" class="secondary">
+      Free camera
+    </button>
+    <button id="orbit-monument" type="button" class="secondary">
+      Orbit monument
+    </button>
+  </div>
+
+  <label for="pilot-camera">Drone camera</label>
+  <select id="pilot-camera">
+    <option value="third">Third-person · fixed</option>
+    <option value="first">First-person · fixed</option>
+  </select>
+
+  <p class="hint">
+    Free camera releases pilot control. Attached views follow the controlled drone or batch.
+  </p>
+
+  <p id="command-status" class="hint">
+    Commands execute locally and deterministically.
+  </p>
+</section>
+
+<section class="local-only">
+  <h2>Mission command</h2>
+
+  <label for="flight-text">Flight instruction</label>
+
+  <textarea id="flight-text" aria-label="Flight instruction">take off to 10 meters, orbit home at a radius of 20 meters clockwise once, then land</textarea>
+
+  <button id="preview-flight" type="button">
+    Preview text path
+  </button>
+
+  <p id="preview-status" class="hint" role="status">
+    Deploy a drone first. Preview height is relative to its deployment point.
+  </p>
+
+  <textarea
+    id="mission-json"
+    spellcheck="false"
+    aria-label="Mission command JSON"
+  ></textarea>
+</section>
+          <div class="actions">
             <button id="free-camera" type="button" class="secondary">Free camera</button>
-            <button id="control-drone" type="button" aria-pressed="false" disabled>Control drone</button>
+            <button id="orbit-monument" type="button" class="secondary">Orbit monument</button>
           </div>
           <label for="pilot-camera">Drone camera</label>
           <select id="pilot-camera">
             <option value="third">Third-person · fixed</option>
             <option value="first">First-person · fixed</option>
-            <option value="free">Free orbit · while piloting</option>
           </select>
-          <p class="hint">Fixed views stay attached to the drone. Free orbit: drag to move the view, scroll to zoom. Q/E turns the drone in every view. The trail persists until Reset.</p>
+          <p class="hint">Free camera releases pilot control. Attached views follow the controlled drone or batch.</p>
           <p id="command-status" class="hint">Commands execute locally and deterministically.</p>
         </section>
         <section>
-          <h2>Drone state</h2>
+          <h2>Fleet playback</h2>
+          <div class="actions">
+            <button id="run-all-paths" type="button">Run all paths</button>
+            <button id="stop-paths" type="button" class="secondary" disabled>Stop playback</button>
+            <button id="pause-paths" type="button" class="secondary" disabled>Pause playback</button>
+          </div>
+          <p id="playback-time" class="hint" role="timer">Elapsed: 0.00 s</p>
+          <p id="playback-status" class="hint" role="status">Record paths by piloting drones, then run them together.</p>
+          <button id="reset-all" type="button" class="secondary">Reset all drones</button>
+        </section>
+        <section>
+          <h2>Fleet overview</h2>
+          <p class="hint">Survey effect fades with distance: 100% within 100 m, 60% to 250 m, 30% to 500 m, then 12%. Shading joins sampled surface hits; small obstacles may be missed. Up to 500 triangles per drone.</p>
+          <div id="fleet-overview" aria-label="Fleet overview"></div>
+          <h2>Selected drone details</h2>
           <dl id="drone-state" class="state"></dl>
         </section>
-        <p class="hint local-only">Click the map, then hold W/A/S/D to fly or R/F to move up/down. Movement keys automatically leave orbit mode. In free camera, Ctrl + drag rotates the view. Orbit monument: drag to circle it and scroll to zoom.</p>
+        <details class="advanced-controls"><summary>Keyboard &amp; mouse controls</summary><p class="hint">WASD moves; R/F changes height. When piloting, Q/E turns and Esc releases. In free camera, Ctrl + drag rotates. Orbit monument: drag to circle, scroll to zoom.</p></details>
       </aside>
     </main>
     <script type="module" src="/src/main.ts"></script>
