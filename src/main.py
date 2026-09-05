@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -29,6 +31,15 @@ from controls import GestureController
 from gestures import GestureInterpreter
 from simulator import QuadSimulator
 from visualizer import Visualizer
+
+# ``python src/main.py`` puts src/ rather than the repository root on sys.path.
+# Add the root only for importing the sibling integration package.
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from integrations.gesture_mission import GestureMissionAdapter
+from integrations.mission_client import MissionClient, MissionClientError
 
 # (start, end) seconds -> gesture held during the demo timeline.
 _DEMO_GESTURES = [
@@ -73,6 +84,8 @@ def run(args: argparse.Namespace) -> int:
     interp = GestureInterpreter()
     sim = QuadSimulator()
     viz = Visualizer()
+    mission_adapter = GestureMissionAdapter() if args.mission_url else None
+    mission_client = MissionClient(args.mission_url) if args.mission_url else None
 
     tracker = None
     cap = None
@@ -129,6 +142,16 @@ def run(args: argparse.Namespace) -> int:
             if kbd_event:
                 gstate.events.append(kbd_event)
                 kbd_event = None
+            if mission_adapter and mission_client:
+                for event in gstate.events:
+                    mission = mission_adapter.event_to_command(event)
+                    if mission is None:
+                        continue
+                    try:
+                        created = mission_client.submit(mission)
+                        print(f"runtime mission: {created.get('id', mission.type)}")
+                    except MissionClientError as exc:
+                        print(f"runtime mission rejected: {exc}")
             cmd = controller.update(hand, gstate, sim.state)
             state = sim.step(cmd, dt if dt > 0 else 1 / 60)
 
@@ -177,6 +200,11 @@ def main() -> int:
     p.add_argument("--duration", type=float, default=10.0,
                    help="seconds to simulate before exiting in --headless")
     p.add_argument("--out", type=str, default="", help="path to save a composite frame")
+    p.add_argument(
+        "--mission-url",
+        default="",
+        help="submit discrete HOLD/RETURN gestures to this runtime URL (for example http://127.0.0.1:8000)",
+    )
     return run(p.parse_args())
 
 
