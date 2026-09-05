@@ -12,7 +12,7 @@ reimplementing gating a third time (dartree-mlx does the same import). See
 README.md for the one-time `git clone` step.
 
 Usage:
-    ./scripts/benchmark.py [--reps 3] [--max-tokens 512] [--base-url http://localhost:8081]
+    ./scripts/benchmark.py [--reps 1] [--max-tokens 512] [--base-url http://localhost:8081]
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ def _load_thermal():
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--reps", type=int, default=3)
+    ap.add_argument("--reps", type=int, default=1)
     ap.add_argument("--max-tokens", type=int, default=512)
     ap.add_argument("--base-url", default=os.environ.get("CHAT_SERVER_URL", "http://localhost:8081"))
     ap.add_argument("--out", default=str(PROJECT_ROOT / "benchmark_result.json"))

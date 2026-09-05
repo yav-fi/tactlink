@@ -103,12 +103,14 @@ Then run:
 ./scripts/benchmark.sh
 ```
 
-Starts the server if needed, runs 3 reps of a fixed prompt (`scripts/matched_prompt.txt`,
-so every run/machine gets byte-identical input) with 512 max tokens each, gates the GPU
-below 40°C individually before every rep (waiting and boosting fans if needed, printing a
-compliance receipt per rep), discards one untimed warmup call first, and reports the
-median decode tok/s. Writes full results (per-rep timings + thermal receipts) to
-`benchmark_result.json` (gitignored — a local artifact, not shared state).
+Starts the server if needed, runs 1 rep (by default) of a fixed prompt
+(`scripts/matched_prompt.txt`, so every run/machine gets byte-identical input) with 512
+max tokens, gates the GPU below 40°C first (waiting and boosting fans if needed, printing
+a compliance receipt — hard-fails rather than reporting an unverified number if the gate
+can't be met), discards one untimed warmup call first, and reports the decode tok/s.
+Writes full results (timings + thermal receipt) to `benchmark_result.json` (gitignored —
+a local artifact, not shared state). Pass `--reps N` for more than one rep (reports the
+median across reps, each individually gated).
 
 Set `MLX_BENCH_DIR` if you cloned `mlx-bench` somewhere other than `~/mlx-bench`, or
 `--reps`/`--max-tokens`/`--base-url`/`--out` to override the defaults.
