@@ -19,6 +19,8 @@ To load Google Photorealistic 3D Tiles, create a Cesium ion token with that data
 
 ## Mission contract
 
+Survey visuals weaken with distance: full base opacity through 100 m, 60% through 250 m, 30% through 500 m and 12% beyond that. Cone faces are split into those range bands. Coverage triangles use their farthest sampled vertex's range when recorded, and keep that strength through group color changes and undo. This is visual attenuation, not a calibrated detection probability.
+
 **Undo** restores up to 20 recent deployment, speed, group, mission, reset or manual-flight edits. A flight session is one undo action; restored drones are parked, with their paths, release markers and Survey patches preserved. Undo does not resume an interrupted mission or playback. **Pause playback / Resume playback** freezes and continues both recorded-path playback and destination-command flights without counting paused time.
 
 Survey flights sample the center and twelve edge rays against loaded map surfaces, recording coverage triangles only where all three sampled vertices hit surfaces. Cone edges extend to their first detected surface; unmatched rays display up to 10 km and create no coverage. Sampling refreshes at most twice per second per drone, staggered across the fleet. Up to 500 surface triangles are retained per drone, sampled after 10 m of movement. This is approximate: small obstacles between rays, surface discontinuities and unloaded tiles can leave errors. The Fleet overview lists type, state, speed, route distance, estimated duration and coverage triangle count.

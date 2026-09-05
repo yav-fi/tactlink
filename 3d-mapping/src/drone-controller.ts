@@ -1,7 +1,7 @@
 import * as Cesium from "cesium";
 import type { Coordinates, MissionCommand, MissionStep } from "./mission";
 import { movementBlocked } from "./collision";
-import { sampleSurvey, surfaceHit, SURVEY_RAYS } from "./survey-surface";
+import { sampleSurvey, surfaceHit, SURVEY_RAYS, SURVEY_DISTANCE_BANDS, surveyStrength, surveyBand } from "./survey-surface";
 
 export type DroneSnapshot = Coordinates & { state: string; currentStep: number; totalSteps: number };
 
@@ -115,7 +115,7 @@ export class DroneController {
       // Only mark triangles whose sampled vertices actually met map surfaces.
       this.coverage.push(this.viewer.entities.add({ id: `${this.id}_coverage_${++this.coverageNumber}`, polygon: {
         hierarchy: [sample.centerHit, a, b], perPositionHeight: true,
-        material: this.color.withAlpha(0.22),
+        material: this.color.withAlpha(0.22 * surveyStrength(Math.max(...[sample.centerHit, a, b].map(p => Cesium.Cartesian3.distance(this.surveyOrigin, p))))),
       } }));
       if (this.coverage.length > 500) this.viewer.entities.remove(this.coverage.shift()!);
     }
@@ -170,15 +170,22 @@ export class DroneController {
     });
     if (droneType === "survey") {
       for (let i = 0; i < SURVEY_RAYS; i++) {
+        for (let band = 0; band < SURVEY_DISTANCE_BANDS.length - 1; band++) {
+        const geometry = () => {
+          if (!this.surveyEnds.length) return [];
+          const mount = Cesium.Matrix4.multiplyByPoint(Cesium.Transforms.eastNorthUpToFixedFrame(this.visualPosition()), new Cesium.Cartesian3(0, 0, -2), new Cesium.Cartesian3());
+          return surveyBand([mount, this.surveyEnds[i], this.surveyEnds[(i + 1) % SURVEY_RAYS]], mount, SURVEY_DISTANCE_BANDS[band], SURVEY_DISTANCE_BANDS[band + 1]);
+        };
         this.surveySides.push(viewer.entities.add({
-          id: `${id}_survey_cone_${i}`,
+          id: `${id}_survey_cone_${i}${band ? `_band_${band}` : ""}`,
           polygon: {
-            show: new Cesium.CallbackProperty(() => this.surveyEnds.length > 0, false),
-            hierarchy: new Cesium.CallbackProperty(() => new Cesium.PolygonHierarchy(this.surveyEnds.length ? [Cesium.Matrix4.multiplyByPoint(Cesium.Transforms.eastNorthUpToFixedFrame(this.visualPosition()), new Cesium.Cartesian3(0, 0, -2), new Cesium.Cartesian3()), this.surveyEnds[i], this.surveyEnds[(i + 1) % SURVEY_RAYS]] : []), false),
+            show: new Cesium.CallbackProperty(() => geometry().length > 0, false),
+            hierarchy: new Cesium.CallbackProperty(() => new Cesium.PolygonHierarchy(geometry()), false),
             perPositionHeight: true,
-            material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => this.color.withAlpha(0.12), false)),
+            material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => this.color.withAlpha(0.12 * surveyStrength(SURVEY_DISTANCE_BANDS[band] + 1)), false)),
           },
         }));
+        }
       }
     }
   }
@@ -255,7 +262,10 @@ export class DroneController {
     const color = Cesium.Color.fromCssColorString(hex);
     if (!color) throw new Error("Invalid drone color.");
     this.color = color;
-    for (const patch of this.coverage) patch.polygon!.material = new Cesium.ColorMaterialProperty(color.withAlpha(0.15));
+    for (const patch of this.coverage) {
+      const alpha = patch.polygon!.material!.getValue(Cesium.JulianDate.now()).color.alpha;
+      patch.polygon!.material = new Cesium.ColorMaterialProperty(color.withAlpha(alpha));
+    }
     this.entity.polyline!.material = new Cesium.PolylineArrowMaterialProperty(color);
     this.trailEntity.polyline!.material = new Cesium.ColorMaterialProperty(color);
     for (const item of [this.entity, this.originEntity, ...this.releases, ...this.arrows, ...(this.replayEntity ? [this.replayEntity] : [])]) {

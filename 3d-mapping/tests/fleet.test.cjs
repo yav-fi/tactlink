@@ -20,6 +20,17 @@ function loadSource(name) {
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
 
+test("Survey effect weakens beyond 100, 250 and 500 meters", () => {
+  const { surveyStrength, surveyBand } = loadSource("survey-surface");
+  assert.deepEqual([0, 100, 101, 250, 251, 500, 501, 10000].map(surveyStrength), [1, 1, 0.6, 0.6, 0.3, 0.3, 0.12, 0.12]);
+  const origin = new Cesium.Cartesian3();
+  const triangle = [origin, new Cesium.Cartesian3(1000, 0, 0), new Cesium.Cartesian3(0, 1000, 0)];
+  const near = surveyBand(triangle, origin, 0, 100);
+  assert.equal(near.length, 3);
+  assert(near.every(p => Cesium.Cartesian3.distance(origin, p) <= 100.00001));
+  assert.equal(surveyBand(near, origin, 250, 500).length, 0);
+});
+
 test("undo restores deployed types, paths, coverage, groups and release markers after reset", () => {
   const entities = new Cesium.EntityCollection();
   const fleet = new Fleet({ entities });
@@ -99,12 +110,16 @@ test("Survey mesh uses underside mount and records only surface hits", () => {
   const body = entities.getById(survey.id).position.getValue();
   const mount = Cesium.Matrix4.multiplyByPoint(Cesium.Transforms.eastNorthUpToFixedFrame(body), new Cesium.Cartesian3(0, 0, -2), new Cesium.Cartesian3());
   assert(Cesium.Cartesian3.distance(points[0], mount) < 1e-6);
-  assert(Math.abs(Cesium.Cartesian3.distance(points[0], points[1]) - 120) < 1e-6);
+  assert(Math.abs(Cesium.Cartesian3.distance(points[0], points[1]) - 100) < 1e-6);
+  const patch = entities.getById(`${survey.id}_coverage_1`);
+  assert(Math.abs(patch.polygon.material.color.getValue().alpha - 0.22 * 0.6) < 1e-6);
   survey.setColor("#ff6666");
   assert.equal(side.polygon.material.color.getValue().withAlpha(1).toCssHexString(), "#ff6666");
+  assert(Math.abs(patch.polygon.material.color.getValue().alpha - 0.22 * 0.6) < 1e-6);
   fleet.checkpoint("reset coverage");
   fleet.clear(); fleet.undo();
   assert.equal(fleet.drones.get(survey.id).coverageCount, 12);
+  assert(Math.abs(entities.getById(`${survey.id}_coverage_1`).polygon.material.color.getValue().alpha - 0.22 * 0.6) < 1e-6);
   fleet.clear(); assert.equal(entities.values.length, 0);
 });
 
