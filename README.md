@@ -48,7 +48,14 @@ If a local checkout of the LibraSpec-enabled chad fork is present at
 the extra ~1.5% from LibraSpec; otherwise it falls back to the public `chad-code`
 package with the same target/draft pair (~65 tok/s, no LibraSpec).
 
-Once it's serving on `http://localhost:8081`, use it from Python:
+**One command, ollama-`run`-style** (starts the server if it's not already up, then asks
+it a question):
+
+```sh
+./scripts/ask.sh "what's 17 * 23?"
+```
+
+Or, once it's serving on `http://localhost:8081`, use it from Python directly:
 
 ```python
 from chat_client import chat_sync
