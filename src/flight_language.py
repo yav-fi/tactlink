@@ -37,6 +37,10 @@ def _parse(text):
     match = re.fullmatch(rf"(?:fly|move) (north|south|east|west) {NUMBER} {METERS}", text)
     if match:
         return {"type": "move", "direction": match[1], "distance_m": float(match[2])}
+    match = re.fullmatch(rf"(?:fly|move) {NUMBER} {METERS} (north|south|east|west) of waypoint (\d{{1,3}})", text)
+    if match:
+        return {"type": "relative_waypoint", "distance_m": float(match[1]),
+                "direction": match[2], "reference_command": int(match[3])}
     match = re.fullmatch(rf"(?:go|fly) to point {NUMBER} {NUMBER} at altitude {NUMBER} {METERS}", text)
     if match:
         return {"type": "waypoint", "north_m": float(match[1]), "east_m": float(match[2]),
@@ -93,6 +97,7 @@ def parse_mission(text, limits=None):
             raise MissionError("All configured limits must be finite and positive.")
     parts = instruction_lines(text)
     commands = []
+    endpoints = []
     north = east = altitude = 0.0
     airborne = False
     for index, part in enumerate(parts, 1):
@@ -110,6 +115,17 @@ def parse_mission(text, limits=None):
             for field in ("altitude_m", "distance_m", "duration_s", "radius_m", "laps"):
                 if field in command and (not math.isfinite(command[field]) or command[field] <= 0):
                     raise MissionError(f"{field} must be finite and positive.")
+            if kind == "relative_waypoint":
+                reference = command["reference_command"]
+                if reference < 1 or reference >= index:
+                    raise MissionError("Waypoint reference must name an earlier command number in this mission.")
+                rn, reast = endpoints[reference - 1]
+                dn, de = {"north": (1, 0), "south": (-1, 0), "east": (0, 1), "west": (0, -1)}[command["direction"]]
+                command = {**command, "type": "waypoint",
+                           "north_m": rn + dn * command["distance_m"],
+                           "east_m": reast + de * command["distance_m"],
+                           "altitude_m": altitude}
+                kind = "waypoint"
             if kind in ("takeoff", "change_altitude", "waypoint"):
                 altitude = command["altitude_m"]
                 if altitude > limits.max_altitude_m:
@@ -149,6 +165,7 @@ def parse_mission(text, limits=None):
             if math.hypot(north, east) > limits.max_distance_from_home_m:
                 raise MissionError("Path exceeds configured flight boundary.")
             commands.append(command)
+            endpoints.append((north, east))
         except MissionError as error:
             raise MissionError(f"Command {index}: {error}") from error
     return {"altitude_reference": "home", "commands": commands,

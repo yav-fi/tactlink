@@ -21,6 +21,7 @@
   </section>
   <section><h2><span>03</span> Type or speak</h2>
     <label for="instruction">Instruction / editable transcript</label><textarea id="instruction" rows="4" placeholder="Take off to 10 meters, fly north 20 meters, then land"></textarea>
+    <p class="muted">Relative destination: “fly 10 meters north of waypoint 7”. Use an earlier command number from the mission list. Keeps current altitude; north, south, east and west are supported. Renumbering commands changes references.</p>
     <label>Add commands<select id="insert-position"><option value="end">At the end of the mission</option></select></label>
     <div class="buttons"><button id="record" class="secondary">● Hold to speak</button><button id="add-text">Add to mission</button></div>
     <p id="input-feedback" role="status" aria-live="polite" class="muted">Choose where to insert the transcript, then add it.</p>

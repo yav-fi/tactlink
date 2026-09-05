@@ -12,6 +12,32 @@ from src.flight_language import MissionError, instruction_lines, parse_mission
 
 
 class WaypointTests(unittest.TestCase):
+    def test_relative_waypoint_uses_reference_not_current_position(self):
+        prefix = 'take off to 10 m, fly north 20 m, fly east 30 m, '
+        for direction, expected in [('north', (0, 30)), ('south', (0, 10)),
+                                    ('east', (10, 20)), ('west', (-10, 20))]:
+            with self.subTest(direction=direction):
+                path = build_preview(prefix + f'fly 10 meters {direction} of waypoint 2')
+                self.assertEqual(path['segments'][-1]['end'], dict(x=expected[0], y=expected[1], z=10))
+
+    def test_relative_waypoint_rejects_bad_references_and_limits(self):
+        for suffix in ['fly 10 meters north of waypoint 0',
+                       'fly 10 meters north of waypoint 2',
+                       'fly 10 meters north of waypoint 7',
+                       'fly -10 meters north of waypoint 1',
+                       'fly 101 meters north of waypoint 1']:
+            with self.subTest(suffix=suffix), self.assertRaises(MissionError):
+                parse_mission('take off to 10 m, ' + suffix)
+        with self.assertRaises(MissionError):
+            parse_mission('take off to 10 m, fly north 100 m, fly north 100 m, fly 10 meters north of waypoint 3')
+
+    def test_spoken_relative_waypoint_seven(self):
+        text = normalize_instruction('fly ten meters north of waypoint seven')
+        self.assertEqual(text, 'fly 10 meters north of waypoint 7')
+        prefix = 'take off to 10 m, ' + 'fly north 5 m, ' * 6
+        path = build_preview(prefix + text)
+        self.assertEqual(path['segments'][-1]['end'], dict(x=0, y=40, z=10))
+
     def test_clicked_waypoint_is_one_direct_segment(self):
         path = build_preview('take off to 10 m, go to point 30 -40 at altitude 15 meters, land')
         segment = path['segments'][1]

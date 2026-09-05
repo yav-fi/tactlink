@@ -109,3 +109,7 @@ geometry. A locally synthesized WAV was transcribed correctly through the real
 HTTP endpoint. Physical microphone/browser permission behavior still needs a
 user recording; synthetic audio does not test microphone quality or accuracy in
 ambient noise. No live ArduPilot flight is claimed.
+
+## Relative destinations
+
+Type or speak: fly 10 meters north of waypoint 7. North, south, east, and west are supported. The number refers to the command sequence/map marker number (including takeoff and hover), and must identify an earlier command. The destination is offset from that command's endpoint, keeping the current planned altitude. Orbit references use the orbit endpoint, not its center. References are resolved again after edits or reordering; review the resulting route. Existing leg and boundary limits still apply.
