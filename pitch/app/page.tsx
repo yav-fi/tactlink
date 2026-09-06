@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
-const REPO = 'https://github.com/yav-fi/dnhacks26/blob/main/';
+const REPO = 'https://github.com/yav-fi/tactlink/blob/main/';
 const nodes = [
   [340, 95],
   [515, 215],
@@ -1302,7 +1302,7 @@ export default function Home() {
           </div>
           <a
             className="repo-link"
-            href="https://github.com/yav-fi/dnhacks26"
+            href="https://github.com/yav-fi/tactlink"
             target="_blank"
             rel="noreferrer"
           >

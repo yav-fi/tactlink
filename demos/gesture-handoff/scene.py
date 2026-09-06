@@ -19,7 +19,6 @@ _DRONE = (90, 230, 90)
 _DRONE_IDLE = (150, 150, 150)
 _TRAIL = (150, 110, 60)
 _ANCHOR = (255, 210, 90)      # operator holding the drone (BGR: cyan-ish gold)
-_TARGET = (90, 220, 255)      # operator being aimed at (orange)
 _OP = (150, 150, 150)
 _TEXT = (225, 225, 225)
 
@@ -47,8 +46,8 @@ class _Camera:
 class Scene:
     def __init__(self, width=640, height=480):
         self.w, self.h = width, height
-        self.cam = _Camera((width, height), eye=(0.0, -15.5, 7.5),
-                           target=(0.0, 0.0, 1.4), fov_deg=62.0)
+        self.cam = _Camera((width, height), eye=(0.0, -18.0, 9.0),
+                           target=(0.0, 0.5, 1.2), fov_deg=66.0)
 
     def _line(self, img, a, b, color, thick=1):
         pa, pb = self.cam.project(a), self.cam.project(b)
@@ -60,9 +59,8 @@ class Scene:
         self._grid(img)
 
         # operators, far to near
-        aim = float(hud.get("aim", 0.0))
         for i in sorted(range(ops.n), key=lambda k: -ops.pos[k][1]):
-            self._operator(img, ops, i, aim)
+            self._operator(img, ops, i)
 
         self._trail(img, quad.trail)
         self._shadow(img, quad)
@@ -81,7 +79,7 @@ class Scene:
         head = (float(ops.pos[i][0]), float(ops.pos[i][1]), 1.6)
         self._line(img, (quad.pos[0], quad.pos[1], quad.pos[2]), head, (66, 62, 56), 1)
 
-    def _grid(self, img, extent=9, step=1.5):
+    def _grid(self, img, extent=12, step=2.0):
         rng = np.arange(-extent, extent + step, step)
         for x in rng:
             self._line(img, (x, -extent, 0), (x, extent, 0),
@@ -90,24 +88,19 @@ class Scene:
             self._line(img, (-extent, y, 0), (extent, y, 0),
                        _GRID_AXIS if abs(y) < 1e-6 else _GRID, 2 if abs(y) < 1e-6 else 1)
 
-    def _operator(self, img, ops, i, aim=0.0):
+    def _operator(self, img, ops, i):
         base = (float(ops.pos[i][0]), float(ops.pos[i][1]), 0.0)
         head = (base[0], base[1], 1.75)
         anchor = i == ops.anchor
-        target = i == ops.target
-        col, thick = (_ANCHOR, 3) if anchor else (_TARGET, 3) if target else (_OP, 2)
+        col, thick = (_ANCHOR, 3) if anchor else (_OP, 2)
         self._line(img, base, head, col, thick)
         p = self.cam.project(head)
         if p:
-            cv2.circle(img, p, 6 if thick == 3 else 5, col, -1, cv2.LINE_AA)
+            cv2.circle(img, p, 6 if anchor else 5, col, -1, cv2.LINE_AA)
             cv2.putText(img, ops.names[i], (p[0] + 9, p[1] + 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1, cv2.LINE_AA)
         if anchor:
             self._ground_ring(img, base, 0.7, _ANCHOR)
-        if target:
-            self._ground_ring(img, base, 1.0, _TARGET)
-            if aim > 0.01:
-                self._ground_ring(img, base, 1.0, (150, 255, 255), arc=aim, thick=3)
 
     def _ground_ring(self, img, centre, r, col, thick=1, arc=1.0):
         pts = []
@@ -161,12 +154,9 @@ class Scene:
                     (80, 210, 255) if mode not in ("IDLE",) else _TEXT, 2, cv2.LINE_AA)
         cv2.putText(img, f"CTRL -> {ops.names[ops.anchor]}", (self.w - 150, 26), f, 0.5,
                     _ANCHOR, 1, cv2.LINE_AA)
-        if ops.target is not None and ops.target != ops.anchor:
-            cv2.putText(img, f"aim: {ops.names[ops.target]}  hold to send",
-                        (self.w - 220, 48), f, 0.45, _TARGET, 1, cv2.LINE_AA)
         swing = hud.get("swing", "")
         if swing:
-            cv2.putText(img, f"wiper {swing}", (self.w - 180, 66), f, 0.45,
+            cv2.putText(img, f"wiper {swing}", (self.w - 180, 48), f, 0.45,
                         (150, 255, 255), 1, cv2.LINE_AA)
 
         note = hud.get("note", "")
@@ -179,5 +169,5 @@ class Scene:
             cv2.rectangle(img, (170, self.h - 44), (170 + 150, self.h - 34), (60, 60, 60), -1)
             cv2.rectangle(img, (170, self.h - 44),
                           (170 + int(150 * prog), self.h - 34), (90, 230, 90), -1)
-        cv2.putText(img, "point at an operator & hold, or Victory ~2 s (random) - two-finger wiper dashes L/R",
+        cv2.putText(img, "Victory ~2 s -> hand off to a random operator   |   two-finger wiper -> dash L/R",
                     (14, self.h - 14), f, 0.36, (140, 140, 140), 1, cv2.LINE_AA)

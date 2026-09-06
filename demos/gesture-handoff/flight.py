@@ -21,10 +21,6 @@ ARRIVE_RADIUS = 1.0       # within this of the anchor, a return/hand-off is "don
 MAX_SPEED = 4.5           # m/s horizontal cruise cap
 DRAG = 1.6                # 1/s, frame-rate independent
 DASH_DISTANCE = 5.0       # metres the wiper nudges the drone sideways
-AIM_DWELL = 1.4           # seconds of steady pointing before a targeted hand-off
-_AIM_LOST = 0.5
-_AIM_MIN_POINT = 0.55     # |finger vector| that counts as a deliberate point
-_AIM_MIN_ALIGN = 0.35     # dot with an operator's on-screen direction
 
 
 def _ang_to(cur: float, target: float) -> float:
@@ -34,15 +30,12 @@ def _ang_to(cur: float, target: float) -> float:
 class Operators:
     """N people scattered through the scene, plus which one holds the drone."""
 
-    def __init__(self, n: int = 4, radius: float = 4.6, min_sep: float = 2.4, seed=None):
+    def __init__(self, n: int = 4, radius: float = 7.0, min_sep: float = 4.0, seed=None):
         self.n = max(2, int(n))
         self.rng = np.random.default_rng(seed)
         self.pos = _scatter(self.n, radius, min_sep, self.rng)
         self.names = [f"OP{i + 1}" for i in range(self.n)]
         self.anchor = 0               # operator the drone belongs to
-        self.target = None            # operator being pointed at for a targeted hand-off
-        self._aim_since = None
-        self._aim_seen = 0.0
 
     def anchor_pos(self) -> np.ndarray:
         return self.pos[self.anchor]
@@ -52,53 +45,6 @@ class Operators:
         choices = [i for i in range(self.n) if i != self.anchor]
         self.anchor = int(self.rng.choice(choices))
         return self.anchor
-
-    def aim_from_point(self, point_dir, drone_xy):
-        """Finger direction (image space) -> the operator most in that direction
-        from the drone, or None. Point the way you want the drone to go."""
-        dx, dy = point_dir
-        if (dx * dx + dy * dy) ** 0.5 < _AIM_MIN_POINT:
-            return None
-        want = np.array([dx, -dy])                    # screen up (-y) == world +y
-        want = want / (np.linalg.norm(want) + 1e-9)
-        drone_xy = np.asarray(drone_xy, float)
-        best, best_score = None, _AIM_MIN_ALIGN
-        for i in range(self.n):
-            if i == self.anchor:
-                continue
-            v = self.pos[i] - drone_xy
-            d = np.linalg.norm(v)
-            if d < 0.5:
-                continue
-            score = float(np.dot(v / d, want))
-            if score > best_score:
-                best, best_score = i, score
-        return best
-
-    def aim(self, target, now: float) -> None:
-        """Feed the aimed operator each frame; hold-to-send progress is tracked."""
-        if target is not None and target != self.anchor:
-            if target != self.target:
-                self.target = int(target)
-                self._aim_since = now
-            self._aim_seen = now
-        elif self.target is not None and now - self._aim_seen > _AIM_LOST:
-            self.target = None
-            self._aim_since = None
-
-    def aim_progress(self, now: float) -> float:
-        if self.target is None or self._aim_since is None:
-            return 0.0
-        return min(1.0, (now - self._aim_since) / AIM_DWELL)
-
-    def commit_aim(self):
-        """Move the anchor to the aimed operator. Returns the new anchor, or None."""
-        if self.target is not None and self.target != self.anchor:
-            self.anchor = self.target
-            self.target = None
-            self._aim_since = None
-            return self.anchor
-        return None
 
 
 class Quad:
@@ -181,13 +127,6 @@ class Autopilot:
             self.mode = "handoff"
             self._orbit_on = False
             return f"hand off -> {self.ops.names[new_anchor]}"
-        if cmd == "handoff_aim":
-            new_anchor = self.ops.commit_aim()
-            if new_anchor is None:
-                return ""
-            self.mode = "handoff"
-            self._orbit_on = False
-            return f"hand off -> {self.ops.names[new_anchor]}"
         return ""
 
     def update(self, quad: Quad, dt: float, now: float) -> None:
@@ -247,20 +186,30 @@ class Autopilot:
         return self.ops.pos[i]
 
 
+_CAM_EYE_Y = -18.0     # the scene camera sits here (keep in sync with scene.Scene)
+_MIN_AZIMUTH = 0.11    # rad (~6 deg) of angular separation as the camera sees them
+
+
+def _azimuth(p) -> float:
+    return math.atan2(p[0], p[1] - _CAM_EYE_Y)
+
+
 def _scatter(n: int, radius: float, min_sep: float, rng) -> list:
-    """n points scattered anywhere in a disc of the given radius, no two closer
-    than min_sep, recentred so the group's centroid is the origin."""
+    """n points scattered through a disc of the given radius, no two closer than
+    min_sep and no two within _MIN_AZIMUTH as the camera sees them (so they never
+    stack on screen), recentred so the group's centroid is the origin."""
     pts: list[np.ndarray] = []
-    for _ in range(8000):
+    for _ in range(12000):
         if len(pts) == n:
             break
         r = radius * math.sqrt(rng.random())
         a = rng.random() * 2 * math.pi
         p = np.array([r * math.cos(a), r * math.sin(a)])
-        if all(np.linalg.norm(p - q) >= min_sep for q in pts):
+        if all(np.linalg.norm(p - q) >= min_sep
+               and abs(_azimuth(p) - _azimuth(q)) >= _MIN_AZIMUTH for q in pts):
             pts.append(p)
-    while len(pts) < n:                            # fall back to a jittered ring
-        a = 2 * math.pi * (len(pts) + rng.random()) / n
-        pts.append(np.array([radius * 0.8 * math.cos(a), radius * 0.8 * math.sin(a)]))
+    while len(pts) < n:                            # fall back to a wide jittered arc
+        a = math.pi * (0.12 + 0.76 * (len(pts) + 0.3 * rng.random()) / max(1, n - 1))
+        pts.append(np.array([radius * math.cos(a), radius * 0.55 * math.sin(a)]))
     centroid = np.mean(pts, axis=0)
     return [p - centroid for p in pts]
