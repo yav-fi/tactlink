@@ -116,12 +116,15 @@ class Autopilot:
             self.mode = "return"
             self._orbit_on = False
             return f"return to {self.ops.names[self.ops.anchor]}"
-        if cmd in ("dash_east", "dash_west"):
-            d = DASH_DISTANCE if cmd == "dash_east" else -DASH_DISTANCE
-            self._dash_goal = quad.pos[:2] + np.array([d, 0.0])
+        if cmd in ("dash_east", "dash_west", "dash_forward"):
+            delta = {"dash_east": (DASH_DISTANCE, 0.0),
+                     "dash_west": (-DASH_DISTANCE, 0.0),
+                     "dash_forward": (0.0, DASH_DISTANCE)}[cmd]
+            self._dash_goal = quad.pos[:2] + np.array(delta)
             self._orbit_on = False
             self.mode = "dash"
-            return f"dash {'right' if d > 0 else 'left'}"
+            return {"dash_east": "dash right", "dash_west": "dash left",
+                    "dash_forward": "dash forward"}[cmd]
         if cmd == "handoff_random":
             new_anchor = self.ops.random_handoff()
             self.mode = "handoff"

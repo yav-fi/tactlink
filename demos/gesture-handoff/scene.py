@@ -154,12 +154,13 @@ class Scene:
                     (80, 210, 255) if mode not in ("IDLE",) else _TEXT, 2, cv2.LINE_AA)
         cv2.putText(img, f"CTRL -> {ops.names[ops.anchor]}", (self.w - 150, 26), f, 0.5,
                     _ANCHOR, 1, cv2.LINE_AA)
-        dash = float(hud.get("dash", 0.0))
-        if dash > 0.01:
-            cv2.putText(img, "dash", (self.w - 150, 48), f, 0.5, (150, 255, 255), 1, cv2.LINE_AA)
-            cv2.rectangle(img, (self.w - 100, 40), (self.w - 20, 48), (60, 60, 60), -1)
-            cv2.rectangle(img, (self.w - 100, 40),
-                          (self.w - 100 + int(80 * dash), 48), (150, 255, 255), -1)
+        pose = float(hud.get("pose", 0.0))
+        if pose > 0.01:
+            plabel = hud.get("pose_label", "")
+            cv2.putText(img, plabel, (self.w - 230, 48), f, 0.45, (150, 255, 255), 1, cv2.LINE_AA)
+            cv2.rectangle(img, (self.w - 230, 54), (self.w - 70, 60), (60, 60, 60), -1)
+            cv2.rectangle(img, (self.w - 230, 54),
+                          (self.w - 230 + int(160 * pose), 60), (150, 255, 255), -1)
 
         note = hud.get("note", "")
         if note:
@@ -171,5 +172,5 @@ class Scene:
             cv2.rectangle(img, (170, self.h - 44), (170 + 150, self.h - 34), (60, 60, 60), -1)
             cv2.rectangle(img, (170, self.h - 44),
                           (170 + int(150 * prog), self.h - 34), (90, 230, 90), -1)
-        cv2.putText(img, "Victory ~1.5 s -> hand off (random)   |   point index left/right & hold -> dash",
-                    (14, self.h - 14), f, 0.36, (140, 140, 140), 1, cv2.LINE_AA)
+        cv2.putText(img, "2 fingers up = hand off  |  3 fingers = dash fwd  |  index L/R = dash  |  hold each",
+                    (14, self.h - 14), f, 0.34, (140, 140, 140), 1, cv2.LINE_AA)

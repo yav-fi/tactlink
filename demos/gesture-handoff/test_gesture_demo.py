@@ -5,7 +5,7 @@ import numpy as np
 
 from flight import Autopilot, Operators, Quad
 from gesture_demo import StableLabel
-from gestures import GestureGate, Hand, SidePointDash, hand_from_landmarks
+from gestures import GestureGate, Hand, HeldPose, classify_pose, hand_from_landmarks
 
 
 def _row(*xs):
@@ -16,9 +16,14 @@ def _row(*xs):
     return ops
 
 
-def _point(dx, dy, fingers=(False, True, False, False, False)):
+def _hand(fingers, dx=0.0, dy=0.0):
     n = math.hypot(dx, dy) or 1.0
     return Hand(present=True, fingers=fingers, point_dir=(dx / n, dy / n))
+
+
+ONE = (False, True, False, False, False)
+TWO = (False, True, True, False, False)
+THREE = (False, True, True, True, False)
 
 
 class SettlingTests(unittest.TestCase):
@@ -36,56 +41,73 @@ class GestureGateTests(unittest.TestCase):
         self.assertEqual(gate.update('Thumb_Up', 0.45)[0], 'takeoff')
         self.assertIsNone(gate.update('Thumb_Up', 0.9)[0])
 
-    def test_victory_hold_time(self):
-        gate = GestureGate(holds={'Victory': 1.5})
-        t = 0.0
-        while t < 1.4:
-            self.assertIsNone(gate.update('Victory', t)[0])
-            t += 0.1
-        self.assertEqual(gate.update('Victory', 1.55)[0], 'handoff_random')
-
-    def test_brief_recognizer_dropout_does_not_reset_the_hold(self):
-        gate = GestureGate(holds={'Victory': 1.5}, gap=0.5)
+    def test_brief_dropout_does_not_reset_the_hold(self):
+        gate = GestureGate(hold=1.0, gap=0.5)
         fired, t = None, 0.0
-        while fired is None and t < 3.0:
-            label = 'None' if (round(t, 1) % 0.5 == 0.0 and t > 0) else 'Victory'
+        while fired is None and t < 2.0:
+            label = 'None' if (round(t, 1) % 0.5 == 0.0 and t > 0) else 'Pointing_Up'
             fired, _, _ = gate.update(label, t)
             t += 0.1
-        self.assertEqual(fired, 'handoff_random')
-        self.assertLess(t, 2.3)
+        self.assertEqual(fired, 'orbit')
+        self.assertLess(t, 1.7)
 
-    def test_fist_does_nothing(self):
+    def test_fist_and_victory_do_nothing_here(self):
         gate = GestureGate()
         for t in range(20):
             self.assertIsNone(gate.update('Closed_Fist', t * 0.2)[0])
+            self.assertIsNone(gate.update('Victory', t * 0.2)[0])
 
 
-class SidePointDashTests(unittest.TestCase):
-    def _hold(self, dx, dy, seconds=0.7, fingers=(False, True, False, False, False)):
-        d = SidePointDash()
+class ClassifyPoseTests(unittest.TestCase):
+    def test_finger_counts_and_directions(self):
+        self.assertEqual(classify_pose(_hand(TWO, dy=-1.0)), 'handoff_random')
+        self.assertEqual(classify_pose(_hand(THREE, dy=-1.0)), 'dash_forward')
+        self.assertEqual(classify_pose(_hand(THREE, dx=1.0)), 'dash_forward')
+        self.assertEqual(classify_pose(_hand(ONE, dx=1.0)), 'dash_east')
+        self.assertEqual(classify_pose(_hand(ONE, dx=-1.0)), 'dash_west')
+        self.assertEqual(classify_pose(_hand(TWO, dx=1.0)), 'dash_east')
+
+    def test_pointing_up_is_not_a_pose(self):
+        self.assertIsNone(classify_pose(_hand(ONE, dy=-1.0)))     # that's orbit (canned)
+        self.assertIsNone(classify_pose(None))
+
+    def test_canned_victory_promotes_to_the_handoff_pose(self):
+        self.assertEqual(classify_pose(None, 'Victory'), 'handoff_random')
+
+
+class HeldPoseTests(unittest.TestCase):
+    def _hold(self, pose, seconds=2.0):
+        h = HeldPose()
         fired, t = None, 0.0
         while fired is None and t < seconds:
             t += 0.05
-            fired, _ = d.update(_point(dx, dy, fingers), t)
-        return fired
+            fired, _, _ = h.update(pose, t)
+        return fired, t
 
-    def test_hold_index_right_or_left_dashes(self):
-        self.assertEqual(self._hold(1.0, 0.05), 'dash_east')
-        self.assertEqual(self._hold(-1.0, 0.05), 'dash_west')
+    def test_fires_after_its_hold_and_survives_a_blip(self):
+        fired, t = self._hold('dash_east')
+        self.assertEqual(fired, 'dash_east')
+        self.assertLess(t, 0.8)                       # dash hold ~0.5 s
 
-    def test_pointing_up_or_victory_up_never_dashes(self):
-        self.assertIsNone(self._hold(0.05, -1.0))                       # index up
-        self.assertIsNone(self._hold(0.05, -1.0, fingers=(False, True, True, False, False)))  # V up
+        h = HeldPose()
+        fired = None
+        t = 0.0
+        while fired is None and t < 2.0:
+            t += 0.05
+            p = None if round(t, 2) == 0.5 else 'handoff_random'   # one-frame blip
+            fired, _, _ = h.update(p, t)
+        self.assertEqual(fired, 'handoff_random')
+        self.assertLess(t, 1.4)                       # hand-off hold ~1.0 s
 
-    def test_needs_the_hold(self):
-        d = SidePointDash()
-        self.assertIsNone(d.update(_point(1.0, 0.0), 0.0)[0])
-        self.assertIsNone(d.update(_point(1.0, 0.0), 0.2)[0])           # not held long enough
-        self.assertGreater(d.update(_point(1.0, 0.0), 0.3)[1], 0.5)     # progress rising
+    def test_needs_a_release_before_re_firing(self):
+        h = HeldPose()
+        for k in range(20):
+            h.update('dash_east', k * 0.05)
+        self.assertIsNone(h.update('dash_east', 1.5)[0])   # still held, no repeat
 
 
 class DashTests(unittest.TestCase):
-    def test_dash_nudges_sideways_then_holds(self):
+    def test_dash_forward_moves_away_then_holds(self):
         from flight import DASH_DISTANCE
         ops = _row(-4.5, -1.5, 1.5, 4.5)
         quad = Quad(ops.anchor_pos())
@@ -93,12 +115,12 @@ class DashTests(unittest.TestCase):
         pilot.command('takeoff', quad, 0.0)
         for _ in range(200):
             pilot.update(quad, 1 / 30, 0.0)
-        x0 = quad.pos[0]
-        pilot.command('dash_east', quad, 5.0)
+        y0 = quad.pos[1]
+        pilot.command('dash_forward', quad, 5.0)
         for k in range(400):
             pilot.update(quad, 1 / 30, 5.0 + k / 30)
-        self.assertAlmostEqual(quad.pos[0] - x0, DASH_DISTANCE, delta=0.6)
-        self.assertEqual(pilot.mode, 'halt')      # holds, does not spring back
+        self.assertAlmostEqual(quad.pos[1] - y0, DASH_DISTANCE, delta=0.7)
+        self.assertEqual(pilot.mode, 'halt')
 
 
 class RandomHandoffTests(unittest.TestCase):
@@ -148,16 +170,14 @@ class ScatterTests(unittest.TestCase):
 
 
 class LandmarkTests(unittest.TestCase):
-    def test_two_finger_pose_detected_from_landmarks(self):
-        pts = [(0.5, 0.9)] * 21
-        pts[0] = (0.5, 0.9)                          # wrist
-        pts[5], pts[6], pts[8] = (0.5, 0.7), (0.5, 0.55), (0.5, 0.3)    # index out (up)
-        pts[9], pts[10], pts[12] = (0.55, 0.7), (0.55, 0.55), (0.55, 0.3)  # middle out
-        pts[13], pts[14] = (0.6, 0.7), (0.6, 0.72)   # ring curled
-        pts[17], pts[18] = (0.65, 0.7), (0.65, 0.72)  # pinky curled
+    def test_finger_counts_from_landmarks(self):
+        pts = [(0.5, 0.9)] * 21                       # everything at the wrist = curled
+        pts[5], pts[6], pts[8] = (0.5, 0.7), (0.5, 0.55), (0.5, 0.30)     # index out
+        pts[9], pts[10], pts[12] = (0.55, 0.7), (0.55, 0.55), (0.55, 0.30)  # middle out
+        pts[13], pts[14], pts[16] = (0.6, 0.7), (0.6, 0.55), (0.6, 0.30)  # ring out
         hand = hand_from_landmarks(pts)
         self.assertTrue(hand.present)
-        self.assertTrue(hand.two_fingers)
+        self.assertEqual(hand.up_count, 3)
 
 
 if __name__ == '__main__':

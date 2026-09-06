@@ -1,9 +1,13 @@
-"""Gesture debouncing and the finger-pointing helpers for the control demo.
+"""Gesture debouncing and geometric hand-pose classification for the demo.
 
-No camera or MediaPipe here - this takes a gesture *label* per frame plus 21
-hand landmarks and turns deliberate poses into commands: a held canned gesture
-(``GestureGate``) and an index finger held pointing left/right (``SidePointDash``
--> dash the drone that way).
+No camera or MediaPipe here.
+
+* ``GestureGate`` fires a command when a canned MediaPipe label is held.
+* ``hand_from_landmarks`` turns 21 landmarks into finger-extension states and an
+  index-pointing vector.
+* ``classify_pose`` + ``HeldPose`` recognise the poses MediaPipe is unreliable
+  about by counting fingers: two up = hand off, three up = dash forward, index
+  held sideways = dash left / right.
 """
 
 from __future__ import annotations
@@ -11,20 +15,18 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-# Canned MediaPipe gesture name -> demo command.
+# Canned MediaPipe gesture name -> demo command (the ones the model does well).
 ACTIONS = {
-    "Thumb_Up": "takeoff",        # arm + take off; again while flying = climb a step
-    "Thumb_Down": "land",         # descend + disarm
-    "Open_Palm": "halt",          # cancel the routine, hover in place
-    "Pointing_Up": "orbit",       # circle the controlling operator (toggle)
-    "ILoveYou": "return",         # fly back to the controlling operator
-    "Victory": "handoff_random",  # hand the drone to a random other operator
+    "Thumb_Up": "takeoff",     # arm + take off; again while flying = climb a step
+    "Thumb_Down": "land",      # descend + disarm
+    "Open_Palm": "halt",       # cancel the routine, hover in place
+    "Pointing_Up": "orbit",    # circle the controlling operator (toggle)
+    "ILoveYou": "return",      # fly back to the controlling operator
 }
 
 HOLD_SEC = 0.40
 RELEASE_SEC = 0.25
-GAP_SEC = 0.5              # a recognizer dropout shorter than this does not break a hold
-HOLDS = {"Victory": 1.5}   # per-gesture hold overrides
+GAP_SEC = 0.5             # a recognizer dropout shorter than this does not break a hold
 
 
 class GestureGate:
@@ -36,7 +38,7 @@ class GestureGate:
         self.hold = hold
         self.release = release
         self.gap = gap
-        self.holds = HOLDS if holds is None else holds
+        self.holds = holds or {}
         self._held = "None"
         self._since = 0.0
         self._seen = 0.0
@@ -82,9 +84,8 @@ class Hand:
     point_dir: tuple = (0.0, 0.0)      # index (+ middle) direction, image space (x right, y down)
 
     @property
-    def two_fingers(self) -> bool:
-        f = self.fingers
-        return bool(f[1] and f[2] and not f[3] and not f[4])
+    def up_count(self) -> int:
+        return sum(self.fingers[1:])   # index..pinky extended
 
 
 def _d(a, b) -> float:
@@ -104,10 +105,9 @@ def hand_from_landmarks(pts) -> Hand:
     thumb = _d(pts[4], w) > _d(pts[2], w) * 1.05
     fingers = (thumb, ext(8, 6), ext(12, 10), ext(16, 14), ext(20, 18))
 
-    # index direction, with the middle finger folded in only if it's also out
     dx = pts[8][0] - pts[5][0]
     dy = pts[8][1] - pts[5][1]
-    if fingers[2]:
+    if fingers[2]:                     # fold in the middle finger only if it's out too
         dx += pts[12][0] - pts[9][0]
         dy += pts[12][1] - pts[9][1]
     n = math.hypot(dx, dy)
@@ -115,52 +115,75 @@ def hand_from_landmarks(pts) -> Hand:
     return Hand(present=True, fingers=fingers, point_dir=point_dir)
 
 
-# --- point-to-dash ------------------------------------------------------
+# --- geometric held poses ----------------------------------------------
 
-_DASH_HOLD = 0.45      # hold the sideways point this long to dash
-_DASH_RELEASE = 0.45   # drop it this long before it can dash again
-_DASH_MIN_DX = 0.45    # |horizontal| of the point that counts as "sideways"
+_POSE_HOLD = {"handoff_random": 1.0, "dash_forward": 0.55,
+              "dash_east": 0.5, "dash_west": 0.5}
+_POSE_LABEL = {"handoff_random": "hand off (2 fingers up)",
+               "dash_forward": "dash forward (3 fingers)",
+               "dash_east": "dash right", "dash_west": "dash left"}
+_SIDE_DX = 0.45
 
 
-class SidePointDash:
-    """Point your index finger clearly left or right and hold ~0.45 s -> the
-    drone dashes that way. Held, not swung - easy to do on a webcam. Pointing
-    up (orbit) or a Victory sign point up, so they never trigger this."""
+def classify_pose(hand: Hand | None, canned: str = "None") -> str | None:
+    """Which held-pose command the hand is making, or None. ``canned`` lets a
+    MediaPipe "Victory" also count as the two-finger hand-off pose."""
+    if canned == "Victory":
+        return "handoff_random"
+    if hand is None or not hand.present:
+        return None
+    idx, mid, rng, pnk = hand.fingers[1:]
+    dx, dy = hand.point_dir
+    sideways = abs(dx) >= _SIDE_DX and abs(dx) >= abs(dy) * 1.2
 
-    def __init__(self):
-        self._dir = None
+    if idx and mid and rng and not pnk:              # three fingers
+        return "dash_forward"
+    if idx and mid and not rng and not pnk:          # two fingers
+        if sideways:
+            return "dash_east" if dx > 0 else "dash_west"
+        if dy < -0.3:                                # pointing up = Victory shape
+            return "handoff_random"
+    if idx and not mid and not rng and not pnk and sideways:   # one finger, sideways
+        return "dash_east" if dx > 0 else "dash_west"
+    return None
+
+
+class HeldPose:
+    """Fires a geometric pose command once it is held long enough; the pose must
+    drop for ``release`` s before the same command can fire again."""
+
+    def __init__(self, release: float = 0.4, gap: float = 0.35):
+        self.release = release
+        self.gap = gap
+        self._pose = None
         self._since = 0.0
         self._seen = -1e9
         self._fired = None
         self._rest_since = None
 
-    def update(self, hand: Hand | None, now: float):
-        """Returns ``(command | None, hold_progress 0..1)``."""
-        want = None
-        if hand is not None and hand.present:
-            f = hand.fingers
-            index_out = f[1] and not f[3] and not f[4]     # index up, ring + pinky down
-            dx, dy = hand.point_dir
-            if index_out and abs(dx) >= _DASH_MIN_DX and abs(dx) >= abs(dy) * 1.2:
-                want = "dash_east" if dx > 0 else "dash_west"
+    def update(self, pose: str | None, now: float):
+        """Returns ``(command | None, progress 0..1, pose_label)``."""
+        if pose is not None:
+            if pose != self._pose:
+                self._pose = pose
+                self._since = now
+            self._seen = now
+            self._rest_since = None
+        else:
+            if self._pose is not None and now - self._seen > self.gap:
+                self._pose = None
+            if self._pose is None:
+                if self._rest_since is None:
+                    self._rest_since = now
+                if now - self._rest_since >= self.release:
+                    self._fired = None
 
-        if want is None:
-            if now - self._seen > 0.35:
-                self._dir = None
-            if self._rest_since is None:
-                self._rest_since = now
-            if now - self._rest_since >= _DASH_RELEASE:
-                self._fired = None
-            return None, 0.0
+        if self._pose is None or self._pose == self._fired:
+            return None, 0.0, ""
 
-        self._rest_since = None
-        self._seen = now
-        if want != self._dir:
-            self._dir, self._since = want, now
-        if want == self._fired:
-            return None, 1.0
-        progress = min(1.0, (now - self._since) / _DASH_HOLD)
+        progress = min(1.0, (now - self._since) / _POSE_HOLD.get(self._pose, 0.6))
+        label = _POSE_LABEL.get(self._pose, self._pose)
         if progress >= 1.0:
-            self._fired = want
-            return want, 1.0
-        return None, progress
+            self._fired = self._pose
+            return self._pose, 1.0, label
+        return None, progress, label

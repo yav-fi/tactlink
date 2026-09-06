@@ -1,15 +1,14 @@
 """Webcam gesture control demo: operator 1 flies one drone among N static
-operators (scattered at random through the scene) and hands it to a random
-other operator by holding a Victory sign.
+operators (scattered at random through the scene) and hands it between them.
 
     python demos/gesture-handoff/gesture_demo.py            # live webcam
     python demos/gesture-handoff/gesture_demo.py --demo     # no camera: scripted flight
     python demos/gesture-handoff/gesture_demo.py --check    # load the model and exit
 
-Gestures (hold ~0.4 s): thumbs up = take off / climb, thumbs down = land,
-open palm = halt, point up = orbit, I-love-you = return. Hold a Victory sign
-~1.5 s to hand the drone to a random operator. Point your index finger clearly
-left or right and hold ~0.5 s to dash the drone that way.
+Canned gestures (hold ~0.4 s): thumbs up = take off / climb, thumbs down = land,
+open palm = halt, point up = orbit, I-love-you = return. Held finger poses:
+two fingers up ~1 s = hand off to a random operator, three fingers ~0.6 s = dash
+forward, index held left/right ~0.5 s = dash that way.
 
 ``--diag`` prints what the recognizer sees each frame. Runs on the repo's deps
 (mediapipe / opencv / numpy); imports nothing from src/. Recognition is local;
@@ -62,15 +61,15 @@ class Sim:
 
     def __init__(self, n_operators=4, seed=None):
         from flight import Autopilot, Operators, Quad
-        from gestures import GestureGate, SidePointDash
+        from gestures import GestureGate, HeldPose
 
         self.ops = Operators(n_operators, seed=seed)
         self.quad = Quad(self.ops.anchor_pos())
         self.pilot = Autopilot(self.ops)
         self.gate = GestureGate()
-        self.dash = SidePointDash()
+        self.pose = HeldPose()
         self.hud = {'mode': 'idle', 'gesture': 'None', 'progress': 0.0,
-                    'note': '', 'dash': 0.0}
+                    'note': '', 'pose': 0.0, 'pose_label': ''}
         self._note_until = 0.0
 
     def _note(self, text, now):
@@ -78,15 +77,20 @@ class Sim:
             self.hud['note'] = text
             self._note_until = now + 2.5
 
-    def advance(self, raw_label, hand, dt, now):
-        # Index finger held pointing left/right -> dash. It points sideways;
-        # Victory / point-up point up, so the two never collide.
-        dash, dash_prog = self.dash.update(hand, now)
-        if dash:
-            self._note(self.pilot.command(dash, self.quad, now), now)
+    def advance(self, raw_label, hand, dt, now, force_pose=None):
+        from gestures import classify_pose
+
         command, progress, held = self.gate.update(raw_label, now)
         if command:
             self._note(self.pilot.command(command, self.quad, now), now)
+
+        # Geometric held poses: 2 fingers up = hand off, 3 fingers = dash
+        # forward, index held sideways = dash left/right. A canned "Victory" also
+        # counts as the hand-off pose.
+        pose = force_pose if force_pose is not None else classify_pose(hand, raw_label)
+        pcmd, pprog, plabel = self.pose.update(pose, now)
+        if pcmd:
+            self._note(self.pilot.command(pcmd, self.quad, now), now)
 
         self.pilot.update(self.quad, dt, now)
 
@@ -95,7 +99,8 @@ class Sim:
         self.hud['mode'] = self.pilot.mode
         self.hud['gesture'] = FRIENDLY.get(held, held if held != 'None' else 'None')
         self.hud['progress'] = progress
-        self.hud['dash'] = dash_prog
+        self.hud['pose'] = pprog
+        self.hud['pose_label'] = plabel
 
     def render_scene(self, scene):
         return scene.render(self.quad, self.ops, self.hud)
@@ -103,38 +108,28 @@ class Sim:
 
 # --- scripted demo input -------------------------------------------------
 
-# (start, end) seconds -> (gesture label, extra) where extra is None or
-# "dash:left" / "dash:right" (the wiper).
+# (start, end) seconds -> (canned label, geometric pose) held during the demo.
 _DEMO = [
-    (1.5, 2.6, 'Thumb_Up', None),        # take off
-    (4.0, 5.0, 'Thumb_Up', None),        # climb a step
-    (6.5, 8.0, 'Pointing_Up', None),     # orbit the starting operator
-    (9.5, 10.5, 'Open_Palm', None),      # halt / stop orbiting
-    (12.5, 13.0, 'None', 'dash:right'),  # wiper -> dash right
-    (16.0, 16.5, 'None', 'dash:left'),   # wiper -> dash left
-    (19.0, 23.0, 'Victory', None),       # hold ~2 s -> hand off to a random operator
-    (26.0, 27.5, 'Pointing_Up', None),   # orbit the new operator
-    (30.0, 31.0, 'ILoveYou', None),      # return to them
-    (33.0, 37.0, 'Victory', None),       # hold ~2 s -> hand off again
-    (40.0, 41.2, 'Thumb_Down', None),    # land
+    (1.5, 2.6, 'Thumb_Up', None),                 # take off
+    (4.0, 5.0, 'Thumb_Up', None),                 # climb a step
+    (6.5, 8.0, 'Pointing_Up', None),              # orbit the starting operator
+    (9.5, 10.5, 'Open_Palm', None),               # halt / stop orbiting
+    (12.5, 13.5, 'None', 'dash_east'),            # index right -> dash right
+    (16.0, 17.0, 'None', 'dash_west'),            # index left -> dash left
+    (19.5, 20.5, 'None', 'dash_forward'),         # three fingers -> dash forward
+    (23.0, 25.0, 'None', 'handoff_random'),       # two fingers up -> hand off
+    (28.0, 29.5, 'Pointing_Up', None),            # orbit the new operator
+    (32.0, 33.0, 'ILoveYou', None),               # return to them
+    (35.5, 37.5, 'None', 'handoff_random'),       # hand off again
+    (40.0, 41.2, 'Thumb_Down', None),             # land
 ]
 
 
 def _demo_input(t):
-    for a, b, label, extra in _DEMO:
+    for a, b, label, pose in _DEMO:
         if a <= t < b:
-            return label, extra
+            return label, pose
     return 'None', None
-
-
-def _demo_step(sim, t, prev_extra):
-    """Translate a demo timeline entry into a label, firing one-shot dash
-    commands on segment entry."""
-    label, extra = _demo_input(t)
-    if extra and extra.startswith('dash:') and extra != prev_extra:
-        sim.pilot.command('dash_west' if extra.endswith('left') else 'dash_east',
-                          sim.quad, t)
-    return label, extra
 
 
 # --- panels + compositing ---------------------------------------------------
@@ -163,13 +158,14 @@ def _webcam_panel(cv2, np, frame, hands, stable_label, score, progress, raw_hint
     return panel
 
 
-def _demo_panel(cv2, np, raw_label):
+def _demo_panel(cv2, np, raw_label, pose=None):
     panel = np.full((PANEL_H, PANEL_W, 3), (30, 28, 26), dtype=np.uint8)
     cv2.putText(panel, 'DEMO MODE (no camera)', (60, 220), cv2.FONT_HERSHEY_SIMPLEX,
                 0.9, (200, 200, 200), 2, cv2.LINE_AA)
-    if raw_label != 'None':
-        cv2.putText(panel, FRIENDLY.get(raw_label, raw_label), (60, 262),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (140, 240, 140), 2, cv2.LINE_AA)
+    text = FRIENDLY.get(raw_label, raw_label) if raw_label != 'None' else pose
+    if text:
+        cv2.putText(panel, str(text), (60, 262), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8, (140, 240, 140), 2, cv2.LINE_AA)
     return panel
 
 
@@ -184,12 +180,12 @@ def run_demo(args):
     scene = Scene(PANEL_W, PANEL_H)
 
     if args.headless:                       # virtual clock: renders immediately
-        dt, vt, raw_label, extra = 1 / 60, 0.0, 'None', None
+        dt, vt, raw_label = 1 / 60, 0.0, 'None'
         while vt < args.seconds:
             vt += dt
-            raw_label, extra = _demo_step(sim, vt, extra)
-            sim.advance(raw_label, None, dt, vt)
-        composite = np.hstack([_demo_panel(cv2, np, raw_label), sim.render_scene(scene)])
+            raw_label, pose = _demo_input(vt)
+            sim.advance(raw_label, None, dt, vt, force_pose=pose)
+        composite = np.hstack([_demo_panel(cv2, np, raw_label, pose), sim.render_scene(scene)])
         if args.out:
             cv2.imwrite(args.out, composite)
             print(f'wrote {args.out}')
@@ -199,15 +195,14 @@ def run_demo(args):
     cv2.namedWindow(window, cv2.WINDOW_NORMAL)
     start = time.monotonic()
     prev = start
-    extra = None
     while True:
         now = time.monotonic()
         t = now - start
         dt = min(0.05, now - prev)
         prev = now
-        raw_label, extra = _demo_step(sim, t, extra)
-        sim.advance(raw_label, None, dt if dt > 0 else 1 / 60, now)
-        composite = np.hstack([_demo_panel(cv2, np, raw_label), sim.render_scene(scene)])
+        raw_label, pose = _demo_input(t)
+        sim.advance(raw_label, None, dt if dt > 0 else 1 / 60, now, force_pose=pose)
+        composite = np.hstack([_demo_panel(cv2, np, raw_label, pose), sim.render_scene(scene)])
         cv2.imshow(window, composite)
         if cv2.waitKey(16) & 0xFF in (27, ord('q')):
             break
@@ -220,7 +215,7 @@ def run_live(args):
     import cv2
     import mediapipe as mp
     import numpy as np
-    from gestures import hand_from_landmarks
+    from gestures import classify_pose, hand_from_landmarks
     from scene import Scene
 
     model = Path(__file__).with_name('gesture_recognizer.task')
@@ -287,10 +282,12 @@ def run_live(args):
 
                 fs = ''.join('TIMRP'[k] if hand and hand.fingers[k] else '-'
                              for k in range(5)) if hand else '-----'
-                readout = f'model: {top_name} {top_score:.0%}   fingers {fs}'
+                pose = classify_pose(hand, raw)
+                readout = f'model {top_name} {top_score:.0%}  fingers {fs}' + \
+                          (f'  -> {pose}' if pose else '')
                 if args.diag and int(now * 4) != int((now - dt) * 4):
                     pd = hand.point_dir if hand else (0, 0)
-                    print(f'{readout}   point ({pd[0]:+.2f},{pd[1]:+.2f})', flush=True)
+                    print(f'{readout}  point ({pd[0]:+.2f},{pd[1]:+.2f})', flush=True)
 
                 disp = FRIENDLY.get(raw, 'Unknown') if raw != 'None' else 'Unknown'
                 label, conf, prog = stable.update(disp, score, now)
