@@ -21,7 +21,12 @@ export type AvoidanceMove = {
  */
 export function avoidanceMove(viewer: Cesium.Viewer, from: Cesium.Cartesian3, to: Cesium.Cartesian3): AvoidanceMove | undefined {
   if (!movementBlocked(viewer, from, to)) return { position: Cesium.Cartesian3.clone(to), detoured: false };
+  const position = detourAround(viewer, from, to);
+  return position ? { position, detoured: true } : undefined;
+}
 
+/** Widen the search around a segment already known to be blocked. */
+function detourAround(viewer: Cesium.Viewer, from: Cesium.Cartesian3, to: Cesium.Cartesian3): Cesium.Cartesian3 | undefined {
   const frame = Cesium.Transforms.eastNorthUpToFixedFrame(from);
   const inverse = Cesium.Matrix4.inverseTransformation(frame, new Cesium.Matrix4());
   const worldDelta = Cesium.Cartesian3.subtract(to, from, new Cesium.Cartesian3());
@@ -44,9 +49,80 @@ export function avoidanceMove(viewer: Cesium.Viewer, from: Cesium.Cartesian3, to
 
   for (const candidate of candidates) {
     const position = Cesium.Matrix4.multiplyByPoint(frame, candidate, new Cesium.Cartesian3());
-    if (!movementBlocked(viewer, from, position)) return { position, detoured: true };
+    if (!movementBlocked(viewer, from, position)) return position;
   }
   return undefined;
+}
+
+// A building query renders an offscreen pick pass and reads pixels back from
+// the GPU, which stalls the frame it runs on. Probing one per animation frame
+// per drone is what makes flight look jagged while a parked drone looks smooth.
+const MIN_LOOKAHEAD_METERS = 4;
+const MAX_LOOKAHEAD_METERS = 30;
+const LOOKAHEAD_SECONDS = 0.25;
+const CORRIDOR_MAX_SECONDS = 0.5;
+// Roughly 1.8 degrees, so drift across a full corridor stays inside the ray sweep.
+const SAME_HEADING_DOT = 0.9995;
+
+/**
+ * Clears a straight corridor ahead of a drone once, then flies inside it for
+ * free. A corridor is re-probed only when it is used up, when it ages out, or
+ * when the requested heading changes, which cuts building queries from one per
+ * frame to a handful per second without shortening the safety margin.
+ */
+export class MotionGuard {
+  private requested?: Cesium.Cartesian3;
+  private travel?: Cesium.Cartesian3;
+  private remaining = 0;
+  private age = 0;
+  private detoured = false;
+
+  /** Drop the corridor whenever the flight mode, route, or position changes. */
+  clear(): void {
+    this.requested = undefined;
+    this.travel = undefined;
+    this.remaining = 0;
+    this.age = 0;
+    this.detoured = false;
+  }
+
+  move(viewer: Cesium.Viewer, from: Cesium.Cartesian3, to: Cesium.Cartesian3, seconds: number): AvoidanceMove | undefined {
+    const delta = Cesium.Cartesian3.subtract(to, from, new Cesium.Cartesian3());
+    const step = Cesium.Cartesian3.magnitude(delta);
+    if (step < 0.00001) return { position: Cesium.Cartesian3.clone(to), detoured: false };
+    const heading = Cesium.Cartesian3.divideByScalar(delta, step, new Cesium.Cartesian3());
+    this.age += Math.max(0, seconds);
+    if (this.travel && this.requested && this.remaining >= step && this.age <= CORRIDOR_MAX_SECONDS
+      && Cesium.Cartesian3.dot(this.requested, heading) >= SAME_HEADING_DOT) {
+      this.remaining -= step;
+      return { position: this.detoured ? advance(from, this.travel, step) : Cesium.Cartesian3.clone(to), detoured: this.detoured };
+    }
+
+    this.clear();
+    const speed = seconds > 0 ? step / seconds : 0;
+    const lookahead = Math.min(MAX_LOOKAHEAD_METERS, Math.max(step, MIN_LOOKAHEAD_METERS, speed * LOOKAHEAD_SECONDS));
+    const probe = advance(from, heading, lookahead);
+    if (!movementBlocked(viewer, from, probe)) {
+      this.requested = this.travel = heading;
+      this.remaining = lookahead - step;
+      return { position: Cesium.Cartesian3.clone(to), detoured: false };
+    }
+
+    // Steer around the obstacle at probe range and hold that heading, rather
+    // than picking a fresh deflection angle on every single frame.
+    const detour = detourAround(viewer, from, probe);
+    if (!detour) return undefined;
+    const reach = Cesium.Cartesian3.distance(from, detour);
+    this.requested = heading;
+    this.travel = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(detour, from, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+    this.remaining = Math.max(0, reach - step);
+    this.detoured = true;
+    return { position: advance(from, this.travel, Math.min(step, reach)), detoured: true };
+  }
+}
+
+function advance(from: Cesium.Cartesian3, direction: Cesium.Cartesian3, distance: number): Cesium.Cartesian3 {
+  return Cesium.Cartesian3.add(from, Cesium.Cartesian3.multiplyByScalar(direction, distance, new Cesium.Cartesian3()), new Cesium.Cartesian3());
 }
 
 export function movementBlocked(viewer: Cesium.Viewer, from: Cesium.Cartesian3, to: Cesium.Cartesian3): boolean {

@@ -471,8 +471,28 @@ test("photorealistic ground can be below the hidden fallback ellipsoid", () => {
   assert(drone.snapshot().longitude > home.longitude);
   assert.equal(drone.collisionBlocked, false);
   viewer.scene.pickFromRay = ray => ({ position: Cesium.Ray.getPoint(ray, 1) });
-  drone.moveManually(1, 0, 0, 0.1);
+  // Reversing course leaves the cleared corridor, so the wall is probed again.
+  drone.moveManually(-1, 0, 0, 0.1);
   assert.equal(drone.collisionBlocked, true);
+});
+
+test("cleared corridors are reused for a while, then re-probed", () => {
+  let queries = 0;
+  const viewer = { entities: new Cesium.EntityCollection(), scene: {
+    pickFromRay: () => { queries++; return undefined; },
+    globe: { show: false, pick: () => undefined, getHeight: () => 0 },
+  } };
+  const drone = new Fleet(viewer).deploy(home);
+  drone.setManualControl(true);
+  drone.moveManually(1, 0, 0, 1 / 60);
+  assert.equal(queries, 1);
+  // Steady flight down the same heading flies inside the corridor for free.
+  for (let frame = 0; frame < 4; frame++) drone.moveManually(1, 0, 0, 1 / 60);
+  assert.equal(queries, 1);
+  assert(drone.snapshot().longitude > home.longitude);
+  // The corridor covers a quarter second of flight and is then re-probed.
+  for (let frame = 0; frame < 60; frame++) drone.moveManually(1, 0, 0, 1 / 60);
+  assert(queries > 1 && queries < 20, `expected a handful of probes, got ${queries}`);
 });
 
 test("failed building queries do not freeze drones or leave the camera in an offscreen view", () => {
