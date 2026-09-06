@@ -9,8 +9,9 @@ git clone https://github.com/yav-fi/dnhacks26.git
 Yavin added `AGENTS.md` and `CLAUDE.md` to keep coding-agent instructions
 consistent across tools.
 
-This repo hosts five hackathon workstreams:
+This repo hosts six hackathon workstreams:
 
+- **[iOS UWB group positioning](ios/README.md)** — native iPhone room joining, rotating UWB pairs, relative maps, and profiling (`ios/`).
 - **[Local LLM chat + benchmark](#local-llm-chat--benchmark)** — fast on-device
   chat inference (`chat_client.py`, `scripts/`).
 - **[Webcam gesture quadcopter control](#webcam-gesture-quadcopter-control)** —

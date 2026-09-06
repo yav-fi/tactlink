@@ -1,0 +1,234 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0E1F7939D91B4581CB9B33CF /* BenchLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78341D3DAB5AC319EDB17188 /* BenchLog.swift */; };
+		0F7E22CEED66A4CB5B980009 /* RangeGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF95549716085D332C7802A /* RangeGeometry.swift */; };
+		60EDBA8853426E3431668792 /* RoomRanging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2226FEF7A16D313BF1CC44D5 /* RoomRanging.swift */; };
+		827D30A20B2B29313F88653C /* RoomSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3B794BA9429F2C22BF764C4 /* RoomSession.swift */; };
+		64A9028494D8B994C550ECB5 /* RoomTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6B89E752EA4126FCFD283FC /* RoomTransport.swift */; };
+		F07861B25F1733CCFC19AADF /* RoomTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8B3E580B598FEB2281572BF /* RoomTypes.swift */; };
+		BDAB630274E7822342001734 /* RoomView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05CAE8B4D7DF8CDE67C0BC17 /* RoomView.swift */; };
+		AF690C5EF47012D8FA4D9C79 /* SignalMapApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3385A57426B673C763666A7 /* SignalMapApp.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		78341D3DAB5AC319EDB17188 /* BenchLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BenchLog.swift; sourceTree = "<group>"; };
+		AEF95549716085D332C7802A /* RangeGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RangeGeometry.swift; sourceTree = "<group>"; };
+		2226FEF7A16D313BF1CC44D5 /* RoomRanging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomRanging.swift; sourceTree = "<group>"; };
+		D3B794BA9429F2C22BF764C4 /* RoomSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomSession.swift; sourceTree = "<group>"; };
+		E6B89E752EA4126FCFD283FC /* RoomTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTransport.swift; sourceTree = "<group>"; };
+		A8B3E580B598FEB2281572BF /* RoomTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTypes.swift; sourceTree = "<group>"; };
+		05CAE8B4D7DF8CDE67C0BC17 /* RoomView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomView.swift; sourceTree = "<group>"; };
+		E3385A57426B673C763666A7 /* SignalMapApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalMapApp.swift; sourceTree = "<group>"; };
+		7D1043473D55BFA90E8530D3 /* SignalMap.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = SignalMap.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7561BFB015D8F536760CB671 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		482182478A3ECD4745BEA917 /* SignalMap */ = {
+			isa = PBXGroup;
+			children = (
+				78341D3DAB5AC319EDB17188 /* BenchLog.swift */,
+				AEF95549716085D332C7802A /* RangeGeometry.swift */,
+				2226FEF7A16D313BF1CC44D5 /* RoomRanging.swift */,
+				D3B794BA9429F2C22BF764C4 /* RoomSession.swift */,
+				E6B89E752EA4126FCFD283FC /* RoomTransport.swift */,
+				A8B3E580B598FEB2281572BF /* RoomTypes.swift */,
+				05CAE8B4D7DF8CDE67C0BC17 /* RoomView.swift */,
+				E3385A57426B673C763666A7 /* SignalMapApp.swift */,
+			);
+			path = SignalMap;
+			sourceTree = "<group>";
+		};
+		B28B7AF69320201D1CF206EB = {
+			isa = PBXGroup;
+			children = (
+				482182478A3ECD4745BEA917 /* SignalMap */,
+				FBDC4F23F93125BBEEAE800C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		FBDC4F23F93125BBEEAE800C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				7D1043473D55BFA90E8530D3 /* SignalMap.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0E8A3AD980EC179856012B7E /* SignalMap */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C57128001CE614BF8549D6BB /* Build configuration list for PBXNativeTarget "SignalMap" */;
+			buildPhases = (
+				BCE16DD0260827ECF338C787 /* Sources */,
+				7561BFB015D8F536760CB671 /* Frameworks */,
+				0189424A5A60FED329FA868E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SignalMap;
+			productName = SignalMap;
+			productReference = 7D1043473D55BFA90E8530D3 /* SignalMap.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		98F54143AB4E86B28C3AFEE0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1640;
+			};
+			buildConfigurationList = 862894B703A6DEDF96A9DD6C /* Build configuration list for PBXProject "SignalMap" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = B28B7AF69320201D1CF206EB;
+			productRefGroup = FBDC4F23F93125BBEEAE800C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0E8A3AD980EC179856012B7E /* SignalMap */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		0189424A5A60FED329FA868E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		BCE16DD0260827ECF338C787 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0E1F7939D91B4581CB9B33CF /* BenchLog.swift in Sources */,
+				0F7E22CEED66A4CB5B980009 /* RangeGeometry.swift in Sources */,
+				60EDBA8853426E3431668792 /* RoomRanging.swift in Sources */,
+				827D30A20B2B29313F88653C /* RoomSession.swift in Sources */,
+				64A9028494D8B994C550ECB5 /* RoomTransport.swift in Sources */,
+				F07861B25F1733CCFC19AADF /* RoomTypes.swift in Sources */,
+				BDAB630274E7822342001734 /* RoomView.swift in Sources */,
+				AF690C5EF47012D8FA4D9C79 /* SignalMapApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		639A7CA24D39909E713B47F7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = 3JFRUZPDPU;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = SignalMap/Info.plist;
+				MARKETING_VERSION = 2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.arulandu.SignalMap;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		7082CC0B6FC1282FCEABD07A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = 3JFRUZPDPU;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = SignalMap/Info.plist;
+				MARKETING_VERSION = 2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.arulandu.SignalMap;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		89E1FD6268CC0F221A2BE178 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		E6DE6C99132752C914FEF632 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		862894B703A6DEDF96A9DD6C /* Build configuration list for PBXProject "SignalMap" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				89E1FD6268CC0F221A2BE178 /* Debug */,
+				E6DE6C99132752C914FEF632 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C57128001CE614BF8549D6BB /* Build configuration list for PBXNativeTarget "SignalMap" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7082CC0B6FC1282FCEABD07A /* Debug */,
+				639A7CA24D39909E713B47F7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 98F54143AB4E86B28C3AFEE0 /* Project object */;
+}
