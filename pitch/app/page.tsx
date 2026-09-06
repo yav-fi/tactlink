@@ -472,6 +472,167 @@ function Pipeline({ training }: { training: boolean }) {
   );
 }
 
+function TeammateVisual() {
+  return (
+    <figure className="teammate-visual">
+      <div className="visual-top">
+        <span>
+          <i className="status-dot" /> HUMAN INTENT
+        </span>
+        <span>ONE SHARED TEAM</span>
+      </div>
+      <svg
+        viewBox="0 0 600 430"
+        role="img"
+        aria-label="Illustration of a tracked hand gesture connected to a drone above a team of three people"
+      >
+        <defs>
+          <pattern
+            id="team-grid"
+            width="30"
+            height="30"
+            patternUnits="userSpaceOnUse"
+          >
+            <path
+              d="M 30 0 L 0 0 0 30"
+              fill="none"
+              stroke="#2c3427"
+              strokeWidth="1"
+            />
+          </pattern>
+          <linearGradient id="team-glow">
+            <stop stopColor="#b4ef74" stopOpacity=".12" />
+            <stop offset="1" stopColor="#b4ef74" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <rect x="0" y="0" width="600" height="430" fill="url(#team-grid)" />
+        <rect x="0" y="0" width="600" height="430" fill="url(#team-glow)" />
+        <path
+          d="M26 80V36h44 M530 36h44v44 M26 350v44h44 M530 394h44v-44"
+          fill="none"
+          stroke="#6c805c"
+          strokeWidth="2"
+        />
+        <text x="48" y="68" fill="#9ca593" fontSize="11" fontFamily="monospace">
+          GESTURE → INTENT
+        </text>
+        <path
+          d="M164 336 L122 289 L87 227 Q78 209 91 210 L127 245 L143 259 L126 158 L113 100 Q112 84 125 86 L142 149 L157 210 L166 224 L169 196 Q173 181 181 194 L188 220 L197 226 L208 203 Q216 193 221 208 L221 232 L232 206 L253 132 Q258 116 269 124 L253 224 L230 293 L201 340 Z"
+          fill="#1d2d17"
+          stroke="#b4ef74"
+          strokeWidth="2"
+        />
+        <g fill="none" stroke="#7dd3c5" strokeWidth="2">
+          <path d="M185 334L143 281L115 240L88 216 M185 334L156 223L141 165L121 97 M156 223L178 218L177 194 M178 218L199 225L215 207 M199 225L228 242L247 184L263 129 M185 334L228 242 M156 223L178 218L199 225L228 242" />
+        </g>
+        <g fill="#eff1e9">
+          {[
+            [185, 334],
+            [143, 281],
+            [115, 240],
+            [88, 216],
+            [156, 223],
+            [141, 165],
+            [121, 97],
+            [178, 218],
+            [177, 194],
+            [199, 225],
+            [215, 207],
+            [228, 242],
+            [247, 184],
+            [263, 129],
+          ].map(([x, y], i) => (
+            <circle key={i} cx={x} cy={y} r="4" />
+          ))}
+        </g>
+        <path
+          d="M283 219H335"
+          stroke="#b4ef74"
+          strokeWidth="2"
+          strokeDasharray="5 6"
+        />
+        <path
+          d="m328 213 9 6-9 6"
+          fill="none"
+          stroke="#b4ef74"
+          strokeWidth="2"
+        />
+        <ellipse
+          cx="435"
+          cy="316"
+          rx="96"
+          ry="40"
+          fill="none"
+          stroke="#6c805c"
+          strokeDasharray="5 6"
+        />
+        <path
+          d="M435 171V284"
+          stroke="#b4ef74"
+          strokeDasharray="4 6"
+          opacity=".6"
+        />
+        <g
+          transform="translate(435 153)"
+          stroke="#b4ef74"
+          strokeWidth="3"
+          fill="none"
+        >
+          <path d="M-32-19 32 19 M32-19-32 19" />
+          <ellipse cx="-32" cy="-19" rx="20" ry="10" />
+          <ellipse cx="32" cy="-19" rx="20" ry="10" />
+          <ellipse cx="-32" cy="19" rx="20" ry="10" />
+          <ellipse cx="32" cy="19" rx="20" ry="10" />
+          <rect x="-10" y="-16" width="20" height="32" rx="6" fill="#b4ef74" />
+        </g>
+        <text
+          x="435"
+          y="105"
+          textAnchor="middle"
+          fill="#b4ef74"
+          fontSize="12"
+          fontFamily="monospace"
+        >
+          YOUR DRONE TEAMMATE
+        </text>
+        {[
+          [375, 298],
+          [437, 320],
+          [501, 288],
+        ].map(([x, y], i) => (
+          <g
+            key={i}
+            transform={`translate(${x} ${y})`}
+            stroke={i === 0 ? '#b4ef74' : '#9ca593'}
+            fill="none"
+            strokeWidth="3"
+          >
+            <circle cy="-26" r="7" />
+            <path d="M0-18V8 M0-10-12 0 M0-10 13-22 M0 8-9 24 M0 8 9 24" />
+          </g>
+        ))}
+        <text
+          x="435"
+          y="377"
+          textAnchor="middle"
+          fill="#9ca593"
+          fontSize="11"
+          fontFamily="monospace"
+        >
+          UNDERSTAND. RESPOND. BELONG.
+        </text>
+      </svg>
+      <div className="visual-speech">
+        <span className="mono">SAY IT NATURALLY</span>
+        <strong>Talk to it like one of your own.</strong>
+        <span>Give it a route. Change the plan.</span>
+      </div>
+      <figcaption>
+        Interaction illustration inspired by our gesture-tracking demo.
+      </figcaption>
+    </figure>
+  );
+}
 export default function Home() {
   return (
     <>
@@ -485,7 +646,7 @@ export default function Home() {
         </a>
         <nav aria-label="Main navigation">
           <a href="#squadmate">The idea</a>
-          <a href="#prototype">The prototype</a>
+          <a href="#prototype">The experience</a>
           <a href="#architecture">The interaction</a>
         </nav>
         <a className="header-link" href="#performance">
@@ -504,11 +665,11 @@ export default function Home() {
               to the <span>squad.</span>
             </h1>
             <p className="hero-description">
-              Plan the mission. Signal changes as the squad moves.
+              Talk to it. Gesture to it. Bring it into the team.
               <br />
-              TactLink brings gestures, spoken commands, and shared control
-              together, with a vision of a drone that works alongside the team
-              as another squadmate.
+              Give it a route, call it over, or change the plan as the situation
+              unfolds. TactLink makes directing a drone feel like communicating
+              with another person on your team.
             </p>
             <div className="hero-actions">
               <a className="primary-link" href="#squadmate">
@@ -520,38 +681,14 @@ export default function Home() {
             </div>
             <div className="hero-tags">
               <span>
-                <EyeOff size={14} /> Shared spatial awareness
+                <EyeOff size={14} /> Gestures + natural language
               </span>
               <span>
                 <Network size={14} /> Human-directed support
               </span>
             </div>
           </div>
-          <div className="intent-preview">
-            <Tag>ONE TEAM. TWO WAYS TO COMMUNICATE.</Tag>
-            <h2>
-              Signal the change.
-              <br />
-              Say what comes next.
-            </h2>
-            <div>
-              <span className="mono">GESTURES</span>
-              <h3>Call it over. Adjust its height.</h3>
-              <p>
-                Direct the virtual drone with hand signals and pass control to
-                another teammate.
-              </p>
-            </div>
-            <div>
-              <span className="mono">NATURAL LANGUAGE</span>
-              <h3>Give it a route. Change the plan.</h3>
-              <p>
-                Use spoken commands to break from a preplanned route in our
-                simulation test environment.
-              </p>
-            </div>
-            <p className="fine">Human intent → simulated drone response</p>
-          </div>
+          <TeammateVisual />
         </section>
         <div className="spec-strip wrap">
           <div>
@@ -607,54 +744,56 @@ export default function Home() {
         <section className="section wrap" id="prototype">
           <div className="section-heading">
             <div>
-              <Tag>01 / THE WORKING PROTOTYPE</Tag>
+              <Tag>01 / ANOTHER MEMBER OF THE TEAM</Tag>
               <h2>
-                Real people.
+                A teammate you can
                 <br />
-                A shared virtual drone.
+                talk and gesture to.
               </h2>
             </div>
             <p>
-              The phones stand in for the squad’s sensors.
-              <br />
-              The simulator stands in for the aircraft.
+              Familiar signals. Shared intent.
+              <br />A drone that fits into the way people work together.
             </p>
           </div>
           <p>
-            We do not have drone hardware yet. Connected iPhones let us
-            represent people moving through the world, capture their gestures,
-            and send their state to a shared 3D simulation on a computer. This
-            is a way to test the squadmate interaction before integrating a
-            physical aircraft.
+            Communicate with the drone the way you would with a person on your
+            team. Give it a plan, signal a change, or ask it to respond to
+            something new. The interaction stays natural as the mission evolves.
           </p>
+          <p className="fine">
+            Demo note: these interactions are demonstrated using phone sensing
+            and a simulation test environment. Physical drone integration is the
+            next step.
+          </p>{' '}
           <div className="metric-cards">
             <article>
               <Tag>01 / PLAN</Tag>
               <h3>Give the mission a starting point.</h3>
               <p>
-                Build a route in the 2D flight planner and explore it in the 3D
-                simulator. The project brings planned missions and live operator
-                input into the same virtual world.
+                Set a route and communicate where you want the drone to go.
+                Bring planned routes and live instructions together, with room
+                to change the plan.
               </p>
-              <span className="metric-status">PLANNER + SIMULATION</span>
+              <span className="metric-status">PLAN THE ROUTE</span>
             </article>
             <article>
               <Tag>02 / SIGNAL</Tag>
               <h3>Make a change with a gesture.</h3>
               <p>
-                In the current phone demo, a fist calls the simulated drone to
-                follow. One finger raises it; two fingers lower it. Releasing
-                the altitude gesture holds the resulting height.
+                A fist calls the drone to follow. One finger raises it; two
+                fingers lower it. Releasing the altitude gesture holds the
+                resulting height.
               </p>
-              <span className="metric-status">DEMONSTRATED WITH PHONES</span>
+              <span className="metric-status">SIGNAL A CHANGE</span>
             </article>
             <article>
               <Tag>03 / SHARE</Tag>
               <h3>Let another teammate take over.</h3>
               <p>
                 A deliberate fist from another participant transfers control.
-                The demo shows two people directing the same virtual drone, with
-                the active operator visible to the team.
+                Two people can direct the same drone, with the active operator
+                visible to the team.
               </p>
               <span className="metric-status">TWO-PERSON HANDOFF</span>
             </article>
@@ -689,7 +828,7 @@ export default function Home() {
             <p>
               Spatial context meets an explicit command.
               <br />
-              The human directs the simulated response.
+              The drone responds to human intent.
             </p>
           </div>
           <div className="system-overview">
