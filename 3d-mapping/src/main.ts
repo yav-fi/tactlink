@@ -1,3 +1,4 @@
+import { startBatteryPanel } from "./battery-panel";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import "./style.css";
 import * as Cesium from "cesium";
@@ -1091,6 +1092,7 @@ function updateAutomaticCamera(deltaSeconds: number): void {
   viewer.camera.lookAt(automaticCenter, new Cesium.HeadingPitchRange(orbitCamera.heading, Cesium.Math.toRadians(-24), automaticRange));
 }
 
+const updateBattery = !runtimeMode && !phoneMode ? startBatteryPanel(fleet, () => drone) : undefined;
 let previousTime = Cesium.JulianDate.clone(viewer.clock.currentTime);
 const undoButton = document.querySelector<HTMLButtonElement>("#undo-action")!;
 const pauseButton = document.querySelector<HTMLButtonElement>("#pause-paths")!;
@@ -1118,6 +1120,7 @@ viewer.clock.onTick.addEventListener((clock) => {
   const cameraDelta = Math.min(0.1, Math.max(0, (cameraTime - previousCameraTime) / 1000));
   updateFreeCamera(cameraDelta);
   updateAutomaticCamera(cameraDelta);
+  updateBattery?.(cameraDelta, fleet.paused || !clock.shouldAnimate);
   previousCameraTime = cameraTime;
   if (!runtimeMode && cameraTime - telemetryTime >= 100) {
     telemetryTime = cameraTime;

@@ -213,3 +213,9 @@ body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !imp
 #phone-guide dd { margin: 3px 0 0; color: #b7cbc7; }
 #phone-guide .active { background: #644714; border-color: #f2b134; }
 @media (max-width: 900px) { #phone-guide { top: auto; bottom: 90px; width: 260px; max-height: 30vh; } #phone-panel { width: 280px; } }
+
+/* Optional PC battery controls; added only in camera input mode. */
+#battery-panel { position: fixed; top: 14px; right: 14px; z-index: 50; width: min(310px, calc(100vw - 28px)); box-sizing: border-box; padding: 12px; border: 1px solid #31516d; border-radius: 12px; background: rgba(7,17,31,.94); color: #edf6ff; font-size: 12px; max-height: calc(100vh - 130px); overflow-y: auto; }
+#battery-panel summary { cursor: pointer; font-weight: 600; }
+#battery-panel p, #battery-readout { line-height: 1.5; color: #b6cadf; }
+#battery-panel button { margin-top: 10px; }

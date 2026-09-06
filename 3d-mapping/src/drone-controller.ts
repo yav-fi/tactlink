@@ -1,3 +1,4 @@
+import { Battery } from "./battery";
 import * as Cesium from "cesium";
 import type { Coordinates, MissionCommand, MissionStep } from "./mission";
 import { MotionGuard } from "./collision";
@@ -38,6 +39,7 @@ function interpolate(a: Coordinates, b: Coordinates, fraction: number): Coordina
 }
 
 export class DroneController {
+  readonly battery = new Battery();
   collisionBlocked = false;
   avoidanceActive = false;
   replayBlocked = false;
@@ -102,10 +104,11 @@ export class DroneController {
   }
   get coverageCount(): number { return this.coverage.length; }
   capture() {
-    return { id: this.id, home: this.homeCoordinates, type: this.droneType, position: { ...this.position }, heading: this.manualHeading, color: this.colorHex, speed: this.speedMph,
+    return { battery: { ...this.battery }, id: this.id, home: this.homeCoordinates, type: this.droneType, position: { ...this.position }, heading: this.manualHeading, color: this.colorHex, speed: this.speedMph,
       points: this.trailPoints.map(p => Cesium.Cartesian3.clone(p)), releases: [...this.releases], coverage: [...this.coverage], coverageNumber: this.coverageNumber };
   }
   restore(data: ReturnType<DroneController["capture"]>): void {
+    if (data.battery) Object.assign(this.battery, data.battery);
     this.guard.clear();
     this.replayGuard.clear();
     this.position = { ...data.position }; this.manualHeading = this.renderedHeading = data.heading; this.speedMph = data.speed;
@@ -260,6 +263,7 @@ export class DroneController {
   }
 
   run(command: MissionCommand): void {
+    if (this.battery.depleted) { this.stopCommand(); return; }
     this.guard.clear();
     this.collisionBlocked = false;
     this.avoidanceActive = false;
@@ -322,6 +326,7 @@ export class DroneController {
 
   get heading(): number { return this.manualHeading; }
   startGestureMotion(east: number, north: number, up: number, speedMps: number): void {
+    if (this.battery.depleted) return;
     const magnitude = Math.hypot(east, north, up);
     if (magnitude < 0.0001) return;
     const next = { east: east / magnitude, north: north / magnitude, up: up / magnitude, speed: Math.max(0.1, speedMps) };
@@ -338,6 +343,7 @@ export class DroneController {
   }
 
   rotateHeading(degrees = 90): void {
+    if (this.battery.depleted) { this.stopCommand(); return; }
     if (!Number.isFinite(degrees) || degrees === 0) return;
     this.guard.clear();
     this.hideReplay();
@@ -429,7 +435,7 @@ export class DroneController {
   }
 
   prepareManualMove(east: number, north: number, up: number, seconds: number, heading = 0): Coordinates | undefined {
-    if (this.state !== "MANUAL") return;
+    if (this.battery.depleted || this.state !== "MANUAL") return;
     this.manualHeading = this.renderedHeading = heading;
     const scale = this.configuredSpeedMph * METERS_PER_SECOND_PER_MPH / Math.max(1, Math.hypot(east, north, up));
     const target = new Cesium.Cartesian3(east * scale, north * scale, up * scale);
@@ -447,6 +453,7 @@ export class DroneController {
   }
 
   applyManualMove(next: Coordinates): void {
+    if (this.battery.depleted) { this.stopCommand(); return; }
     this.position = next;
     this.syncEntity();
   }
@@ -502,6 +509,7 @@ export class DroneController {
   }
 
   update(deltaSeconds: number): void {
+    if (this.battery.depleted) { this.stopCommand(); return; }
     if (this.headingTurn) {
       this.headingTurn.elapsed += Math.min(deltaSeconds, 0.1);
       const linear = Math.min(1, this.headingTurn.elapsed / this.headingTurn.duration);
@@ -546,10 +554,11 @@ export class DroneController {
   }
 
   snapshot(): DroneSnapshot {
-    return { ...this.position, state: this.state, currentStep: this.mission ? this.stepIndex + 1 : 0, totalSteps: this.mission?.mission.length ?? 0 };
+    return { ...this.position, state: this.battery.depleted ? "BATTERY_EMPTY" : this.state, currentStep: this.mission ? this.stepIndex + 1 : 0, totalSteps: this.mission?.mission.length ?? 0 };
   }
 
   beginReplay(): number | null {
+    if (this.battery.depleted) return null;
     this.guard.clear();
     this.replayGuard.clear();
     this.replayBlocked = false;
@@ -592,6 +601,7 @@ export class DroneController {
   }
 
   replayAt(elapsedSeconds: number, moveDrone = false): void {
+    if (this.battery.depleted) { this.replayBlocked = true; return; }
     if (!this.replayEntity || this.replayBlocked) return;
     const length = this.replayDistances.at(-1)!;
     const distance = elapsedSeconds >= length / this.replaySpeed ? length : Math.max(0, elapsedSeconds) * this.replaySpeed;
