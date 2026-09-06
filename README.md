@@ -1,12 +1,52 @@
 # TactLink
 
-**Mission:** Give American teams a faster, safer way to conduct reconnaissance
-and protect the people beside them. TactLink turns natural finger gestures into
-coordinated drone commands, so operators can keep their eyes on the mission and
-their hands free from conventional flight controls.
+## Direct a drone like a teammate.
 
-When there is no time to command a drone stick by stick, point, signal, and let
-TactLink translate intent into action.
+**Human signals become drone actions.** Point, and the drone circles you.
+Signal forward, and it moves that way. Call it back, and it arrives overhead —
+above *you*, the person who asked. Show an open palm, and it stops. No sticks,
+no tablet, no eyes off what is in front of you.
+
+**Gesture → intent → action.**
+
+**Mission:** Give American teams a faster, safer way to run reconnaissance and
+protect the people beside them. When there is no time to fly a drone stick by
+stick, TactLink reads the hand signals a squad already uses and turns them into
+coordinated drone commands.
+
+### Three design choices
+
+- **Deliberate commands.** A small gesture vocabulary, each pose held ~0.4 s, so
+  the drone acts on intent rather than on a twitch.
+- **Spatial meaning.** Commands resolve against the person who gave them —
+  "return" means overhead of the sender, "forward" means their forward.
+- **Direct intervention.** An open palm is an emergency stop that anyone in
+  view can give.
+
+Design input: conversation with a Mach Industries representative.
+
+### What works today
+
+Phones as operators → main computer → shared 3D simulation. Each iPhone ranges
+the others over UWB, so the people appear on the map where they actually stand,
+and the drone takes orders from the operator nearest it.
+
+| Command | What the drone does |
+| --- | --- |
+| **Orbit** | Circle the operator |
+| **Move** | Follow directional intent |
+| **Return** | Come overhead to the sender |
+| **Stop** | Open-palm emergency stop |
+
+A planned mission stays responsive: plan the route in 2D, watch it in 3D, and
+interrupt it by gesture mid-flight. Spoken commands ("take a picture of my
+location") are in development.
+
+**Honest status:** this is a connected phone prototype in simulation. No
+physical flight data yet. GPS-independent navigation is a separate problem.
+Next validation gates are measuring errors, latency and unintended commands;
+stress-testing visibility and competing operators; and integrating onboard
+compute with physical flight.
 
 Clone:
 
@@ -17,22 +57,25 @@ git clone https://github.com/yav-fi/tactlink.git
 Yavin added `AGENTS.md` and `CLAUDE.md` to keep coding-agent instructions
 consistent across tools.
 
-TactLink brings together six hackathon workstreams:
+## How it is built
 
-- **[iOS UWB group positioning](ios/README.md)** — native iPhone room joining, rotating UWB pairs, relative maps, and profiling (`ios/`).
-- **[Local LLM chat + benchmark](#local-llm-chat--benchmark)** — fast on-device
-  chat inference (`chat_client.py`, `scripts/`).
+TactLink brings together seven hackathon workstreams:
+
+- **[iOS UWB group positioning](ios/README.md)** — iPhones range each other over
+  ultra-wideband to build a live relative map of where everyone is standing (`ios/`).
+- **[Phones as live operators](#advanced-phones-in-the-separate-distributed-runtime)** —
+  those phones appear as people in the simulation, and the nearest one commands
+  each drone (`simulation/operators.py`, `server/phone_listener.py`).
 - **[Webcam gesture quadcopter control](#webcam-gesture-quadcopter-control)** —
-  fly a simulated drone with hand gestures (`src/`).
-- **[Distributed mission runtime](#distributed-mission-runtime)** — multi-node
-  autonomy under degraded communications (`simulation/`, `server/`).
-- **[Autonomous planning engine](planning/README.md)** — local mission and
-  motion planning with obstacle routing, deconfliction, and energy checks (`planning/`).
-- **[Cesium 3D mapping](#cesium-3d-mapping)** — browser-based fleet deployment,
-  piloting, and deterministic local missions (`3d-mapping/`).
-- **[Phones as live operators](#phones-on-the-ground--live-operators-in-the-runtime)** —
-  iPhones appear as people on the map and the nearest one commands each drone
-  (`simulation/operators.py`, `server/phone_listener.py`).
+  hand gestures read by a camera fly a simulated drone (`src/`).
+- **[Cesium 3D mapping](#cesium-3d-mapping)** — the shared 3D world: fleet
+  deployment, piloting, and deterministic local missions in the browser (`3d-mapping/`).
+- **[Autonomous planning engine](planning/README.md)** — mission and motion
+  planning with obstacle routing, deconfliction, and energy checks (`planning/`).
+- **[Distributed mission runtime](#distributed-mission-runtime)** — many drones
+  keeping the mission alive under degraded communications (`simulation/`, `server/`).
+- **[Local LLM chat + benchmark](#local-llm-chat--benchmark)** — on-device
+  inference for turning spoken instructions into missions (`chat_client.py`, `scripts/`).
 
 ## Close-up phone demo
 
