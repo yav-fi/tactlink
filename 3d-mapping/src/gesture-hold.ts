@@ -4,7 +4,7 @@ export const GESTURE_DROPOUT_GRACE_MS = 180;
 
 const ACTIONS: Readonly<Record<string, string>> = {
   Thumb_Up: "takeoff",
-  Thumb_Down: "land",
+  Thumb_Down: "descend",
   Pointing_Up: "orbit",
   ILoveYou: "return_home",
   Open_Palm: "halt",

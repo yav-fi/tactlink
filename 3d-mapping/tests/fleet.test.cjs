@@ -52,7 +52,7 @@ test("browser gesture holds survive a brief low-confidence frame", () => {
 
 test("browser canned gestures map to the primary flight actions", () => {
   const expected = {
-    Thumb_Down: "land",
+    Thumb_Down: "descend",
     Pointing_Up: "orbit",
     ILoveYou: "return_home",
     Open_Palm: "halt",
@@ -916,4 +916,26 @@ test("backend ENU conversion preserves metre-scale east north and up offsets", (
   for (const point of [{ x: 100, y: 0, z: 0 }, { x: 0, y: 100, z: 0 }, { x: 0, y: 0, z: 100 }]) {
     assert(Math.abs(Cesium.Cartesian3.distance(anchor, localToFixed(origin, point)) - 100) < 0.001);
   }
+});
+
+
+test("PC descent stops on release and stays vertical away from home", () => {
+  const repeats = new GestureCommandRepeater();
+  repeats.start("descend", "Thumb_Down", 0);
+  assert.deepEqual(repeats.update("Thumb_Down", 750), ["descend"]);
+  assert.deepEqual(repeats.update(undefined, 800), []);
+  assert.deepEqual(repeats.update(undefined, 1021), ["gesture_stop"]);
+  const viewer = { entities: new Cesium.EntityCollection(), scene: { globe: { show: false }, pickFromRay: () => undefined } };
+  const fleet = new Fleet(viewer); const drone = fleet.deploy(home);
+  drone.applyManualMove({ ...home, longitude: home.longitude + .001, altitude: 150 });
+  drone.startGestureMotion(1, 0, 0, 18); drone.update(.1);
+  const before = drone.snapshot();
+  drone.startGestureMotion(0, 0, -1, 18);
+  for (let i = 0; i < 10; i++) drone.update(.1);
+  const after = drone.snapshot();
+  assert(after.altitude < before.altitude);
+  assert(Math.abs(after.longitude - before.longitude) < 1e-10);
+  assert(Math.abs(after.latitude - before.latitude) < 1e-10);
+  drone.stopCommand(); drone.update(.1);
+  assert.equal(drone.snapshot().altitude, after.altitude);
 });

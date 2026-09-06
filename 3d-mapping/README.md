@@ -108,3 +108,13 @@ planner bridge. The separate Python bridge remains available for integration
 work by running `.venv/bin/python -m integrations.flight_bridge --port 8766`.
 See [the bridge guide](../docs/flight-bridge.md) for its HTTP/WebSocket contract,
 ArduPilot telemetry setup, and Mission Planner export.
+
+## Optional PC battery simulation
+
+Open `?mode=local&input=camera`, expand **Battery simulation** in the bottom control dock, and enable it. It is off on every new page load and is not exposed in phone or backend runtime modes. Existing controls are unchanged when disabled.
+
+Every PC drone has its own pack. Select a drone, choose Lightweight (35 Wh / 0.22 kg), Standard (60 Wh / 0.38 kg), Endurance (95 Wh / 0.62 kg), or enter custom capacity, weight, and health; press **Replace selected battery** to fit a full pack and stop flight/replay. The panel displays the fitted pack separately from the editable replacement fields. Resetting a drone does not recharge it; undo restores captured battery state. Turning the mode off suspends consumption and depletion restrictions without refilling.
+
+The demo model uses a 0.85 kg airframe, mass-scaled hover power, a modest forward-flight efficiency benefit, cubic speed drag, climb/descent costs, and acceleration cost. Ground idle draws 2 W. Consumption integrates observed movement over the capped flight-update interval; replay pause suspends consumption. Instant repositioning is excluded from motion costs. No wind, payload, voltage sag, thermal effects, regenerative descent, or calibrated aircraft performance is modeled. Battery mass changes energy demand, not existing flight handling.
+
+At 20% reserve (including a straight-line return estimate), the panel warns. At zero, motion is blocked and telemetry reports BATTERY_EMPTY. This is a simulation freeze, not an emergency landing model. The direct-return estimate excludes obstacle detours and is advisory; full mission preflight certification and automatic return are not implemented in this mode.
