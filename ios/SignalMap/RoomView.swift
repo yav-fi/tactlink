@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 private let roomMint = Color(red: 0.55, green: 0.95, blue: 0.76)
 private let roomBackground = Color(red: 0.025, green: 0.045, blue: 0.045)
@@ -24,7 +25,7 @@ struct RoomView: View {
                         .background(roomMint.opacity(0.12), in: Capsule()).foregroundStyle(roomMint)
                 }.padding(.top, 12)
                 if room.joined { sessionContent } else { lobby }
-                Text("No GPS · No internet · No camera")
+                Text("No GPS · Camera gestures stay on this phone")
                     .font(.system(size: 10, design: .monospaced)).foregroundStyle(roomMuted)
                     .frame(maxWidth: .infinity).padding(.bottom, 14)
             }.padding(.horizontal, 22)
@@ -37,7 +38,7 @@ struct RoomView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("A shared sense\nof where you are.")
                     .font(.system(size: 34, weight: .medium, design: .rounded)).tracking(-1)
-                Text(room.threePhoneMode ? "Join three phones. Rotate every pair. Test a flat map." : "Join five phones. Measure between pairs. See the group around you.")
+                Text(room.twoPhoneMode ? "Test gestures with two phones. Distance is measured; map direction is assumed." : room.threePhoneMode ? "Join three phones. Rotate every pair. Test a flat map." : "Join five phones. Measure between pairs. See the group around you.")
                     .font(.subheadline).foregroundStyle(roomMuted).lineSpacing(4)
             }.padding(.top, 12)
             HStack(spacing: 12) {
@@ -73,8 +74,8 @@ struct RoomView: View {
             }.buttonStyle(.borderedProminent).foregroundStyle(roomBackground)
             VStack(alignment: .leading, spacing: 12) {
                 eyebrow("HAVE A ROOM CODE?")
-                TextField("ABCD EFGH JKLM NPQR", text: $enteredCode)
-                    .font(.system(size: 17, design: .monospaced)).textInputAutocapitalization(.characters)
+                TextField("6-digit room code", text: $enteredCode)
+                    .font(.system(size: 17, design: .monospaced)).keyboardType(.numberPad)
                     .autocorrectionDisabled().submitLabel(.join)
                     .padding(14).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
                     .onSubmit { room.join(enteredCode) }
@@ -139,6 +140,7 @@ struct RoomView: View {
                 }
             }
             RoomMap(room: room)
+            GestureStatus(camera: room.gestureCamera)
             HStack(spacing: 12) {
                 stat("CYCLE", String(room.cycle))
                 stat("PAIR RANGES", "\(room.availableRanges.count)/\(max(1,room.participantCount*(room.participantCount-1)/2))")
@@ -185,9 +187,11 @@ struct RoomView: View {
     }
     private var testModeToggle: some View {
         VStack(alignment:.leading,spacing:7) {
+            Toggle("2-phone gesture test",isOn:Binding(get:{room.twoPhoneMode},set:{room.setTwoPhoneMode($0)}))
+                .font(.subheadline.weight(.medium))
             Toggle("3-phone flat test",isOn:Binding(get:{room.threePhoneMode},set:{room.setThreePhoneMode($0)}))
                 .font(.subheadline.weight(.medium))
-            Text(room.threePhoneMode ? "Starts at three. All phones share Z = 0; one mirror layout is chosen and kept consistent." : "Full mode starts at five and estimates a 3D group shape.")
+            Text(room.twoPhoneMode ? "Starts at two. One real UWB distance places phones on a fixed vertical map line, X = Z = 0. Direction is assumed, not measured." : room.threePhoneMode ? "Starts at three. All phones share Z = 0; one mirror layout is chosen and kept consistent." : "Full mode starts at five and estimates a 3D group shape.")
                 .font(.caption2).foregroundStyle(roomMuted).lineSpacing(2)
         }.padding(14).background(.white.opacity(0.035),in:RoundedRectangle(cornerRadius:14))
     }
@@ -197,6 +201,88 @@ struct RoomView: View {
             Text(value).font(.system(size: 23, weight: .medium, design: .rounded)).monospacedDigit()
         }.frame(maxWidth: .infinity, alignment: .leading).padding(12).background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
     }
+}
+
+private struct GestureStatus: View {
+    @ObservedObject var camera: GestureCamera
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("FRONT CAMERA · \(camera.processedFrames) frames processed")
+                .font(.caption2.monospaced()).foregroundStyle(roomMint)
+            GesturePreview(session: camera.session)
+                .overlay {
+                    Canvas { context,size in
+                        let scale=min(size.width/camera.frameSize.width,size.height/camera.frameSize.height)
+                        let width=camera.frameSize.width*scale,height=camera.frameSize.height*scale
+                        let points=camera.handLandmarks.map{CGPoint(x:(size.width-width)/2+$0.x*width,y:(size.height-height)/2+$0.y*height)}
+                        guard points.count==21 else{return}
+                        let chains=[[0,1,2,3,4],[0,5,6,7,8],[5,9,10,11,12],[9,13,14,15,16],[13,17,18,19,20],[0,17]]
+                        var path=Path()
+                        for chain in chains { path.move(to:points[chain[0]]);for index in chain.dropFirst(){path.addLine(to:points[index])} }
+                        context.stroke(path,with:.color(.green),lineWidth:2)
+                        for point in points { context.fill(Path(ellipseIn:CGRect(x:point.x-3,y:point.y-3,width:6,height:6)),with:.color(.yellow)) }
+                    }.allowsHitTesting(false)
+                }
+                .frame(height: 220).clipShape(RoundedRectangle(cornerRadius: 10))
+            Text(camera.rawStatus).font(.caption2.monospaced()).foregroundStyle(roomMint)
+            Text("Hold upright; show your whole hand. Fist: call and follow. One finger (index): climb. Two fingers (index + middle): descend. Direction does not matter. Lower your hand to stop vertical movement. Use Stop drone in the visualizer to cancel follow.")
+                .font(.caption2).foregroundStyle(roomMuted)
+        HStack(spacing: 10) {
+            Image(systemName: camera.gesture == "None" ? "hand.raised.slash" : "hand.raised.fill")
+                .foregroundStyle(camera.gesture == "None" ? roomMuted : roomMint)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("STABLE GESTURE · \(camera.gesture.replacingOccurrences(of:"_",with:" "))")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                Text(camera.status).font(.caption2).foregroundStyle(roomMuted)
+            }
+            Spacer()
+            Text(camera.gesture == "None" ? "—" : "HELD")
+                .font(.system(size: 13, weight: .medium, design: .monospaced)).foregroundStyle(roomMint)
+        }
+        }.padding(14).background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+private struct GesturePreview: UIViewRepresentable {
+    let session: AVCaptureSession
+    final class PreviewView: UIView {
+        override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
+        var preview: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+        private var rotation:AVCaptureDevice.RotationCoordinator?
+        private var rotationObservation:NSKeyValueObservation?
+        override init(frame:CGRect) {
+            super.init(frame:frame)
+            NotificationCenter.default.addObserver(self,selector:#selector(sessionStarted(_:)),name:AVCaptureSession.didStartRunningNotification,object:nil)
+        }
+        required init?(coder:NSCoder) { super.init(coder:coder) }
+        deinit { NotificationCenter.default.removeObserver(self) }
+        @objc private func sessionStarted(_ notification:Notification) {
+            DispatchQueue.main.async { [weak self] in self?.orientPreview() }
+        }
+        func orientPreview() {
+            // SwiftUI may lay out this view before the camera adds its input.
+            // Retry on updates after session startup, when the connection exists.
+            guard let connection=preview.connection else{return}
+            if rotation==nil,let device=(preview.session?.inputs.first as? AVCaptureDeviceInput)?.device {
+                rotation=AVCaptureDevice.RotationCoordinator(device:device,previewLayer:preview)
+                rotationObservation=rotation?.observe(\.videoRotationAngleForHorizonLevelPreview,options:[.new]) { [weak self] _,_ in self?.orientPreview() }
+            }
+            if let rotation {
+                let angle=(round(rotation.videoRotationAngleForHorizonLevelPreview/90)*90).truncatingRemainder(dividingBy:360)
+                if connection.videoRotationAngle != angle,connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle=angle }
+            }
+            if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false; connection.isVideoMirrored=true }
+        }
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            orientPreview()
+        }
+    }
+    func makeUIView(context: Context) -> PreviewView {
+        let view=PreviewView(); view.preview.session=session; view.preview.videoGravity = .resizeAspect
+        return view
+    }
+    func updateUIView(_ view: PreviewView, context: Context) { view.orientPreview() }
 }
 
 private struct RoomMap: View {

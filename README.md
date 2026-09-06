@@ -1,4 +1,12 @@
-# dnhacks26
+# TactLink
+
+**Mission:** Give American teams a faster, safer way to conduct reconnaissance
+and protect the people beside them. TactLink turns natural finger gestures into
+coordinated drone commands, so operators can keep their eyes on the mission and
+their hands free from conventional flight controls.
+
+When there is no time to command a drone stick by stick, point, signal, and let
+TactLink translate intent into action.
 
 Clone:
 
@@ -9,7 +17,7 @@ git clone https://github.com/yav-fi/dnhacks26.git
 Yavin added `AGENTS.md` and `CLAUDE.md` to keep coding-agent instructions
 consistent across tools.
 
-This repo hosts six hackathon workstreams:
+TactLink brings together six hackathon workstreams:
 
 - **[iOS UWB group positioning](ios/README.md)** — native iPhone room joining, rotating UWB pairs, relative maps, and profiling (`ios/`).
 - **[Local LLM chat + benchmark](#local-llm-chat--benchmark)** — fast on-device
@@ -22,6 +30,17 @@ This repo hosts six hackathon workstreams:
   motion planning with obstacle routing, deconfliction, and energy checks (`planning/`).
 - **[Cesium 3D mapping](#cesium-3d-mapping)** — browser-based fleet deployment,
   piloting, and deterministic local missions (`3d-mapping/`).
+- **[Phones as live operators](#phones-on-the-ground--live-operators-in-the-runtime)** —
+  iPhones appear as people on the map and the nearest one commands each drone
+  (`simulation/operators.py`, `server/phone_listener.py`).
+
+## Close-up phone demo
+
+Open `./start` at `?mode=local`. The phone scene uses real metre offsets: a 1 m grid, 1.75 m human figures, and a drone scaled to a 0.8 m spinning-rotor envelope. The camera frames the group and drone at a close distance for 1–10 m tests. Use **Frame group** to restore that view after dragging; +/− changes zoom. Drone models are not enlarged to a minimum screen size in this mode.
+
+The drone begins hovering 3.5 m above the scene ground. Movement stays between 2.5 m and 8 m above the highest positioned person's base; thumbs-down descends to that floor. Pointing with one index finger orbits at a target radius of 2 m. The visible **Gestures → Drone** guide lists exact finger poses, speeds, 0.4 s hold behavior, and which actions repeat. The gold person is the current controller. Hold a closed fist for 0.4 s on either phone to fly above and follow that person’s mapped position, even if another person is closer. Follow stays on after lowering the hand; another fresh held fist switches the target. Hold an open palm on either phone to cancel follow. Ordinary movement still stops when the pose is released. Follow tracks the relative UWB map, so the anchor must remain stationary.
+
+These are chosen demo model dimensions, not measurements of a particular person or drone. UWB relative positions retain their measured metre separation; the two-phone axis and three-phone flat assumptions still apply. Five-phone shape height is relative group geometry, not measured gravity altitude. The legacy runtime controls documented below are separate from this browser-owned phone demo.
 
 ## One-command demo
 
@@ -31,12 +50,51 @@ Run this from the repository root:
 ./start
 ```
 
-It creates/installs missing local dependencies, starts the Python runtime and
-3D frontend, starts the local mission AI when its downloaded model is present,
-and opens the flight sandbox. Type `/` in the bottom command line for direct
-commands, or enter a plain-language mission for the AI compiler. Press `Ctrl+C`
-once to stop everything it started. Use `./start --no-open` when you do not want
-it to open a browser.
+It installs missing dependencies, starts the phone UDP receiver and serves the detailed
+3D flight simulator. The default is **one simulated drone controlled by the phones**;
+the Mac camera and the separate distributed-drone simulation are not used.
+
+1. Put the Mac and phones on the same trusted Wi-Fi. Keep Wi-Fi and Bluetooth on.
+2. Install the current SignalMap build on every phone. Set **Visualizer host** to
+   the address printed by `./start` (Mac Wi-Fi IP, port 9870).
+3. Create one room and join it from the others. Five-phone mode remains the default.
+   For two phones, enable **2-phone gesture test**: it uses real UWB distance but assumes
+   a fixed vertical map line (X = Z = 0). For three, enable **3-phone flat test** (Z = 0).
+   Keep exactly the selected number of phones in the room, all on the current build.
+4. Keep the app open and accept Local Network, Nearby Interaction and Camera permissions.
+   The console distinguishes phones connected from phones with a completed UWB position.
+5. Once positions appear, the nearest phone controls the single drone. Hold gestures
+   for 0.4 s: thumb up climbs, thumb down descends, open palm stops, pointing up orbits
+   the operator, three fingers move forward, directional dashes move left/right,
+   closed fist turns 90°, and ILoveYou returns toward the starting point. Release
+   the gesture to stop motion. Loss of the controlling phone also stops the drone.
+
+The **Group alignment** controls choose a stationary anchor, rotation and mirror.
+UWB preserves relative metre offsets, not global location or compass alignment.
+Keep the anchor still. Two-phone mode assumes direction and measures only separation; three-phone mode is flat; five-phone mode preserves relative
+XYZ, whose third axis is not gravity height. Camera/compass processing stays on
+phones; frames are never uploaded. Phone motion is 2 m/s, descent 1 m/s, and climb
+is capped at 10 m above the starting point for this close-range demo.
+
+`./start --no-open` starts without opening a browser. Open
+[the phone demo](http://127.0.0.1:5173/?mode=local). Ctrl+C stops services started by
+the launcher. It refuses to reuse an old server without the active LAN phone receiver.
+
+Automatic app setup from another terminal:
+
+```sh
+./ios/scripts/dev ship
+./ios/scripts/dev watch --room YOUR_ROOM_CODE --bridge MAC_WIFI_IP:9870
+```
+
+With no phones, `.venv/bin/python scripts/mock_phone_feed.py --phones 5 --still --script`
+sends synthetic phone input (use `--phones 3` for the flat test). The console labels
+the mock room; stop the mock feed and select the real room before a hardware test.
+
+The former browser-camera sandbox remains available at `?mode=local&input=camera`.
+The separate distributed runtime remains an advanced path started directly with
+`PHONE_DEMO=0 .venv/bin/uvicorn server.main:app`; its console is `?mode=runtime`.
+It is not the phone demo. Optional AI model setup is separate from `./start`.
 
 ---
 
@@ -364,6 +422,12 @@ VITE_RUNTIME_URL=http://127.0.0.1:8000 npm --prefix 3d-mapping run dev
 - Cesium connected mode: <http://127.0.0.1:5173/?mode=runtime>
 - Cesium local sandbox: <http://127.0.0.1:5173/?mode=local>
 
+In the local Cesium control, the browser opens its hidden gesture camera,
+places the current gesture guess in the compact bottom command dock, and maps a
+held closed fist to repeating smooth 90-degree clockwise heading turns. The
+original two-finger V-H-V-H pointing motion and three-finger forward control
+remain active while held; losing the active pose stops momentary gesture motion.
+
 Connected mode consumes `ws://127.0.0.1:8000/ws`, converts backend local
 coordinates as x=east, y=north, z=up metres from the snapshot origin, and shows
 truth/estimated positions, uncertainty, plans, missions, links, relay roles,
@@ -377,6 +441,104 @@ nodes include a relay-capable specialist; override the bounded demo fleet with
 
 See [`3d-mapping/README.md`](3d-mapping/README.md) for Cesium token setup,
 controls, and its local mission format.
+
+---
+
+# Advanced: phones in the separate distributed runtime
+
+For the integrated single-drone phone test, use **One-command demo** above. This
+section describes the older distributed mission runtime and its separate task auction.
+Do not use its runtime-mode browser URL for the single-drone test.
+
+The same iPhones that range each other over UWB also show up as **people** in
+the Cesium console, standing on the lawn beside the drones, and the drone obeys
+whichever person is **nearest to it**.
+
+Nothing new is needed on the phone. `RoomBridge` already streams each phone's own
+position, compass facing, and locally recognized gesture as a small JSON datagram
+(~10 Hz). The runtime now listens for exactly that datagram, so a phone already
+in the field only needs its **Visualizer host** pointed at the runtime machine.
+
+```sh
+# Terminal 1: runtime. It also opens the phone feed on udp://127.0.0.1:9870.
+SIMULATION_DRONE_COUNT=3 .venv/bin/uvicorn server.main:app --host 127.0.0.1 --port 8000
+
+# Terminal 2: Cesium console -> http://127.0.0.1:5173/?mode=runtime
+VITE_RUNTIME_URL=http://127.0.0.1:8000 npm --prefix 3d-mapping run dev
+
+# No phones handy? Three fake ones walking a scripted gesture timeline:
+.venv/bin/python scripts/mock_phone_feed.py --phones 3 --still --script
+```
+
+To take real phones, bind the feed to the Wi-Fi the phones are on and set that
+host in each app's lobby. The datagrams are **unauthenticated**, so do this only
+on a trusted network:
+
+```sh
+PHONE_FEED_HOST=0.0.0.0 SIMULATION_DRONE_COUNT=3 \
+  .venv/bin/uvicorn server.main:app --host 0.0.0.0 --port 8000
+```
+
+`PHONE_FEED_PORT` moves the port; `0` disables the UDP feed entirely, leaving the
+HTTP route below. Anything that can speak HTTP can publish the same object:
+
+```sh
+curl -X POST http://127.0.0.1:8000/api/operators \
+  -H 'content-type: application/json' \
+  -d '{"id":"ian","name":"Ian","pos":[0,0],"compass":0,"compassValid":true,
+       "gesture":"Thumb_Up","gestureConfidence":0.9}'
+```
+
+## Putting the group on the lawn
+
+UWB ranging fixes the group's **shape** but can never observe its absolute
+position or north. So one phone is nominated as the **anchor**: it stands at a
+chosen point, and everyone else keeps the offset UWB actually measured, rotated
+to line up with north.
+
+```sh
+curl -X POST http://127.0.0.1:8000/api/operators/frame \
+  -H 'content-type: application/json' \
+  -d '{"anchor_id":"ian","anchor_east":0,"anchor_north":-45,"rotation_deg":0}'
+```
+
+`anchor_east` / `anchor_north` are metres from the scene origin, which is already
+the Washington Monument (38.8895, -77.0353). The default puts the anchor 45 m
+south of it, on the open ground in front of the drone staging line.
+`rotation_deg` absorbs magnetic declination and any phone mount-angle offset in
+one constant — the runtime equivalent of `--phone-frame-rot`. `GET
+/api/operators` shows where everyone landed; `GET /api/state` carries them to the
+frontend as `operators`.
+
+## Who is flying what
+
+Control is decided **per drone**: each drone listens to the operator nearest to
+it, with hysteresis so control does not flicker as a drone passes between two
+people. In the console, a person commanding a drone turns amber, gains a control
+ring, and draws a dashed line to each drone listening to them; the anchor is
+labelled. A phone that goes quiet dims and then disappears, so lost tracking
+never leaves a stale commander on the map.
+
+A gesture must be **held ~0.4 s** to fire, fires once, and cannot repeat until the
+hand changes — timed per person, so one operator's hold never affects another's.
+Only the controlling operator's gestures reach a drone; everyone else's are
+recognized, shown, and dropped.
+
+| Gesture | Runtime command |
+| --- | --- |
+| 👍 Thumb up | `GOTO` above that operator, 25 m |
+| 👎 Thumb down | `GOTO` the drone's own x/y at 2 m |
+| ✋ Open palm | `HOLD` where it is |
+| ☝️ Pointing up | `WATCH` aimed at that operator |
+| 🤟 ILoveYou | `GOTO` where that person is standing, 15 m |
+| Three fingers / two-finger dashes | `GOTO` 25 m along that operator's facing (±90°) |
+
+Dashes resolve against the operator's **own compass facing**, so "forward" means
+forward for the person who signalled it. Gesture missions carry
+`metadata.source = "operator-gesture"` with the operator, gesture, and the drone
+addressed. They are submitted to the ordinary auction rather than pinned to that
+drone: the addressed drone almost always wins, because bids are distance-based
+and the target sits next to it, but a better-placed peer may take it.
 
 ---
 

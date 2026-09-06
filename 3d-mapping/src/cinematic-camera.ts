@@ -35,3 +35,8 @@ export function blendHeading(current: number, target: number, amount: number): n
   const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current));
   return current + delta * Math.max(0, Math.min(1, amount));
 }
+
+/** A restrained side-to-side camera drift that never abandons its subject. */
+export function idleCameraDriftRate(stillSeconds: number): number {
+  return 0.012 * Math.cos(Math.max(0, stillSeconds) * 0.55);
+}

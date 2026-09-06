@@ -9,28 +9,36 @@
 /* Begin PBXBuildFile section */
 		0E1F7939D91B4581CB9B33CF /* BenchLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78341D3DAB5AC319EDB17188 /* BenchLog.swift */; };
 		0F7E22CEED66A4CB5B980009 /* RangeGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF95549716085D332C7802A /* RangeGeometry.swift */; };
+		235D52D51D0ED019A60A6ECF /* Pods_SignalMap.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AE5BF7D3373908BBEF679F67 /* Pods_SignalMap.framework */; };
 		60EDBA8853426E3431668792 /* RoomRanging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2226FEF7A16D313BF1CC44D5 /* RoomRanging.swift */; };
+		620CE39D41A75EC6C1315D50 /* gesture_recognizer.task in Resources */ = {isa = PBXBuildFile; fileRef = 649D158084D1A0F137AB4A5D /* gesture_recognizer.task */; };
+		64A9028494D8B994C550ECB5 /* RoomTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6B89E752EA4126FCFD283FC /* RoomTransport.swift */; };
 		827D30A20B2B29313F88653C /* RoomSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3B794BA9429F2C22BF764C4 /* RoomSession.swift */; };
+		AF690C5EF47012D8FA4D9C79 /* SignalMapApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3385A57426B673C763666A7 /* SignalMapApp.swift */; };
 		B1D6E0A72F00A10100000001 /* RoomBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1D6E0A72F00A10100000002 /* RoomBridge.swift */; };
 		B1D6E0A72F00A10200000001 /* HeadingSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1D6E0A72F00A10200000002 /* HeadingSource.swift */; };
-		64A9028494D8B994C550ECB5 /* RoomTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6B89E752EA4126FCFD283FC /* RoomTransport.swift */; };
-		F07861B25F1733CCFC19AADF /* RoomTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8B3E580B598FEB2281572BF /* RoomTypes.swift */; };
+		B1D6E0A72F00A10300000001 /* GestureCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1D6E0A72F00A10300000002 /* GestureCamera.swift */; };
 		BDAB630274E7822342001734 /* RoomView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05CAE8B4D7DF8CDE67C0BC17 /* RoomView.swift */; };
-		AF690C5EF47012D8FA4D9C79 /* SignalMapApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3385A57426B673C763666A7 /* SignalMapApp.swift */; };
+		F07861B25F1733CCFC19AADF /* RoomTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8B3E580B598FEB2281572BF /* RoomTypes.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		78341D3DAB5AC319EDB17188 /* BenchLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BenchLog.swift; sourceTree = "<group>"; };
-		AEF95549716085D332C7802A /* RangeGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RangeGeometry.swift; sourceTree = "<group>"; };
+		05CAE8B4D7DF8CDE67C0BC17 /* RoomView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomView.swift; sourceTree = "<group>"; };
 		2226FEF7A16D313BF1CC44D5 /* RoomRanging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomRanging.swift; sourceTree = "<group>"; };
-		D3B794BA9429F2C22BF764C4 /* RoomSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomSession.swift; sourceTree = "<group>"; };
+		649D158084D1A0F137AB4A5D /* gesture_recognizer.task */ = {isa = PBXFileReference; includeInIndex = 1; path = gesture_recognizer.task; sourceTree = "<group>"; };
+		78341D3DAB5AC319EDB17188 /* BenchLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BenchLog.swift; sourceTree = "<group>"; };
+		7D1043473D55BFA90E8530D3 /* SignalMap.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = SignalMap.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9B2901124C32B88DCE01A741 /* Pods-SignalMap.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SignalMap.debug.xcconfig"; path = "Target Support Files/Pods-SignalMap/Pods-SignalMap.debug.xcconfig"; sourceTree = "<group>"; };
+		A8B3E580B598FEB2281572BF /* RoomTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTypes.swift; sourceTree = "<group>"; };
+		AC6C780C20AA5DE3B055AF96 /* Pods-SignalMap.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SignalMap.release.xcconfig"; path = "Target Support Files/Pods-SignalMap/Pods-SignalMap.release.xcconfig"; sourceTree = "<group>"; };
+		AE5BF7D3373908BBEF679F67 /* Pods_SignalMap.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_SignalMap.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		AEF95549716085D332C7802A /* RangeGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RangeGeometry.swift; sourceTree = "<group>"; };
 		B1D6E0A72F00A10100000002 /* RoomBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomBridge.swift; sourceTree = "<group>"; };
 		B1D6E0A72F00A10200000002 /* HeadingSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadingSource.swift; sourceTree = "<group>"; };
-		E6B89E752EA4126FCFD283FC /* RoomTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTransport.swift; sourceTree = "<group>"; };
-		A8B3E580B598FEB2281572BF /* RoomTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTypes.swift; sourceTree = "<group>"; };
-		05CAE8B4D7DF8CDE67C0BC17 /* RoomView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomView.swift; sourceTree = "<group>"; };
+		B1D6E0A72F00A10300000002 /* GestureCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureCamera.swift; sourceTree = "<group>"; };
+		D3B794BA9429F2C22BF764C4 /* RoomSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomSession.swift; sourceTree = "<group>"; };
 		E3385A57426B673C763666A7 /* SignalMapApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalMapApp.swift; sourceTree = "<group>"; };
-		7D1043473D55BFA90E8530D3 /* SignalMap.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = SignalMap.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E6B89E752EA4126FCFD283FC /* RoomTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTransport.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -38,12 +46,23 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				235D52D51D0ED019A60A6ECF /* Pods_SignalMap.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		300E2556F9954487DA6B78B7 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				9B2901124C32B88DCE01A741 /* Pods-SignalMap.debug.xcconfig */,
+				AC6C780C20AA5DE3B055AF96 /* Pods-SignalMap.release.xcconfig */,
+			);
+			name = Pods;
+			path = Pods;
+			sourceTree = "<group>";
+		};
 		482182478A3ECD4745BEA917 /* SignalMap */ = {
 			isa = PBXGroup;
 			children = (
@@ -52,13 +71,23 @@
 				2226FEF7A16D313BF1CC44D5 /* RoomRanging.swift */,
 				B1D6E0A72F00A10100000002 /* RoomBridge.swift */,
 				B1D6E0A72F00A10200000002 /* HeadingSource.swift */,
+				B1D6E0A72F00A10300000002 /* GestureCamera.swift */,
 				D3B794BA9429F2C22BF764C4 /* RoomSession.swift */,
 				E6B89E752EA4126FCFD283FC /* RoomTransport.swift */,
 				A8B3E580B598FEB2281572BF /* RoomTypes.swift */,
 				05CAE8B4D7DF8CDE67C0BC17 /* RoomView.swift */,
 				E3385A57426B673C763666A7 /* SignalMapApp.swift */,
+				649D158084D1A0F137AB4A5D /* gesture_recognizer.task */,
 			);
 			path = SignalMap;
+			sourceTree = "<group>";
+		};
+		52C61AE62CC3BA83B5EB7D7C /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				AE5BF7D3373908BBEF679F67 /* Pods_SignalMap.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		B28B7AF69320201D1CF206EB = {
@@ -66,6 +95,8 @@
 			children = (
 				482182478A3ECD4745BEA917 /* SignalMap */,
 				FBDC4F23F93125BBEEAE800C /* Products */,
+				300E2556F9954487DA6B78B7 /* Pods */,
+				52C61AE62CC3BA83B5EB7D7C /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -84,6 +115,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = C57128001CE614BF8549D6BB /* Build configuration list for PBXNativeTarget "SignalMap" */;
 			buildPhases = (
+				9A97BD3D42B9FF1B1BB4673E /* [CP] Check Pods Manifest.lock */,
 				BCE16DD0260827ECF338C787 /* Sources */,
 				7561BFB015D8F536760CB671 /* Frameworks */,
 				0189424A5A60FED329FA868E /* Resources */,
@@ -129,10 +161,36 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				620CE39D41A75EC6C1315D50 /* gesture_recognizer.task in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		9A97BD3D42B9FF1B1BB4673E /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-SignalMap-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		BCE16DD0260827ECF338C787 /* Sources */ = {
@@ -144,6 +202,7 @@
 				60EDBA8853426E3431668792 /* RoomRanging.swift in Sources */,
 				B1D6E0A72F00A10100000001 /* RoomBridge.swift in Sources */,
 				B1D6E0A72F00A10200000001 /* HeadingSource.swift in Sources */,
+				B1D6E0A72F00A10300000001 /* GestureCamera.swift in Sources */,
 				827D30A20B2B29313F88653C /* RoomSession.swift in Sources */,
 				64A9028494D8B994C550ECB5 /* RoomTransport.swift in Sources */,
 				F07861B25F1733CCFC19AADF /* RoomTypes.swift in Sources */,
@@ -157,6 +216,7 @@
 /* Begin XCBuildConfiguration section */
 		639A7CA24D39909E713B47F7 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AC6C780C20AA5DE3B055AF96 /* Pods-SignalMap.release.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 5;
@@ -175,6 +235,7 @@
 		};
 		7082CC0B6FC1282FCEABD07A /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 9B2901124C32B88DCE01A741 /* Pods-SignalMap.debug.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 5;

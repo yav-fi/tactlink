@@ -11,9 +11,8 @@ and streams one small JSON datagram a few times a second over UDP:
 ``pos`` is metres in the room's *arbitrary* shared frame (no north, origin
 wherever the mesh initialised); ``heading`` is radians in that same frame from
 the phone's relative-motion estimate (only meaningful while walking - the sim
-holds the last value otherwise). ``gesture`` is reserved: the phones do not
-classify hand poses yet, so it is always ``"None"`` for now and the webcam still
-supplies gestures in ``main.py``.
+holds the last value otherwise). ``gesture`` is recognized locally on the phone;
+camera images never cross this bridge.
 
 ``PhoneFeed`` runs a daemon UDP listener and keeps the newest datagram per phone
 id, dropping any that go quiet. ``OperatorPool.sync_from_reports`` turns that
@@ -44,6 +43,7 @@ class PhoneReport:
     compass_valid: bool = False
     gesture: str = "None"
     gesture_source: str = "phone"
+    gesture_confidence: float = 0.0
     cycle: int = 0
     recv_time: float = 0.0
 
@@ -90,6 +90,13 @@ def parse_datagram(data: bytes, now: float | None = None) -> PhoneReport | None:
         compass = 0.0
     compass_valid = bool(obj.get("compassValid", False)) and math.isfinite(compass)
 
+    try:
+        gesture_confidence = float(obj.get("gestureConfidence", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        gesture_confidence = 0.0
+    if not math.isfinite(gesture_confidence):
+        gesture_confidence = 0.0
+
     cycle = obj.get("cycle", 0)
     return PhoneReport(
         op_id=op_id[:64],
@@ -102,6 +109,7 @@ def parse_datagram(data: bytes, now: float | None = None) -> PhoneReport | None:
         compass_valid=compass_valid,
         gesture=(str(obj.get("gesture"))[:32] if obj.get("gesture") else "None"),
         gesture_source=(str(obj.get("gestureSource"))[:16] if obj.get("gestureSource") else "phone"),
+        gesture_confidence=max(0.0, min(1.0, gesture_confidence)),
         cycle=int(cycle) if isinstance(cycle, (int, float)) and math.isfinite(cycle) else 0,
         recv_time=time.monotonic() if now is None else now,
     )

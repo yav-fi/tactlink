@@ -33,6 +33,7 @@ struct DeviceProfile: Codable, Equatable {
     var rxBytes: Int
     var reconnects: Int
     var threePhoneMode: Bool
+    var twoPhoneMode: Bool? = nil
 }
 
 struct RoomMember: Identifiable {
@@ -244,8 +245,9 @@ struct GroupRangeSnapshot: Codable {
     var thirdAxisResolved: Bool
     var measurementSpan: Double
     var flat: Bool
+    var twoPhoneMode: Bool? = nil
     var valid: Bool {
-        (flat ? (3...5).contains(positions.count) : (4...5).contains(positions.count)) && positions.values.allSatisfy { $0.finite && $0.length < 3000 && (!flat || abs($0.z)<0.001) } &&
+        (twoPhoneMode == true ? (flat && positions.count == 2 && positions.values.allSatisfy { abs($0.x)<0.001 }) : (flat ? (3...5).contains(positions.count) : (4...5).contains(positions.count))) && positions.values.allSatisfy { $0.finite && $0.length < 3000 && (!flat || abs($0.z)<0.001) } &&
         created.isFinite && rms.isFinite && rms >= 0 && rms < 0.4 &&
         measurementSpan.isFinite && (0...15).contains(measurementSpan)
     }
@@ -276,6 +278,7 @@ struct RoomControl: Codable {
     var measurementSeconds: Double?
     var extended: Bool?
     var threePhoneMode: Bool?
+    var twoPhoneMode: Bool? = nil
 }
 
 /// Heading from changes in centroid-relative positions. This is not inertial navigation:

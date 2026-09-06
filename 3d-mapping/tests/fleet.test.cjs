@@ -18,12 +18,129 @@ function loadSource(name) {
   return module.exports;
 }
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
-const { blendHeading, fleetCameraFrame, screenRelativeMovement } = loadSource("cinematic-camera");
+const { blendHeading, fleetCameraFrame, idleCameraDriftRate, screenRelativeMovement } = loadSource("cinematic-camera");
 const { parseCommandInput, parseCommandSequence } = loadSource("command-console");
 const { compileMissionSequence } = loadSource("mission-sequence");
 const { resolveLandmark } = loadSource("landmarks");
-const { MOTION_TRACE_LIFETIME_MS, motionTraceAlpha } = loadSource("motion-trace");
+const { plannedFlightStep } = loadSource("flight-motion");
+const { GestureHoldInterpreter } = loadSource("gesture-hold");
+const { GestureCommandRepeater } = loadSource("gesture-repeat");
+const { deriveFingerMotionInput, FingerMotionInterpreter, resolvePointedDirection } = loadSource("finger-motion");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
+
+test("browser gestures fire once after a deliberate hold and re-arm after release", () => {
+  const gestures = new GestureHoldInterpreter();
+  assert.deepEqual(gestures.update("Thumb_Up", 0), { progress: 0 });
+  assert.deepEqual(gestures.update("Thumb_Up", 200), { progress: 0.5 });
+  assert.deepEqual(gestures.update("Thumb_Up", 400), { progress: 1, action: "takeoff" });
+  assert.deepEqual(gestures.update("Thumb_Up", 800), { progress: 0 });
+
+  gestures.update("None", 900);
+  gestures.update("None", 1100);
+  gestures.update("None", 1250);
+  gestures.update("Thumb_Up", 1300);
+  assert.equal(gestures.update("Thumb_Up", 1700).action, "takeoff");
+});
+
+test("browser gesture holds survive a brief low-confidence frame", () => {
+  const gestures = new GestureHoldInterpreter();
+  gestures.update("Pointing_Up", 0);
+  assert.equal(gestures.update("Pointing_Up", 200).progress, 0.5);
+  assert.equal(gestures.update("None", 300).progress, 0.75);
+  assert.equal(gestures.update("Pointing_Up", 400).action, "orbit");
+});
+
+test("browser canned gestures map to the primary flight actions", () => {
+  const expected = {
+    Thumb_Down: "descend",
+    Pointing_Up: "orbit",
+    ILoveYou: "return_home",
+    Open_Palm: "halt",
+    Closed_Fist: "rotate_heading",
+  };
+  for (const [gesture, action] of Object.entries(expected)) {
+    const interpreter = new GestureHoldInterpreter();
+    interpreter.update(gesture, 0);
+    assert.equal(interpreter.update(gesture, 400).action, action);
+  }
+});
+
+test("held motion gestures repeat and release into one explicit stop", () => {
+  const repeats = new GestureCommandRepeater();
+  repeats.start("rotate_heading", "Closed_Fist", 0);
+  assert.deepEqual(repeats.update("Closed_Fist", 1_799), []);
+  assert.deepEqual(repeats.update("Closed_Fist", 1_800), ["rotate_heading"]);
+  assert.deepEqual(repeats.update(undefined, 2_000), []);
+  assert.deepEqual(repeats.update(undefined, 2_220), ["gesture_stop"]);
+  assert.deepEqual(repeats.update(undefined, 5_000), []);
+
+  repeats.start("orbit", "Pointing_Up", 6_000);
+  assert.deepEqual(repeats.update("Pointing_Up", 20_000), []);
+  assert.deepEqual(repeats.update(undefined, 20_220), []);
+  assert.deepEqual(repeats.update(undefined, 20_440), ["gesture_stop"]);
+});
+
+test("automatic camera keeps a restrained side-to-side drift", () => {
+  assert.equal(idleCameraDriftRate(0), 0.012);
+  assert(idleCameraDriftRate(Math.PI / 0.55) < 0);
+  assert(Math.abs(idleCameraDriftRate(20)) <= 0.012);
+});
+
+function motionHand(pointDirection, fingers = [false, true, true, false, false], present = true) {
+  return { present, fingers, pointDirection };
+}
+
+function feedMotion(interpreter, input, start, duration = 400) {
+  const actions = [];
+  let now = start;
+  for (let elapsed = 0; elapsed < duration; elapsed += 50) {
+    now += 50;
+    actions.push(...interpreter.update(input, now).actions);
+  }
+  return { actions, now };
+}
+
+test("two-finger V-H-V-H wiper flies toward its final point", () => {
+  for (const [horizontal, expected] of [[[0.98, 0.05], "fly_east"], [[-0.98, 0.05], "fly_west"]]) {
+    const interpreter = new FingerMotionInterpreter();
+    let now = 0;
+    const actions = [];
+    for (const direction of [[0.03, -0.99], horizontal, [0.03, -0.99], horizontal]) {
+      const result = feedMotion(interpreter, motionHand(direction), now);
+      now = result.now;
+      actions.push(...result.actions);
+    }
+    assert.deepEqual(actions, [expected]);
+  }
+  assert.equal(resolvePointedDirection([0.1, -0.99]), "fly_north");
+});
+
+test("three-finger W pose fires one forward dash per deliberate hold", () => {
+  const interpreter = new FingerMotionInterpreter();
+  const three = motionHand([0, -1], [false, true, true, true, false]);
+  let result = feedMotion(interpreter, three, 0, 800);
+  assert.deepEqual(result.actions, ["fly_forward"]);
+  const stillHeld = feedMotion(interpreter, three, result.now, 500);
+  assert.deepEqual(stillHeld.actions, []);
+  result = feedMotion(interpreter, motionHand([0, 0], [false, false, false, false, false]), stillHeld.now, 450);
+  assert.deepEqual(feedMotion(interpreter, three, result.now, 800).actions, ["fly_forward"]);
+});
+
+test("browser landmarks recover the original three-finger geometry", () => {
+  const landmarks = Array.from({ length: 21 }, () => ({ x: 0.5, y: 0.8 }));
+  landmarks[0] = { x: 0.5, y: 0.9 };
+  for (const [mcp, pip, tip, x] of [[5, 6, 8, 0.40], [9, 10, 12, 0.50], [13, 14, 16, 0.60]]) {
+    landmarks[mcp] = { x, y: 0.68 };
+    landmarks[pip] = { x, y: 0.46 };
+    landmarks[tip] = { x, y: 0.20 };
+  }
+  landmarks[17] = { x: 0.70, y: 0.68 };
+  landmarks[18] = { x: 0.70, y: 0.48 };
+  landmarks[20] = { x: 0.70, y: 0.72 };
+  const geometry = deriveFingerMotionInput(landmarks);
+  assert.deepEqual(geometry.fingers.slice(1), [true, true, true, false]);
+  assert(geometry.pointDirection[1] < -0.95);
+});
 
 test("command bar understands slash commands and common plain English", () => {
   assert.deepEqual(parseCommandInput("/deploy 4 survey"), { type: "deploy", count: 4, survey: true });
@@ -31,6 +148,7 @@ test("command bar understands slash commands and common plain English", () => {
   assert.deepEqual(parseCommandInput("move forward 75 meters"), { type: "move", direction: "forward", meters: 75 });
   assert.deepEqual(parseCommandInput("/goto 38.8895, -77.0353, 120"), { type: "goto", latitude: 38.8895, longitude: -77.0353, altitude: 120, all: false });
   assert.deepEqual(parseCommandInput("return the whole fleet home"), { type: "return", all: true });
+  assert.deepEqual(parseCommandInput("rotate right"), { type: "turn", direction: "right", degrees: 90 });
   assert.deepEqual(parseCommandInput("inspect the monuments with two drones"), { type: "ai", instruction: "inspect the monuments with two drones" });
 });
 
@@ -91,10 +209,20 @@ test("cinematic heading takes the shortest turn behind a flying drone", () => {
   assert(Math.abs(Cesium.Math.toDegrees(blended) - 180) < 0.001);
 });
 
-test("motion trace fades quickly to transparent", () => {
-  assert.equal(motionTraceAlpha(0), 0.72);
-  assert(motionTraceAlpha(MOTION_TRACE_LIFETIME_MS / 2) < 0.3);
-  assert.equal(motionTraceAlpha(MOTION_TRACE_LIFETIME_MS), 0);
+test("planned flight accelerates smoothly and brakes for arrival", () => {
+  let speed = 0;
+  let remaining = 100;
+  const speeds = [];
+  for (let frame = 0; frame < 200 && remaining > 0; frame++) {
+    const step = plannedFlightStep(speed, 40, remaining, 0.1);
+    speed = step.speed;
+    remaining -= step.distance;
+    speeds.push(speed);
+  }
+  assert(speeds[1] > speeds[0]);
+  assert(Math.max(...speeds) <= 40);
+  assert(speeds.at(-1) === 0);
+  assert(remaining <= 0.000001);
 });
 
 test("first manual-flight undo keeps hidden render geometry at valid geographic positions", () => {
@@ -140,25 +268,40 @@ test("propeller blades rotate over time while hubs stay fixed", () => {
   blades.forEach((part, i) => assert.deepEqual(part.position.getValue(), centers[i]));
 });
 
-test("four-rotor geometry follows body during flight and playback and shares color", () => {
+test("bundled aircraft model follows the controller during flight and playback", () => {
   const entities = new Cesium.EntityCollection();
   const fleet = new Fleet({ entities });
   const drone = fleet.deploy(home);
-  const parts = entities.values.filter(e => e.id.includes("_quad_"));
-  assert.equal(parts.filter(e => e.id.includes("_hub_")).length, 4);
-  assert.equal(parts.filter(e => e.id.includes("_prop_")).length, 8);
+  const aircraft = entities.getById(drone.id);
+  assert.equal(aircraft.model.uri.getValue(), "/models/uav.glb");
+  assert.equal(aircraft.model.runAnimations.getValue(), true);
+  assert.equal(aircraft.box, undefined);
   drone.setManualControl(true);
   for (let i = 0; i < 120; i++) drone.moveManually(1, 0, 0, 1 / 60, 1);
-  const check = center => {
-    for (const part of parts) assert(Cesium.Cartesian3.distance(center, part.position.getValue()) < 0.5);
-  };
-  check(entities.getById(drone.id).position.getValue());
+  const flown = Cesium.Cartesian3.clone(aircraft.position.getValue());
   drone.setManualControl(false);
   fleet.startReplay(0); fleet.updateReplay(0.5);
-  check(entities.getById(`${drone.id}_replay`).position.getValue());
+  const replay = entities.getById(`${drone.id}_replay`);
+  assert(replay.model);
+  assert(!Cesium.Cartesian3.equals(replay.position.getValue(), flown));
   drone.setColor("#ff6666");
-  assert(parts.every(p => p.box.material.color.getValue().toCssHexString() === "#ff6666"));
+  assert.equal(aircraft.model.silhouetteColor.getValue().toCssHexString(), "#ff6666");
   fleet.clear(); assert.equal(entities.values.length, 0);
+});
+
+test("bundled aircraft keeps a black canopy and a red accent material", () => {
+  const bytes = fs.readFileSync(path.resolve(__dirname, "../public/models/uav.glb"));
+  assert.equal(bytes.readUInt32LE(0), 0x46546c67);
+  const jsonLength = bytes.readUInt32LE(12);
+  const gltf = JSON.parse(bytes.subarray(20, 20 + jsonLength).toString("utf8").trim());
+  const black = gltf.materials.find(material => material.name === "blackPanel");
+  const red = gltf.materials.find(material => material.name === "accent");
+  assert(black.pbrMetallicRoughness.baseColorFactor.slice(0, 3).every(channel => channel < 0.02));
+  assert(red.pbrMetallicRoughness.baseColorFactor[0] > 0.9);
+  assert(gltf.meshes[0].primitives.some(primitive => primitive.material === gltf.materials.indexOf(black)));
+  assert.equal(gltf.animations[0].channels.length, 4);
+  assert.equal(gltf.nodes.filter(node => node.name.startsWith("rotor_")).length, 4);
+  assert.equal(gltf.meshes[1].name, "rotor_blades");
 });
 
 test("Survey effect weakens beyond 100, 250 and 500 meters", () => {
@@ -304,7 +447,7 @@ test("manual flight automatically detours around a directional obstacle", () => 
 
   const missionDrone = fleet.deploy(home);
   missionDrone.run({ drone_id: missionDrone.id, mission: [{ action: "goto", ...home, longitude: home.longitude + 0.01, speed_mps: 100 }] });
-  missionDrone.update(0.1);
+  for (let frame = 0; frame < 20 && !missionDrone.avoidanceActive; frame++) missionDrone.update(0.1);
   assert.equal(missionDrone.snapshot().state, "AVOIDING");
   assert.equal(missionDrone.collisionBlocked, false);
   assert.equal(missionDrone.avoidanceActive, true);
@@ -321,8 +464,76 @@ test("photorealistic ground can be below the hidden fallback ellipsoid", () => {
   assert(drone.snapshot().longitude > home.longitude);
   assert.equal(drone.collisionBlocked, false);
   viewer.scene.pickFromRay = ray => ({ position: Cesium.Ray.getPoint(ray, 1) });
-  drone.moveManually(1, 0, 0, 0.1);
+  // Reversing course leaves the cleared corridor, so the wall is probed again.
+  drone.moveManually(-1, 0, 0, 0.1);
   assert.equal(drone.collisionBlocked, true);
+});
+
+test("cleared corridors are reused for a while, then re-probed", () => {
+  let queries = 0;
+  const viewer = { entities: new Cesium.EntityCollection(), scene: {
+    pickFromRay: () => { queries++; return undefined; },
+    globe: { show: false, pick: () => undefined, getHeight: () => 0 },
+  } };
+  const drone = new Fleet(viewer).deploy(home);
+  drone.setManualControl(true);
+  drone.moveManually(1, 0, 0, 1 / 60);
+  assert.equal(queries, 1);
+  // Steady flight down the same heading flies inside the corridor for free.
+  for (let frame = 0; frame < 4; frame++) drone.moveManually(1, 0, 0, 1 / 60);
+  assert.equal(queries, 1);
+  assert(drone.snapshot().longitude > home.longitude);
+  // The corridor covers a quarter second of flight and is then re-probed.
+  for (let frame = 0; frame < 60; frame++) drone.moveManually(1, 0, 0, 1 / 60);
+  assert(queries > 1 && queries < 20, `expected a handful of probes, got ${queries}`);
+});
+
+test("a drone with no safe route stops re-searching every frame", () => {
+  let queries = 0;
+  const viewer = { entities: new Cesium.EntityCollection(), scene: {
+    globe: { show: false },
+    pickFromRay: ray => { queries++; return { position: Cesium.Ray.getPoint(ray, 1) }; },
+  } };
+  const drone = new Fleet(viewer).deploy(home);
+  drone.setManualControl(true);
+  drone.moveManually(1, 0, 0, 1 / 60);
+  const search = queries;
+  assert.equal(drone.collisionBlocked, true);
+  assert(search > 1, "the first pinned frame probes ahead and then looks for a detour");
+  // Pinned in place against the same wall on the same heading: nothing has
+  // changed, so repeating the nine-query search would only stall the frame.
+  for (let frame = 0; frame < 30; frame++) drone.moveManually(1, 0, 0, 1 / 60);
+  assert.equal(drone.collisionBlocked, true);
+  assert.equal(queries, search, `expected no repeat searches, got ${queries - search}`);
+  // The world can change around a stationary drone, so a stale result expires.
+  for (let frame = 0; frame < 40; frame++) drone.moveManually(1, 0, 0, 1 / 60);
+  assert(queries > search, "a failed route is retried once it goes stale");
+});
+
+test("an obstacle detour commits to one side instead of alternating", () => {
+  let openNorth = false;
+  const viewer = { entities: new Cesium.EntityCollection(), scene: {
+    globe: { show: false },
+    pickFromRay(ray) {
+      const frame = Cesium.Transforms.eastNorthUpToFixedFrame(ray.origin);
+      const local = Cesium.Matrix4.multiplyByPointAsVector(
+        Cesium.Matrix4.inverseTransformation(frame, new Cesium.Matrix4()), ray.direction, new Cesium.Cartesian3());
+      const clear = local.y < -0.4 || (openNorth && local.y > 0.4);
+      return clear ? undefined : { position: Cesium.Ray.getPoint(ray, 1) };
+    },
+  } };
+  const drone = new Fleet(viewer).deploy(home);
+  drone.setManualControl(true);
+  for (let frame = 0; frame < 12; frame++) drone.moveManually(1, 0, 0, 1 / 60);
+  assert.equal(drone.avoidanceActive, true);
+  assert(drone.snapshot().latitude < home.latitude, "south is the only way past the wall");
+
+  // Once both sides open up, the drone must finish the way it started rather
+  // than snapping back across the obstacle it is already passing.
+  openNorth = true;
+  const committed = drone.snapshot().latitude;
+  for (let frame = 0; frame < 30; frame++) drone.moveManually(1, 0, 0, 1 / 60);
+  assert(drone.snapshot().latitude < committed, "the detour reversed instead of holding its side");
 });
 
 test("failed building queries do not freeze drones or leave the camera in an offscreen view", () => {
@@ -392,15 +603,19 @@ test("wall and ground checks block manual motion, batches, missions and replay",
   obstacle = true;
   const destination = { ...home, longitude: home.longitude + 0.01 };
   drone.run({ drone_id: drone.id, mission: [{ action: "goto", ...destination, speed_mps: 10000 }] });
-  drone.update(0.1);
+  for (let frame = 0; frame < 20 && drone.snapshot().state !== "BLOCKED"; frame++) drone.update(0.1);
   assert.equal(drone.snapshot().state, "BLOCKED");
-  assert.equal(drone.snapshot().longitude, parked.longitude);
+  assert(Cesium.Cartesian3.distance(
+    Cesium.Cartesian3.fromDegrees(parked.longitude, parked.latitude, parked.altitude),
+    entities.getById(drone.id).position.getValue(),
+  ) < 0.6);
+  const blockedAt = drone.snapshot();
   fleet.commandGroup([drone.id], destination, 30, 0);
   fleet.updateReplay(1000);
   assert.equal(fleet.blockedCount, 1);
   assert.equal(fleet.replay.arrived, 0);
   assert.equal(fleet.replay.running, false);
-  assert.equal(drone.snapshot().longitude, parked.longitude);
+  assert.equal(drone.snapshot().longitude, blockedAt.longitude);
   obstacle = false;
   viewer.scene.globe.getHeight = () => 75;
   drone.setManualControl(true);
@@ -555,7 +770,7 @@ test("synchronized replay uses assigned speeds and stops at the last arrival", (
   assert(Math.abs(fleet.replay.duration - expectedDuration) < 1e-9);
   for (const drone of [first, second]) {
     const replay = entities.getById(`${drone.id}_replay`);
-    assert(replay.box);
+    assert(replay.model);
     assert.equal(replay.position.isConstant, false);
     assert(Cesium.Cartesian3.equals(replay.position.getValue(), trail[0]));
   }
@@ -636,7 +851,57 @@ test("sample mission accepts orbit/hover and rejects invalid speed overrides", (
   const { parseMission, sampleMission } = loadSource("mission");
   assert.deepEqual(parseMission(JSON.stringify(sampleMission)), sampleMission);
   assert.doesNotThrow(() => parseMission(JSON.stringify({ drone_id: "drone_1", mission: [{ action: "hover", duration_s: 2 }] })));
+  assert.doesNotThrow(() => parseMission(JSON.stringify({ drone_id: "drone_1", mission: [{ action: "orbit", radius_m: 20, duration_s: 2, center: home }] })));
+  assert.throws(() => parseMission(JSON.stringify({ drone_id: "drone_1", mission: [{ action: "orbit", radius_m: 20, duration_s: 2, center: { latitude: 999, longitude: 0, altitude: 1 } }] })));
   assert.throws(() => parseMission(JSON.stringify({ drone_id: "drone_1", mission: [{ action: "return_home", speed_mps: -2 }] })));
+});
+
+test("halt cancels an active mission and holds the current position", () => {
+  const entities = new Cesium.EntityCollection();
+  const fleet = new Fleet({ entities });
+  const drone = fleet.deploy(home);
+  drone.run({ drone_id: drone.id, mission: [{ action: "orbit", radius_m: 30, duration_s: 60 }] });
+  drone.update(0.1);
+  drone.stopCommand();
+  const stopped = drone.snapshot();
+  drone.update(1);
+  assert.deepEqual(drone.snapshot(), stopped);
+  assert.equal(stopped.state, "HOVERING");
+});
+
+test("held gesture motion accelerates continuously and stops on release", () => {
+  const entities = new Cesium.EntityCollection();
+  const drone = new Fleet({ entities }).deploy(home);
+  drone.startGestureMotion(0, 1, 0, 38);
+  const distances = [];
+  let previous = Cesium.Cartesian3.clone(entities.getById(drone.id).position.getValue());
+  for (let frame = 0; frame < 12; frame++) {
+    drone.update(0.1);
+    const current = Cesium.Cartesian3.clone(entities.getById(drone.id).position.getValue());
+    distances.push(Cesium.Cartesian3.distance(previous, current));
+    previous = current;
+  }
+  assert.equal(drone.snapshot().state, "GESTURE_CONTROL");
+  assert(distances[5] > distances[0]);
+  const released = drone.snapshot();
+  drone.stopCommand();
+  drone.update(1);
+  assert.deepEqual(drone.snapshot(), { ...released, state: "HOVERING", currentStep: 0, totalSteps: 0 });
+});
+
+test("closed-fist heading command turns in place with eased motion", () => {
+  const entities = new Cesium.EntityCollection();
+  const drone = new Fleet({ entities }).deploy(home);
+  const start = drone.snapshot();
+  drone.rotateHeading(90);
+  drone.update(0.1);
+  assert.equal(drone.snapshot().state, "TURNING");
+  assert(drone.heading > 0 && drone.heading < Math.PI / 2);
+  for (let frame = 0; frame < 20; frame++) drone.update(0.1);
+  assert.equal(drone.snapshot().state, "HOVERING");
+  assert(Math.abs(drone.heading - Math.PI / 2) < 1e-9);
+  assert.equal(drone.snapshot().latitude, start.latitude);
+  assert.equal(drone.snapshot().longitude, start.longitude);
 });
 
 test("empty startup, unique drone IDs and eight-color wraparound", () => {
@@ -649,10 +914,13 @@ test("empty startup, unique drone IDs and eight-color wraparound", () => {
     assert.equal(drone.id, `drone_${i + 1}`);
     const leader = entities.getById(drone.id);
     const expected = Cesium.Color.fromCssColorString(DRONE_COLORS[i % 8].hex);
-    assert(Cesium.Color.equals(leader.box.material.color.getValue(), expected));
+    assert.equal(leader.model.uri.getValue(), "/models/uav.glb");
+    assert(Cesium.Color.equals(leader.model.silhouetteColor.getValue(), expected));
     assert.equal(entities.getById(`${drone.id}_trail`).show, false);
     assert.equal(leader.polyline, undefined);
-    assert(Cesium.Cartesian3.equals(leader.box.dimensions.getValue(), new Cesium.Cartesian3(0.36, 0.24, 0.12)));
+    assert.equal(leader.model.minimumPixelSize.getValue(), 42);
+    // Flight leaves no trailing particles: only the body, label and markers.
+    assert.equal(entities.values.filter(entity => entity.id.startsWith(`${drone.id}_trace`)).length, 0);
   }
   assert.equal(fleet.drones.size, 9);
 });
@@ -696,4 +964,26 @@ test("backend ENU conversion preserves metre-scale east north and up offsets", (
   for (const point of [{ x: 100, y: 0, z: 0 }, { x: 0, y: 100, z: 0 }, { x: 0, y: 0, z: 100 }]) {
     assert(Math.abs(Cesium.Cartesian3.distance(anchor, localToFixed(origin, point)) - 100) < 0.001);
   }
+});
+
+
+test("PC descent stops on release and stays vertical away from home", () => {
+  const repeats = new GestureCommandRepeater();
+  repeats.start("descend", "Thumb_Down", 0);
+  assert.deepEqual(repeats.update("Thumb_Down", 750), ["descend"]);
+  assert.deepEqual(repeats.update(undefined, 800), []);
+  assert.deepEqual(repeats.update(undefined, 1021), ["gesture_stop"]);
+  const viewer = { entities: new Cesium.EntityCollection(), scene: { globe: { show: false }, pickFromRay: () => undefined } };
+  const fleet = new Fleet(viewer); const drone = fleet.deploy(home);
+  drone.applyManualMove({ ...home, longitude: home.longitude + .001, altitude: 150 });
+  drone.startGestureMotion(1, 0, 0, 18); drone.update(.1);
+  const before = drone.snapshot();
+  drone.startGestureMotion(0, 0, -1, 18);
+  for (let i = 0; i < 10; i++) drone.update(.1);
+  const after = drone.snapshot();
+  assert(after.altitude < before.altitude);
+  assert(Math.abs(after.longitude - before.longitude) < 1e-10);
+  assert(Math.abs(after.latitude - before.latitude) < 1e-10);
+  drone.stopCommand(); drone.update(.1);
+  assert.equal(drone.snapshot().altitude, after.altitude);
 });

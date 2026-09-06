@@ -7,6 +7,9 @@
   "Pointing_Up": "orbit",
   "ILoveYou": "return_home",
   "Open_Palm": "halt",
+  "Three_Finger_Forward": "fly_forward",
+  "Dash_Left": "fly_left",
+  "Dash_Right": "fly_right",
 
   "Closed_Fist": null,
   "Victory": null

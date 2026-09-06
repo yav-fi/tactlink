@@ -13,7 +13,7 @@ import Network
 ///     {"v":1,"id":...,"name":...,"room":...,"t":...,"cycle":...,
 ///      "pos":[x,y],"z":...,"heading":...,"moving":...,"speed":...,
 ///      "headingReady":...,"compass":...,"compassValid":...,
-///      "gesture":"None","flat":...}
+///      "gesture":...,"gestureConfidence":...,"gestureSource":"mediapipe","flat":...}
 ///
 /// consumed by `src/phone_feed.py` on the simulator side. `heading` is the
 /// motion-derived heading in the UWB frame (walking only); `compass` is the
@@ -26,16 +26,21 @@ final class RoomBridge {
         var room: String
         var t: Double            // sender ProcessInfo.systemUptime, seconds
         var cycle: Int
-        var pos: [Double]        // [x, y] metres, arbitrary shared group frame
-        var z: Double
+        var pos: [Double]?        // absent while waiting for UWB geometry
+        var z: Double?
         var heading: Double      // radians in the same frame; held when stationary
         var moving: Bool
         var speed: Double
         var headingReady: Bool
         var compass: Double      // degrees clockwise from magnetic north
         var compassValid: Bool
-        var gesture: String      // reserved; "None" until phones classify on-device
+        var gesture: String
+        var gestureConfidence: Double
+        var gestureSource: String
         var flat: Bool
+        var geometryAge: Double
+        var members: Int
+        var twoPhone: Bool
     }
 
     /// Minimum gap between datagrams (~15 Hz). `tick()` runs at 10 Hz, so in
@@ -85,20 +90,25 @@ final class RoomBridge {
     }
 
     func send(id: String, name: String, room: String, cycle: Int,
-              position: Vector3, heading: RelativeMotionHeading,
-              compassDegrees: Double?, flat: Bool) {
+              position: Vector3?, heading: RelativeMotionHeading,
+              compassDegrees: Double?, gesture: String,
+              gestureConfidence: Double, flat: Bool, geometryAge: Double = 0, members: Int = 0, twoPhone: Bool = false) {
         queue.async { [weak self] in
-            guard let self, let connection = self.connection, position.finite else { return }
+            guard let self, let connection = self.connection else { return }
+            let position = position.flatMap { $0.finite ? $0 : nil }
             let now = ProcessInfo.processInfo.systemUptime
             guard now - self.lastSend >= self.minInterval else { return }
             self.lastSend = now
             let compassOK = (compassDegrees?.isFinite ?? false)
             let sample = Sample(id: id, name: String(name.prefix(24)), room: room, t: now,
-                                cycle: cycle, pos: [position.x, position.y], z: position.z,
+                                cycle: cycle, pos: position.map { [$0.x, $0.y] }, z: position?.z,
                                 heading: heading.angle, moving: heading.moving,
                                 speed: heading.speed, headingReady: heading.available,
                                 compass: compassOK ? compassDegrees! : 0, compassValid: compassOK,
-                                gesture: "None", flat: flat)
+                                gesture: gesture.isEmpty ? "None" : String(gesture.prefix(32)),
+                                gestureConfidence: gestureConfidence.isFinite ? max(0, min(1, gestureConfidence)) : 0,
+                                gestureSource: gesture == "None" ? "none" : "mediapipe", flat: flat,
+                                geometryAge: geometryAge.isFinite ? max(0, geometryAge) : 0, members: members, twoPhone: twoPhone)
             guard let data = try? self.encoder.encode(sample) else { return }
             connection.send(content: data, completion: .idempotent)
         }

@@ -59,6 +59,15 @@ def test_parse_compass():
     assert r.compass_valid is False
 
 
+def test_parse_gesture_metadata_is_bounded():
+    r = parse_datagram(_packet(gesture="Dash_Left", gestureSource="vision",
+                               gestureConfidence=1.7), now=1.0)
+    assert r.gesture == "Dash_Left" and r.gesture_source == "vision"
+    assert r.gesture_confidence == 1.0
+    r = parse_datagram(_packet(gestureConfidence=float("nan")), now=1.0)
+    assert r.gesture_confidence == 0.0
+
+
 def test_sim_heading_prefers_compass_then_falls_back():
     # compass 0 deg = facing north = sim +y = pi/2, regardless of rot.
     north = PhoneReport("a", "a", (0.0, 0.0), heading=1.234, compass=0.0, compass_valid=True)

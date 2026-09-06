@@ -20,7 +20,9 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 STATE = ROOT / 'build' / 'dev-deploy'
 BUNDLE = 'com.arulandu.SignalMap'
-XCODE = os.environ.get('DEVELOPER_DIR', '/Applications/Xcode 26.3.app/Contents/Developer')
+XCODE = os.environ.get('DEVELOPER_DIR') or subprocess.check_output(
+    ['xcode-select', '-p'], text=True
+).strip()
 ENV = dict(os.environ, DEVELOPER_DIR=XCODE)
 
 
@@ -92,6 +94,8 @@ def eligible(device):
 def source_digest():
     digest = hashlib.sha256(XCODE.encode())
     files = list((ROOT / 'SignalMap').rglob('*')) + list((ROOT / 'SignalMap.xcodeproj').rglob('*'))
+    files += [ROOT / 'Podfile', ROOT / 'Podfile.lock']
+    files += list((ROOT / 'SignalMap.xcworkspace').rglob('*'))
     for path in sorted(files):
         if not path.is_file() or 'xcuserdata' in path.parts or path.name == '.DS_Store':
             continue
@@ -136,18 +140,19 @@ def publish(app, source):
 
 def build(*, force=False, register=None):
     with lock('build.lock'):
+        execute(['sh', 'scripts/setup-gestures.sh'], timeout=300, logfile=STATE / 'gesture-setup.log')
         source = source_digest()
         previous = read_json(STATE / 'latest.json')
         if not force and not register and previous and previous['source'] == source and Path(previous['app']).exists():
             say('Source unchanged; reusing the signed build.')
             return previous
         products = STATE / 'products'
-        common = ['-project', 'SignalMap.xcodeproj', '-configuration', 'Debug',
+        common = ['-workspace', 'SignalMap.xcworkspace', '-scheme', 'SignalMap', '-configuration', 'Debug',
                   '-allowProvisioningUpdates', f'CONFIGURATION_BUILD_DIR={products}',
                   f'OBJROOT={STATE / "objects"}', f'SYMROOT={STATE / "symbols"}']
         if register:
             say(f'Registering new development device {register}; first-time setup may take longer.')
-            registration = ['xcodebuild', *common, '-scheme', 'SignalMap', '-destination', f'id={register}',
+            registration = ['xcodebuild', *common, '-destination', f'id={register}',
                             '-allowProvisioningDeviceRegistration', 'build']
             try:
                 execute(registration, timeout=240, logfile=STATE / 'registration.log')
@@ -162,14 +167,23 @@ def build(*, force=False, register=None):
                         logfile=STATE / 'registration-fallback.log')
         version = str(int(time.time()))
         say('Building and signing Signal Map…')
-        execute(['xcodebuild', *common, '-target', 'SignalMap', '-sdk', 'iphoneos',
-                 f'CURRENT_PROJECT_VERSION={version}', 'build'], timeout=300, logfile=STATE / 'build.log')
+        command = ['xcodebuild', *common, '-sdk', 'iphoneos', '-destination', 'generic/platform=iOS',
+                   f'CURRENT_PROJECT_VERSION={version}', 'build']
+        try:
+            execute(command, timeout=300, logfile=STATE / 'build.log')
+        except RuntimeError:
+            error = (STATE / 'build.log').read_text()
+            fallback = Path(os.environ.get('SIGNALMAP_PROVISIONING_XCODE', '/Applications/Xcode.app/Contents/Developer'))
+            if 'not installed' not in error or not fallback.exists() or str(fallback) == XCODE:
+                raise
+            say('Selected Xcode lacks its iOS platform; building the workspace with installed fallback Xcode.')
+            execute(command, env=dict(ENV, DEVELOPER_DIR=str(fallback)), timeout=300, logfile=STATE / 'build-fallback.log')
         if source_digest() != source:
             raise RuntimeError('Source changed during the build; not publishing. Run ship again.')
         return publish(products / 'SignalMap.app', source)
 
 
-def deploy(device, manifest, room, installed):
+def deploy(device, manifest, room, installed, bridge=None):
     identifier = device['identifier']
     name = device.get('deviceProperties', {}).get('name', identifier)
     receipt = STATE / 'receipts' / f'{identifier}.json'
@@ -184,6 +198,8 @@ def deploy(device, manifest, room, installed):
     args = ['device', 'process', 'launch', '--device', identifier, '--terminate-existing', BUNDLE]
     if room:
         args += ['--room', room]
+    if bridge:
+        args += ['--sim-bridge', bridge]
     # devicectl options must precede the application arguments.
     with tempfile.TemporaryDirectory(prefix='signalmap-launch-') as folder:
         output = Path(folder) / 'result.json'
@@ -191,6 +207,8 @@ def deploy(device, manifest, room, installed):
         if read_json(output, {}).get('info', {}).get('outcome') != 'success':
             raise RuntimeError('Launch did not report success.')
     mark['launched'] = True
+    mark['room'] = room
+    mark['bridge'] = bridge
     atomic_json(receipt, mark)
     say(f'{name}: app running. Total {time.monotonic()-started:.1f}s.')
 
@@ -229,9 +247,9 @@ def watch(args):
                                 continue
                             mark = read_json(STATE / 'receipts' / f'{identifier}.json', {})
                             installed = mark.get('fingerprint') == latest['fingerprint']
-                            if installed and mark.get('launched'):
+                            if installed and mark.get('launched') and mark.get('room') == args.room and mark.get('bridge') == args.bridge:
                                 continue
-                            jobs[identifier] = pool.submit(deploy, device, latest, args.room, installed)
+                            jobs[identifier] = pool.submit(deploy, device, latest, args.room, installed, args.bridge)
                     elif not jobs:
                         say('No published build. Run ./scripts/dev ship in another terminal.')
                     if args.once and not jobs:
@@ -250,6 +268,7 @@ def main():
     ship.add_argument('--force', action='store_true', help='Rebuild even when source is unchanged')
     watcher = sub.add_parser('watch', help='Install latest build on reachable phones as they appear')
     watcher.add_argument('--room', help='Automatically open a test room after each update')
+    watcher.add_argument('--bridge', help='Set the phone Visualizer host automatically, e.g. 192.168.1.115:9870')
     watcher.add_argument('--once', action='store_true', help='Deploy currently reachable devices, then exit')
     adopt = sub.add_parser('adopt', help='Publish an existing signed physical-device .app')
     adopt.add_argument('app', type=Path)

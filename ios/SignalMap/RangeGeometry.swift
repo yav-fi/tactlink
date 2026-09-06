@@ -9,8 +9,13 @@ struct GeometrySolution {
 enum RangeGeometry {
     /// Complete, contemporaneous distance graphs only. Missing edges are never filled with zero.
     /// Axes are a group convention, not device heading or gravity.
-    static func solve(ids: [String], distances: [RangingPair: Double], previous: [String: Vector3] = [:], flat: Bool = false) -> GeometrySolution? {
+    static func solve(ids: [String], distances: [RangingPair: Double], previous: [String: Vector3] = [:], flat: Bool = false, line: Bool = false) -> GeometrySolution? {
         let ids = Array(Set(ids)).sorted(), n = Set(ids).count
+        if line {
+            // One range constrains distance only. The north/south axis is explicitly assumed.
+            guard n == 2, let d = distances[.init(ids[0],ids[1])], d.isFinite, d > 0.05, d < 1000 else { return nil }
+            return .init(positions:[ids[0]:.init(x:0,y:-d/2,z:0),ids[1]:.init(x:0,y:d/2,z:0)],rms:0,heightResolved:false)
+        }
         guard n >= (flat ? 3 : 4) && n <= 5 else { return nil }
         var squared = Array(repeating: Array(repeating: 0.0, count: n), count: n)
         for i in 0..<n {

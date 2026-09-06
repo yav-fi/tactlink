@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm --prefix pitch ci",
+  "buildCommand": "npm --prefix pitch run build",
+  "outputDirectory": "pitch/dist/client"
+}

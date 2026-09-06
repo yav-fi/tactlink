@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="DNHacks geospatial drone mission simulator" />
-    <title>Drone Mission Control</title>
+    <meta name="description" content="TactLink gesture-driven reconnaissance and drone mission control" />
+    <title>TactLink</title>
     <style>
       body:not(.runtime-mode) .runtime-only { display: none !important; }
       body.runtime-mode .local-only { display: none !important; }
@@ -15,8 +15,8 @@
     <main id="app">
       <div id="cesiumContainer" aria-label="3D map"></div>
       <aside class="mission-panel">
-        <p class="eyebrow">DNHacks 2026</p>
-        <h1>Drone mission control</h1>
+        <p class="eyebrow">Gesture-driven reconnaissance</p>
+        <h1>TactLink</h1>
         <p id="world-status" class="status">Starting map…</p>
         <nav class="mode-switch" aria-label="Runtime mode">
           <a href="?mode=runtime">Backend runtime</a>
@@ -50,11 +50,23 @@
         </section>
         <div class="local-only" id="local-command-dock">
         <div id="command-suggestions" class="command-suggestions" role="listbox" aria-label="Available commands" hidden></div>
+        <div class="dock-command-stack">
+        <aside id="gesture-hud" class="gesture-hud" aria-live="polite">
+          <div class="gesture-hud-heading">
+            <span id="gesture-dot" class="gesture-dot" aria-hidden="true"></span>
+            <span id="gesture-connection">CAMERA CONNECTING</span>
+          </div>
+          <strong id="gesture-name">NO HAND</strong>
+          <span id="gesture-confidence">Show a gesture to control drone 1</span>
+          <div class="gesture-progress" aria-hidden="true"><span id="gesture-progress-fill"></span></div>
+          <span id="gesture-action">GESTURES READY</span>
+        </aside>
         <form id="command-form" class="command-form">
           <span class="command-prompt" aria-hidden="true">›</span>
           <input id="command-input" type="text" autocomplete="off" spellcheck="false" aria-label="Drone command" aria-controls="command-suggestions" placeholder="Tell the drones what to do · type / for commands" />
           <span id="command-status" class="visually-hidden" role="status">Ready · type / for commands</span>
         </form>
+        </div>
         <dl class="flight-hud" aria-label="Selected drone telemetry">
           <div><dt>Drone</dt><dd id="hud-drone">None</dd></div>
           <div><dt>Lat</dt><dd id="hud-latitude">—</dd></div>
@@ -64,6 +76,13 @@
           <div><dt>State</dt><dd id="hud-state">Idle</dd></div>
           <div><dt>Fleet</dt><dd id="hud-fleet">0</dd></div>
         </dl>
+        <nav id="input-switch" class="input-switch local-only" aria-label="Gesture input source">
+          <span class="input-switch-label">Gesture input</span>
+          <div class="input-switch-options">
+            <a id="input-phone" href="?mode=local" title="iPhone front camera over the UWB group map. Reloads the page.">iPhone</a>
+            <a id="input-camera" href="?mode=local&amp;input=camera" title="This computer's webcam, recognized in the browser. Reloads the page.">Mac cam</a>
+          </div>
+        </nav>
         <div class="dock-row" hidden>
           <button id="deploy-drone" type="button">+ Deploy</button>
           <select id="selected-drone" aria-label="Selected drone" disabled><option>No drones deployed</option></select>

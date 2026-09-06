@@ -40,6 +40,7 @@ from .models import (
 )
 from .network import NetworkSimulator
 from .resilience import NetworkResilienceManager
+from .operators import OperatorRegistry, gesture_mission
 from .scenarios import PRESET_INTERFERENCE, ScenarioEngine, ScenarioPreset
 from .workunits import EdgeComputeBroker, EdgeResourceProfile, WorkExecutor
 from .world import BoxObstacle, MovingEntity, Region, World, WorldDefinition
@@ -117,6 +118,9 @@ class SimulationEngine:
         self._last_reconcile_event: dict[str, float] = {}
         self._external_workers: dict[str, object] = {}
         self._initial_drone_count = drone_count
+        # People on the ground, fed by phones. Empty (and therefore inert)
+        # unless something is publishing, so determinism is unaffected.
+        self.operators = OperatorRegistry()
         self._create_default_drones(drone_count)
         self.events.emit(
             self.time,
@@ -390,6 +394,7 @@ class SimulationEngine:
         if relay_command is not None and self.mode == "fabric":
             self._submit_relay_mission(relay_command)
         self._collect_adaptive_signals()
+        self._apply_operator_gestures()
         snapshot = self.snapshot()
         if self._recorder is not None:
             self._recorder.record_snapshot(snapshot)
@@ -896,6 +901,42 @@ class SimulationEngine:
                             [node_id], choice,
                         )
 
+    def _apply_operator_gestures(self) -> None:
+        """Let the people on the ground fly the drones they are standing next to.
+
+        Placement and control selection happen every tick so the console can draw
+        who is in charge; only a gesture that has just been *held* long enough by
+        the controlling operator turns into a mission. With no phones publishing
+        the registry is empty and this is a no-op, which keeps seeded runs
+        reproducible.
+        """
+        if not self.operators.connected:
+            return
+        positions = {
+            node_id: self.world.truth(node_id).position
+            for node_id in self.drones
+            if self.world.is_online(node_id)
+        }
+        for command in self.operators.update(positions):
+            mission = gesture_mission(command, positions[command.node_id])
+            if mission is None:
+                continue
+            try:
+                self.submit_mission(mission)
+            except RuntimeError:
+                # Mission control is offline; the gesture is simply dropped
+                # rather than queued, so a stale intent cannot fire later.
+                continue
+            self.events.emit(
+                self.time,
+                EventCategory.MISSION,
+                EventType.TASK_CREATED,
+                command.operator.operator_id,
+                f"{command.operator.name} signalled {command.action} to {command.node_id}",
+                [command.node_id],
+                {"gesture": command.operator.gesture, "action": command.action},
+            )
+
     def snapshot(self, event_limit: int = 30) -> SimulationSnapshot:
         drones: list[DronePublicState] = []
         for node_id, node in sorted(self.drones.items()):
@@ -979,6 +1020,7 @@ class SimulationEngine:
             network=network_metrics,
             control_available=self.missions.control_available,
             adaptive=self._adaptive_state(),
+            operators=self.operators.states(),
             events=self.events.recent(event_limit),
         )
 

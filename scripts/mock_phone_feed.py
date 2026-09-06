@@ -26,9 +26,11 @@ _NAMES = ["Ian", "Alvan", "Yavin", "Thomas", "Sam", "Max", "Uma", "Leo"]
 
 # (start, end) seconds within a 20 s loop -> gesture phone 1 holds. Mirrors the
 # --demo timeline in src/main.py.
-_SCRIPT = [(2.0, 3.0, "Thumb_Up"), (5.0, 6.0, "Thumb_Up"), (9.0, 10.5, "Pointing_Up"),
-           (13.0, 14.0, "Open_Palm"), (17.0, 18.5, "Thumb_Down")]
-_SCRIPT_LOOP = 20.0
+_SCRIPT = [(2.0, 3.0, "Thumb_Up"), (5.0, 6.0, "Thumb_Up"), (8.0, 9.0, "Pointing_Up"),
+           (11.0, 12.0, "Dash_Left"), (14.0, 15.0, "Dash_Right"),
+           (17.0, 18.0, "Three_Finger_Forward"), (20.0, 21.0, "ILoveYou"),
+           (23.0, 24.0, "Open_Palm"), (26.0, 27.5, "Thumb_Down")]
+_SCRIPT_LOOP = 30.0
 
 
 def _scripted_gesture(t: float) -> str:
@@ -69,6 +71,8 @@ def main() -> None:
                 ang = phase + (0.0 if args.still else args.speed * t)
                 x = args.radius * math.cos(ang)
                 y = args.radius * math.sin(ang)
+                if args.phones == 2:
+                    x, y = 0.0, (-1 if i == 0 else 1) * args.radius
                 heading = ang + math.pi if args.still else ang + math.pi / 2
                 gesture = _scripted_gesture(t) if (args.script and i == 0) else "None"
                 # sim-frame facing (radians) -> compass degrees CW from north.
@@ -84,8 +88,12 @@ def main() -> None:
                     "compass": round(compass, 2),
                     "compassValid": not args.no_compass,
                     "gesture": gesture,
-                    "gestureSource": "canned" if gesture != "None" else "none",
-                    "flat": True,
+                    "gestureConfidence": 0.9 if gesture != "None" else 0.0,
+                    "gestureSource": "mock" if gesture != "None" else "none",
+                    "flat": args.phones in (2, 3),
+                    "twoPhone": args.phones == 2,
+                    "members": args.phones,
+                    "geometryAge": 0.0,
                 }
                 sock.sendto(json.dumps(msg).encode("utf-8"), dst)
             time.sleep(period)

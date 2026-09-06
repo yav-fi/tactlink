@@ -1,3 +1,4 @@
+import { startBatteryPanel } from "./battery-panel";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import "./style.css";
 import * as Cesium from "cesium";
@@ -5,15 +6,19 @@ import { DroneController } from "./drone-controller";
 import { Fleet, DRONE_COLORS } from "./fleet";
 import { formationSlots } from "./formation";
 import { collisionWarning } from "./collision";
-import { blendHeading, fleetCameraFrame, screenRelativeMovement } from "./cinematic-camera";
+import { blendHeading, fleetCameraFrame, idleCameraDriftRate, screenRelativeMovement } from "./cinematic-camera";
 import { parseMission, sampleMission, type MissionStep } from "./mission";
 import { startRuntimeMode } from "./runtime/index";
 import { previewCoordinate } from "./flight-preview";
-import { startPlannerLink } from './planner-link';
 import { COMMANDS, parseCommandSequence, type CommandIntent } from "./command-console";
 import { compileMissionSequence, isFlightSequenceIntent } from "./mission-sequence";
+import { startGestureCamera, type BrowserGestureState } from "./gesture-camera";
+import { startPhoneDemo } from "./phone-demo";
 
-const home = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
+const monument = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
+// The south side of the monument plaza: visibly at the base, but outside the
+// obelisk geometry so the collision layer can launch the aircraft safely.
+const home = { latitude: 38.88928, longitude: -77.0353, altitude: -24 };
 const token = import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined;
 const status = document.querySelector<HTMLParagraphElement>("#world-status")!;
 const commandStatus = document.querySelector<HTMLElement>("#command-status")!;
@@ -36,7 +41,19 @@ new MutationObserver(() => {
 }).observe(commandStatus, { childList: true, characterData: true, subtree: true });
 const runtimeApiBase = ((import.meta.env.VITE_RUNTIME_URL as string | undefined) ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 const runtimeMode = new URLSearchParams(window.location.search).get("mode") === "runtime";
+const phoneMode = !runtimeMode && new URLSearchParams(window.location.search).get("input") !== "camera";
+document.body.classList.toggle("phone-mode", phoneMode);
+if (!runtimeMode) document.querySelector(`#input-${phoneMode ? "phone" : "camera"}`)!.setAttribute("aria-current", "page");
+if (phoneMode) hud.altitude.previousElementSibling!.textContent = "Height";
 document.body.classList.toggle("runtime-mode", runtimeMode);
+const gestureHud = {
+  root: document.querySelector<HTMLElement>("#gesture-hud")!,
+  connection: document.querySelector<HTMLElement>("#gesture-connection")!,
+  name: document.querySelector<HTMLElement>("#gesture-name")!,
+  confidence: document.querySelector<HTMLElement>("#gesture-confidence")!,
+  progress: document.querySelector<HTMLElement>("#gesture-progress-fill")!,
+  action: document.querySelector<HTMLElement>("#gesture-action")!,
+};
 
 const panelTabs = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
 function showControlTab(name: "drone" | "batches"): void {
@@ -95,7 +112,6 @@ const placeGeocoder = token ? new Cesium.IonGeocoderService({
   geocodeProviderType: Cesium.IonGeocodeProviderType.GOOGLE,
 }) : undefined;
 if (runtimeMode) startRuntimeMode(viewer);
-if (!runtimeMode) startPlannerLink(viewer);
 
 viewer.scene.globe.enableLighting = false;
 viewer.scene.globe.maximumScreenSpaceError = 3;
@@ -188,7 +204,7 @@ function releaseDrone(): void {
   batchControlButton.textContent = "Control selected batch";
   batchControlButton.setAttribute("aria-pressed", "false");
 }
-const monumentTarget = Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, 20);
+const monumentTarget = Cesium.Cartesian3.fromDegrees(monument.longitude, monument.latitude, 20);
 const orbitCamera = { heading: Cesium.Math.toRadians(30), pitch: Cesium.Math.toRadians(-22), range: 450 };
 let cameraMode: "auto" | "placement" = "auto";
 let isOrbitDragging = false;
@@ -223,10 +239,11 @@ function flyToFreeCameraOverview(): void {
   refreshFleet();
 }
 
-cameraHandler.setInputAction(() => { isOrbitDragging = cameraMode === "auto"; steering = controllingDrone; }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+cameraHandler.setInputAction(() => { if (phoneMode) return; isOrbitDragging = cameraMode === "auto"; steering = controllingDrone; }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
 cameraHandler.setInputAction(() => { isOrbitDragging = false; steering = false; }, Cesium.ScreenSpaceEventType.LEFT_UP);
 window.addEventListener("pointerup", () => { steering = false; isOrbitDragging = false; });
 cameraHandler.setInputAction((movement: { startPosition: Cesium.Cartesian2; endPosition: Cesium.Cartesian2 }) => {
+  if (phoneMode) return;
   if (controllingDrone && steering) {
     pilotView.heading += (movement.endPosition.x - movement.startPosition.x) * 0.005;
     return;
@@ -237,6 +254,7 @@ cameraHandler.setInputAction((movement: { startPosition: Cesium.Cartesian2; endP
   applyOrbitCamera();
 }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 cameraHandler.setInputAction((delta: number) => {
+  if (phoneMode) return;
   if (controllingDrone) return;
   if (cameraMode !== "auto" || fleet.drones.size > 0) return;
   orbitCamera.range = Cesium.Math.clamp(orbitCamera.range + delta * 0.22, 80, 4_000);
@@ -274,6 +292,7 @@ function refreshFleet(): void {
   updateTelemetry();
 }
 
+let lastPhoneTelemetry: { point: Cesium.Cartesian3; at: number } | undefined;
 function updateTelemetry(): void {
   const snapshot = drone?.snapshot();
   hud.drone.textContent = drone?.id.replace("_", " ") ?? "None";
@@ -281,6 +300,15 @@ function updateTelemetry(): void {
   hud.longitude.textContent = snapshot ? snapshot.longitude.toFixed(5) : "—";
   hud.altitude.textContent = snapshot ? `${snapshot.altitude.toFixed(1)} m` : "—";
   hud.speed.textContent = drone ? `${drone.speedMph.toFixed(1)} mph` : "—";
+  if (phoneMode && snapshot) {
+    hud.altitude.textContent = `${Math.max(0, snapshot.altitude - home.altitude).toFixed(1)} m`;
+    const point = Cesium.Cartesian3.fromDegrees(snapshot.longitude, snapshot.latitude, snapshot.altitude);
+    const at = performance.now();
+    const speed = lastPhoneTelemetry && at > lastPhoneTelemetry.at
+      ? Cesium.Cartesian3.distance(point, lastPhoneTelemetry.point) / ((at - lastPhoneTelemetry.at) / 1000) : 0;
+    hud.speed.textContent = `${speed.toFixed(1)} m/s`;
+    lastPhoneTelemetry = { point, at };
+  }
   hud.state.textContent = snapshot?.state.replaceAll("_", " ") ?? "Idle";
   hud.fleet.textContent = String(fleet.drones.size);
 }
@@ -541,7 +569,23 @@ if (token) {
   status.textContent = "Offline grid globe active. No token needed to simulate; an ion token enables the 3D city.";
 }
 }
-void loadWorld();
+const worldReady = loadWorld();
+
+async function groundStartingHome(): Promise<void> {
+  const location = Cesium.Cartographic.fromDegrees(home.longitude, home.latitude, home.altitude);
+  let height: number | undefined;
+  if (token) {
+    try {
+      const [sampled] = await viewer.scene.sampleHeightMostDetailed([location], viewer.entities.values, 0.5);
+      height = sampled?.height;
+    } catch { /* Keep the surveyed DC ellipsoid-height fallback below. */ }
+  } else {
+    try { height = viewer.scene.globe.getHeight(location); } catch { /* Use fallback. */ }
+  }
+  // The fallback globe is the zero-height ellipsoid, including before its tiles load.
+  if (!Number.isFinite(height) && viewer.scene.globe.show) height = 0;
+  if (Number.isFinite(height)) home.altitude = height! + (phoneMode ? 0 : 0.62);
+}
 
 document.querySelector<HTMLButtonElement>("#run-mission")!.addEventListener("click", () => {
   try {
@@ -608,6 +652,97 @@ function runLocalMission(target: DroneController, mission: Parameters<DroneContr
   drone = target;
   refreshFleet();
 }
+
+function gestureOffset(action: string, meters = 65): { east: number; north: number } | undefined {
+  if (action === "fly_north") return { east: 0, north: meters };
+  if (action === "fly_south") return { east: 0, north: -meters };
+  if (action === "fly_east") return { east: meters, north: 0 };
+  if (action === "fly_west") return { east: -meters, north: 0 };
+  if (action === "fly_forward") {
+    const heading = drone?.horizontalFlightHeading ?? drone?.heading ?? 0;
+    return { east: Math.sin(heading) * meters, north: Math.cos(heading) * meters };
+  }
+  if (action.startsWith("fly_bearing:")) {
+    const bearing = Number(action.slice("fly_bearing:".length));
+    if (Number.isFinite(bearing)) return { east: Math.sin(bearing) * meters, north: Math.cos(bearing) * meters };
+  }
+  return undefined;
+}
+
+function executeGestureAction(action: string): void {
+  const target = drone ?? fleet.drones.values().next().value;
+  if (!target) return;
+  drone = target;
+  if (action === "gesture_stop") {
+    target.stopCommand();
+    refreshFleet();
+    gestureHud.action.textContent = "GESTURE RELEASED · HOLDING";
+    setCommandMessage("Gesture released · drone holding position");
+    return;
+  }
+  const offset = gestureOffset(action);
+  if (offset) {
+    target.startGestureMotion(offset.east, offset.north, 0, Math.max(38, target.speedMph * 0.44704));
+    refreshFleet();
+  } else if (action === "takeoff") {
+    target.startGestureMotion(0, 0, 1, 18);
+    refreshFleet();
+  } else if (action === "descend") {
+    target.startGestureMotion(0, 0, -1, 18);
+    refreshFleet();
+  } else if (action === "land" || action === "return_home") {
+    runLocalMission(target, { drone_id: target.id, mission: [{ action: "return_home", speed_mps: 12 }] }, "gesture return");
+  } else if (action === "orbit") {
+    runLocalMission(target, { drone_id: target.id, mission: [{ action: "orbit", radius_m: 45, duration_s: 3600 }] }, "gesture orbit");
+  } else if (action === "halt" || action === "estop") {
+    if (controllingDrone) flyToFreeCameraOverview();
+    target.stopCommand();
+    refreshFleet();
+  } else if (action === "rotate_heading") {
+    if (controllingDrone) flyToFreeCameraOverview();
+    fleet.checkpoint("gesture heading turn");
+    target.rotateHeading(90);
+    refreshFleet();
+  } else if (action.startsWith("speed:")) {
+    const speed = action.endsWith("slow") ? 25 : action.endsWith("sport") ? 90 : 60;
+    target.speedMph = speed;
+    refreshFleet();
+  } else if (action === "spin360") {
+    runLocalMission(target, { drone_id: target.id, mission: [{ action: "orbit", radius_m: 5, duration_s: 3 }] }, "gesture spin");
+  }
+  gestureHud.action.textContent = `COMMAND · ${action.replaceAll("_", " ").toUpperCase()}`;
+  setCommandMessage(`Gesture received · ${action.replaceAll("_", " ")}`);
+}
+
+function updateGestureHud(state: BrowserGestureState): void {
+  const active = state.status === "active";
+  gestureHud.root.classList.toggle("connected", active);
+  gestureHud.connection.textContent = active ? "CAMERA ACTIVE · ON-DEVICE" : state.status === "loading" ? "LOADING GESTURE MODEL" : "CAMERA OFFLINE";
+  gestureHud.name.textContent = state.present
+    ? state.gesture === "None" ? "HAND DETECTED" : state.gesture.replaceAll("_", " ").toUpperCase()
+    : "NO HAND";
+  gestureHud.confidence.textContent = state.message ?? (state.present && state.gesture !== "None"
+    ? `${Math.round(state.score * 100)}% confidence · hold to command`
+    : active ? "Show a gesture to control drone 1" : "Waiting for browser camera permission");
+  gestureHud.progress.style.width = `${Math.round(state.holdProgress * 100)}%`;
+}
+
+let stopGestureCamera: (() => void) | undefined;
+if (!runtimeMode && !phoneMode) {
+  void startGestureCamera(updateGestureHud, executeGestureAction)
+    .then(stop => { stopGestureCamera = stop; })
+    .catch(error => updateGestureHud({
+      status: "error",
+      present: false,
+      gesture: "None",
+      score: 0,
+      holdProgress: 0,
+      message: error instanceof DOMException && error.name === "NotAllowedError"
+        ? "Camera permission denied · allow it in browser settings, then reload"
+        : `Gesture camera failed · ${error instanceof Error ? error.message : "reload to retry"}`,
+    }));
+}
+window.addEventListener("beforeunload", () => stopGestureCamera?.());
 
 type AiObjective = {
   type: string;
@@ -759,6 +894,15 @@ async function executeCommand(intent: CommandIntent): Promise<void> {
     setCommandMessage(`${target.id.replace("_", " ")} moving ${intent.direction} ${intent.meters} m.`);
     return;
   }
+  if (intent.type === "turn") {
+    const target = requireDrone();
+    if (controllingDrone) flyToFreeCameraOverview();
+    fleet.checkpoint("heading turn");
+    target.rotateHeading(intent.direction === "right" ? intent.degrees : -intent.degrees);
+    refreshFleet();
+    setCommandMessage(`${target.id.replace("_", " ")} rotating ${intent.direction} ${intent.degrees}°.`);
+    return;
+  }
   if (intent.type === "hover") {
     const target = requireDrone();
     runLocalMission(target, { drone_id: target.id, mission: [{ action: "hover", duration_s: intent.seconds }] }, "hover command");
@@ -771,8 +915,8 @@ async function executeCommand(intent: CommandIntent): Promise<void> {
     setCommandMessage(`${target.id.replace("_", " ")} orbiting at ${intent.radius} m for ${intent.seconds} seconds.`);
     return;
   }
-  if (intent.type === "landmark" || intent.type === "place" || intent.type === "turn") {
-    await executeCommandSequence([intent], intent.type === "turn" ? `turn ${intent.direction}` : `go to ${intent.type === "landmark" ? intent.name : intent.query}`);
+  if (intent.type === "landmark" || intent.type === "place") {
+    await executeCommandSequence([intent], `go to ${intent.type === "landmark" ? intent.name : intent.query}`);
     return;
   }
   await executeAiInstruction(intent.instruction);
@@ -842,6 +986,7 @@ commandInput.addEventListener("keydown", event => {
 });
 commandForm.addEventListener("submit", event => {
   event.preventDefault();
+  if (phoneMode) return;
   const value = commandInput.value;
   commandInput.value = "";
   commandSuggestions.hidden = true;
@@ -869,6 +1014,17 @@ document.addEventListener("visibilitychange", clearInput);
 document.addEventListener("focusin", clearInput);
 viewer.canvas.tabIndex = 0;
 viewer.canvas.addEventListener("pointerdown", () => viewer.canvas.focus());
+
+if (!runtimeMode) void worldReady.then(async () => {
+  await groundStartingHome();
+  drone = fleet.deploy(phoneMode ? { ...home, altitude: home.altitude + 3.5 } : home);
+  selectedIds.add(drone.id);
+  refreshFleet();
+  if (phoneMode) {
+    stopGestureCamera = startPhoneDemo(viewer, drone, home, runtimeApiBase);
+    commandStatus.textContent = "One drone · waiting for phone positions and gestures";
+  } else commandStatus.textContent = "Drone 1 grounded beside the Washington Monument · show a gesture to fly.";
+});
 
 function updateFreeCamera(deltaSeconds: number): void {
   if (controllingDrone && drone) {
@@ -899,7 +1055,7 @@ let stillSeconds = 0;
 const previousSubjects = new Map<string, Cesium.Cartesian3>();
 
 function updateAutomaticCamera(deltaSeconds: number): void {
-  if (runtimeMode || cameraMode !== "auto" || deploying || (controllingDrone && pilotCameraMode === "first")) return;
+  if (runtimeMode || phoneMode || cameraMode !== "auto" || deploying || (controllingDrone && pilotCameraMode === "first")) return;
   const subjects = [...fleet.drones.values()].map(member => ({ id: member.id, position: member.cameraPosition }));
   if (!subjects.length) {
     orbitCamera.heading += deltaSeconds * 0.08;
@@ -926,9 +1082,13 @@ function updateAutomaticCamera(deltaSeconds: number): void {
   const headingDrone = controllingDrone ? drone : movingId ? fleet.drones.get(movingId) : undefined;
   const flightHeading = controllingDrone ? headingDrone?.heading : headingDrone?.horizontalFlightHeading;
   if (flightHeading !== undefined && (controllingDrone || movement >= 0.04)) {
-    orbitCamera.heading = blendHeading(orbitCamera.heading, flightHeading, 1 - Math.exp(-4.5 * deltaSeconds));
-  } else if (stillSeconds > 0.65) {
-    orbitCamera.heading += deltaSeconds * 0.065;
+    // A detour swings the travel heading hard and briefly. Following that at
+    // full rate throws the view around the obstacle the drone is avoiding, so
+    // the camera lags well behind the aircraft until the route settles again.
+    const avoiding = headingDrone?.avoidanceActive || headingDrone?.collisionBlocked;
+    orbitCamera.heading = blendHeading(orbitCamera.heading, flightHeading, 1 - Math.exp((avoiding ? -1.1 : -4.5) * deltaSeconds));
+  } else {
+    orbitCamera.heading += deltaSeconds * idleCameraDriftRate(stillSeconds);
   }
 
   const frame = fleetCameraFrame(subjects.map(subject => subject.position))!;
@@ -940,6 +1100,7 @@ function updateAutomaticCamera(deltaSeconds: number): void {
   viewer.camera.lookAt(automaticCenter, new Cesium.HeadingPitchRange(orbitCamera.heading, Cesium.Math.toRadians(-24), automaticRange));
 }
 
+const updateBattery = !runtimeMode && !phoneMode ? startBatteryPanel(fleet, () => drone) : undefined;
 let previousTime = Cesium.JulianDate.clone(viewer.clock.currentTime);
 const undoButton = document.querySelector<HTMLButtonElement>("#undo-action")!;
 const pauseButton = document.querySelector<HTMLButtonElement>("#pause-paths")!;
@@ -956,17 +1117,22 @@ let surveyUpdateIndex = 0;
 let previousCameraTime = performance.now();
 let pilotStatusTime = 0;
 let telemetryTime = 0;
+// A building query stalls the frame it runs on. Integrating that whole stall
+// would jump a cruising drone metres in one step, which reads as a lurch rather
+// than as flight, so a hitched frame advances the world in slow motion instead.
+const MAX_FRAME_SECONDS = 1 / 30;
 viewer.clock.onTick.addEventListener((clock) => {
-  const deltaSeconds = Math.max(0, Math.min(0.1, Cesium.JulianDate.secondsDifference(clock.currentTime, previousTime)));
+  const deltaSeconds = Math.max(0, Math.min(MAX_FRAME_SECONDS, Cesium.JulianDate.secondsDifference(clock.currentTime, previousTime)));
   previousTime = Cesium.JulianDate.clone(clock.currentTime, previousTime);
   if (!runtimeMode) for (const item of fleet.drones.values()) item.update(deltaSeconds);
   const cameraTime = performance.now();
   const wasPlaying = fleet.replay.running;
   fleet.updateReplay(cameraTime / 1000);
   if (wasPlaying && !fleet.replay.running) refreshFleet();
-  const cameraDelta = Math.min(0.1, Math.max(0, (cameraTime - previousCameraTime) / 1000));
+  const cameraDelta = Math.min(MAX_FRAME_SECONDS, Math.max(0, (cameraTime - previousCameraTime) / 1000));
   updateFreeCamera(cameraDelta);
   updateAutomaticCamera(cameraDelta);
+  updateBattery?.(cameraDelta, fleet.paused || !clock.shouldAnimate);
   previousCameraTime = cameraTime;
   if (!runtimeMode && cameraTime - telemetryTime >= 100) {
     telemetryTime = cameraTime;

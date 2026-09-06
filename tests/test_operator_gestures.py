@@ -58,6 +58,14 @@ def test_phone_gesture_wins_over_webcam():
     assert fired == ["land"]          # phone's Thumb_Down, not the webcam's Thumb_Up
 
 
+def test_phone_geometric_labels_reach_only_active_operator():
+    pool = _pool(("A", 0.0, "Dash_Left"), ("B", 3.0, "Three_Finger_Forward"))
+    assert _drain(OperatorGestures(), pool, "A") == ["fly_left"]
+    assert _drain(OperatorGestures(), pool, "B") == ["fly_forward"]
+    pool = _pool(("A", 0.0, "Dash_Right"), ("B", 3.0, "None"))
+    assert _drain(OperatorGestures(), pool, "A") == ["fly_right"]
+
+
 def test_interpreters_are_pruned_when_operators_leave():
     og = OperatorGestures()
     pool = _pool(("A", 0.0, "None"), ("B", 3.0, "None"))

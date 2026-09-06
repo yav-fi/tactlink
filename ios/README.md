@@ -1,6 +1,8 @@
-# Signal Map
+# TactLink iOS Team Positioning
 
-A native SwiftUI app that coordinates nearby iPhones, rotates UWB ranging pairs, and shares a relative group map. No camera, GPS, or internet connection is used. Network.framework carries encrypted coordination and measurements; Nearby Interaction supplies UWB distances. One optional, off-by-default feature (**Visualizer bridge**, below) sends this phone's own position over the local network to an external simulator.
+A native SwiftUI app that coordinates nearby iPhones, rotates UWB ranging pairs, and shares a relative group map. No GPS or internet connection is used. Network.framework carries encrypted coordination and measurements; Nearby Interaction supplies UWB distances. One optional, off-by-default feature (**Visualizer bridge**, below) sends this phone's own position, facing, and locally recognized gesture to an external simulator. Its front-camera frames remain on the phone.
+
+New rooms use **six numeric digits**, with a numeric keypad for joining. The first digit selects the initial two-, three-, or five-phone mode. Update every participating phone before creating a short-code room; the updated app can still join an existing 16-character room by pasting its code. Short codes are intended for nearby demo sessions, not strong access secrets.
 
 ## Three-phone test
 
@@ -33,16 +35,23 @@ Logs live in `Documents/RoomBench/latest.txt`, `attempts.jsonl`, and `events.jso
 
 ## Build and install
 
-Open `SignalMap.xcodeproj`, choose your development team, pair/trust the physical iPhone, enable Developer Mode, and run the SignalMap scheme. A new phone must be included in the development provisioning profile. If iOS reports **Untrusted Developer**, trust the development profile in **Settings → General → VPN & Device Management**.
-
-Local Xcode 26.3 is at `/Applications/Xcode 26.3.app`. The target can be built with its installed SDK even when scheme builds report a missing downloadable platform:
+Run the one-time MediaPipe setup, then open **SignalMap.xcworkspace** (the workspace includes CocoaPods). Choose your development team, trust the iPhone, enable Developer Mode, and run the SignalMap scheme. All phones need the updated build.
 
 ```sh
-DEVELOPER_DIR='/Applications/Xcode 26.3.app/Contents/Developer' \
-xcodebuild -project SignalMap.xcodeproj -target SignalMap -sdk iphoneos \
-  -configuration Debug -allowProvisioningUpdates \
-  CONFIGURATION_BUILD_DIR=/tmp/SignalMap-room-products \
-  OBJROOT=/tmp/SignalMap-room-objects SYMROOT=/tmp/SignalMap-room-symbols build
+sh scripts/setup-gestures.sh
+open SignalMap.xcworkspace
+```
+
+The setup pins MediaPipeTasksVision 0.10.21 and downloads the same gesture model as the PC detector, checking its SHA-256. The model and Pods are generated dependencies and stay out of Git. Camera frames are processed on the iPhone using the bundled model; recognition does not require internet access.
+
+For Thomas's separately signed installation, run the setup on his signing Mac, open the workspace, select his development team and the existing `com.thomas.SignalMap` bundle identifier, and run on his phone. This Mac currently has only Arul's signing identity; its profile does not include Thomas's device.
+
+For a signed build and the existing deployment workflow, use `./scripts/dev ship`. It builds the workspace and falls back to the fully installed Xcode if the selected Xcode lacks its iOS platform. Or build directly:
+
+```sh
+xcodebuild -workspace SignalMap.xcworkspace -scheme SignalMap -sdk iphoneos \
+  -destination 'generic/platform=iOS' -configuration Debug -allowProvisioningUpdates \
+  CONFIGURATION_BUILD_DIR=/tmp/SignalMap-room-products build
 ```
 
 Install using `xcrun devicectl device install app --device DEVICE_ID /tmp/SignalMap-room-products/SignalMap.app` with the same developer directory. Development installs work over USB or a reachable paired wireless connection. All participants need the same current app build. Launch arguments `--name NAME --room CODE` prefill a test session; `--bench` explicitly enables an available-device diagnostic run at two devices.
@@ -60,11 +69,20 @@ Source: `RoomTransport.swift` handles data links, `RoomSession.swift` coordinate
 
 ## Visualizer bridge
 
-`RoomBridge.swift` streams this phone's own group-frame position and heading over **UDP to a host on the same Wi-Fi**, about ten times a second, for an external drone simulator (`../src/phone_feed.py`). It is one-way (never receives), off unless a host is set, and carries no room code, NI tokens, or other phones' data. The datagram is small JSON: `id`, `name`, `room` fingerprint, `pos` `[x, y]`, `z`, `heading`, `moving`, `speed`, `cycle`, `compass`, `compassValid`, and a reserved `gesture` field (always `"None"` — the app does not classify hand poses).
+`RoomBridge.swift` streams this phone's own group-frame position and heading over **UDP to a host on the same Wi-Fi**, about ten times a second, for an external drone simulator (`../src/phone_feed.py`). It is one-way (never receives), off unless a host is set, and carries no room code, NI tokens, other phones' data, or camera frames. The datagram is small JSON: `id`, `name`, `room` fingerprint, `pos` `[x, y]`, `z`, `heading`, `moving`, `speed`, `cycle`, `compass`, `compassValid`, `gesture`, `gestureConfidence`, and `gestureSource`.
+
+`GestureCamera.swift` uses Apple's on-device Vision hand landmarks at up to 15 fps. It emits the same canned labels consumed by `config/gesture_actions.json`, plus `Dash_Left`, `Dash_Right`, and `Three_Finger_Forward`. The front-camera input is normalized as an upright mirrored selfie: left/right are the wearer's left/right. All three directional labels are resolved relative to the controlling operator's compass facing by the Python simulator. Losing the hand, dropping below confidence, leaving the room, or backgrounding immediately returns the label to `None`.
 
 Two headings are sent. `heading` is `RelativeMotionHeading` — derived from how the group centroid-relative position changes, so it is only meaningful while walking. `compass` (`HeadingSource.swift`) is an absolute **magnetic** bearing in degrees clockwise from north, from Core Motion's `.xMagneticNorthZVertical` device-motion fusion — no location permission, no GPS. The simulator prefers `compass` when `compassValid`, else falls back to `heading`. Magnetic (not true) north is fine: every phone in one place shares the reference, and declination plus any mount-angle offset is one constant on the sim side (`--phone-frame-rot`). It assumes the phone is worn upright, screen facing forward; a near-flat phone reports `compassValid: false`.
 
-Set the target as **Visualizer host** in the lobby (`192.168.1.50:9870`, port defaults to 9870), or pass `--sim-bridge host:port` as a launch argument. The value is remembered. Blank turns it off. Positions only exist once a full range cycle has resolved, so nothing is sent before the group map appears.
+The same datagram now also feeds the **mission runtime** (`server/main.py`),
+which listens on `udp://<host>:9870` and draws each phone as a person standing on
+the ground in the Cesium console, with the nearest operator commanding each drone.
+Point **Visualizer host** at the machine running the runtime; nothing on the phone
+changes. See the repository README, "Phones on the ground". The feed is
+unauthenticated, so the runtime binds loopback unless `PHONE_FEED_HOST` is set.
+
+Set the target as **Visualizer host** in the lobby (`192.168.1.50:9870`, port defaults to 9870), or pass `--sim-bridge host:port` as a launch argument. The value is remembered. Blank turns it off. Heartbeat telemetry starts as soon as the room is joined, so the Mac can show a connected phone while UWB is still resolving. Position fields are omitted until a full range cycle resolves. Packets include geometry age and member count; an expired position is never replaced with a made-up coordinate.
 
 ## Fast automatic deployment
 
@@ -83,3 +101,32 @@ Deployment regression checks: `python3 -m unittest discover -s Tests/DeployTests
 Each device card now shows the latest attempt's first and last accepted distance, mean, median, minimum, maximum, sample standard deviation (`n - 1` denominator), signed first-minus-median difference, and first-reading z-score `(first - mean) / sample SD`. These summarize every accepted reading in that attempt, including the first and completion-grace readings. The existing quality check and map measurement still use their bounded recent-reading window. No raw sensor precision or ground-truth accuracy is implied.
 
 The z-score is undefined with fewer than two readings or effectively zero standard deviation. Per-device p50/p95 of `abs(first - median)` summarizes attempts with readings, including unsuccessful attempts; it does not pool different partners' distances. Expand entries under **Recent attempts** to inspect older attempts. The JSONL `distanceStatistics` object and text snapshot include the new fields. Older peer builds can still exchange reports but cannot supply these statistics. Tests include known distributions, single/identical readings, signed scores, JSON round trips, and retaining the initial reading beyond the quality window.
+
+## Single-drone phone demo
+
+Run `./start` from the repository root. It now connects this app to the detailed browser flight simulator and one drone; the Mac camera is off. Three-phone flat mode and five-phone mode both use the same path. The console shows connected phones, position readiness, and the nearest controlling operator. Set Visualizer host on every phone or launch the installer with `./scripts/dev watch --room YOUR_ROOM_CODE --bridge MAC_WIFI_IP:9870`. After changing those installer arguments, the watcher relaunches already installed phones with the new configuration.
+
+## Two-phone gesture test
+
+Enable **2-phone gesture test** in the lobby or active room on either phone. It is mutually exclusive with the three-phone toggle and propagates through the room coordinator. A new two-phone room code starts with `2`; joining it selects the mode automatically. Use exactly two phones on the current build. The one UWB pair ranges repeatedly and supplies the measured separation. Sorted phone IDs are placed at `(0, -distance/2, 0)` and `(0, +distance/2, 0)`. This is an assumed vertical line on the map, not measured direction or physical altitude. No position is sent without a valid real range.
+
+The usual Visualizer host and camera gestures then drive the same one-drone demo. Both app and browser label the assumption. Switching modes clears prior geometry and waits for the new group size.
+
+## On-device gestures
+
+Only three poses command the phone demo. Show the whole hand and hold the pose for about one second for recognition and the command hold. Hand direction and thumb position are ignored.
+
+- **Fist:** curl index, middle, ring, and pinky. Call the drone above you and follow your mapped position. Another person's fresh fist transfers control.
+- **One finger:** index extended, middle/ring/pinky curled. Climb while held.
+- **Two fingers:** index + middle extended, ring/pinky curled. Descend to the hover floor while held.
+- Lower your hand to stop vertical movement and hover at the resulting height. Fist-follow stays active after releasing the fist. Use **Stop drone** in the visualizer to cancel follow and release control.
+
+Other finger combinations have no command. The PC paths are unchanged. Old phone directional Pointing_Up/Pointing_Down labels are no longer movement commands; both phones need the updated build for the new one/two-finger mapping.
+
+MediaPipe estimates the hand's 21 landmarks. The app checks 3D finger-bend angles and fingertip reach, with separate extended/curled thresholds and an uncertain band. It recognizes a geometrically closed fist even when Google's canned gesture label is None. A confident canned fist can also fill in uncertain geometry when no finger is clearly extended. Recent-frame voting suppresses single-frame flips; losing the hand clears output. This is not custom model training.
+
+The preview shows the tracked skeleton, raw Google label/score, frame dimensions/rotation, and each finger's up/curled/? state. STABLE GESTURE shows the accepted command. Rule acceptance flags in the UDP confidence field are not calibrated probabilities and are no longer displayed as percentage confidence. Raw Google scores remain visible separately.
+
+Capture requests 640×480. Apple's device-specific rotation coordinator sets capture and preview orientation; a hardcoded 90-degree angle is not assumed for all front cameras. Camera images stay on-device.
+
+Physical recognition reliability still requires testing on the phones. Compilation and synthetic geometric tests do not establish accuracy for real hands, occlusion, or lighting.

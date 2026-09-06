@@ -24,3 +24,5 @@ runs/
 .env.local
 3d-mapping/node_modules/
 3d-mapping/dist/
+ios/Pods/
+ios/SignalMap/gesture_recognizer.task

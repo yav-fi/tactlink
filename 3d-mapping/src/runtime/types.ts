@@ -260,6 +260,22 @@ export type RuntimeEvent = {
   payload: Record<string, unknown>;
 };
 
+/** One person on the ground, placed by the backend from a phone's own report. */
+export type RuntimeOperator = {
+  operator_id: string;
+  name: string;
+  position: LocalVector;
+  heading: number;              // radians, 0 = +east
+  gesture: string;
+  gesture_confidence: number;
+  gesture_source: string;
+  action: string | null;
+  is_anchor: boolean;
+  controls: string[];           // drones currently listening to this person
+  nearest_distance: number | null;
+  age: number;                  // seconds since this phone last reported
+};
+
 export type RuntimeSnapshot = {
   type: string;
   simulation_time: number;
@@ -275,6 +291,7 @@ export type RuntimeSnapshot = {
   network: NetworkMetrics;
   control_available: boolean;
   adaptive: AdaptiveRuntimeState;
+  operators: RuntimeOperator[];
   origin_lat: number;
   origin_lon: number;
   origin_alt: number;

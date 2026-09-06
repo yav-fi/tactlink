@@ -1,6 +1,6 @@
-# 3D mapping
+# TactLink 3D Mission Control
 
-CesiumJS operator interface for the DNHacks distributed runtime, with the
+CesiumJS operator interface for the TactLink distributed runtime, with the
 original deterministic browser simulator preserved as a separate local mode.
 
 ## Run it
@@ -42,9 +42,20 @@ reset. These are local HTTP calls to port 8000.
 
 Open <http://127.0.0.1:5173/?mode=local> for the original browser simulator.
 
-All four propeller assemblies spin continuously, with adjacent rotors turning in opposite directions. The cinematic camera begins by circling the Washington Monument. Once drones exist, it smoothly follows their collective center and adjusts its range to keep the full fleet visible; it circles the fleet while motion is minimal. First-person remains available as an advanced pilot option.
+The hidden browser camera supports the five static signs from the root gesture
+guide plus both geometric motion controls from the original Python tracker:
+hold index + middle + ring with the pinky curled for 0.45 seconds to dash
+forward continuously, or hold index + middle and swing vertical → horizontal →
+vertical → horizontal within four seconds to fly north/east/west based on the final point.
+The bottom command dock shows the current guess, confidence, three-finger hold,
+and each confirmed V/H swing stage. Thumb-up climbs and the W/pointing motions
+fly only while their poses remain visible. A held closed fist smoothly rotates
+the selected drone's heading 90 degrees clockwise, pauses for one second, and
+repeats. Losing the active pose stops these momentary controls.
 
-Live flight markers and playback bodies use a compact quadcopter: a 36 × 24 × 12 cm center body, four arms and four crossed-blade rotor assemblies, under one meter across. Parts follow the drone's pose and color for both Normal and Survey types. Automatic framing stays close for one drone, expands with fleet spread, and includes playback bodies. Movement leaves a short segmented streak that fades fully in 1.3 seconds; complete route history remains internal for replay instead of cluttering the map. Start/release prisms remain route markers.
+The cinematic camera begins by circling the Washington Monument. Once drones exist, it smoothly follows their collective center and adjusts its range to keep the full fleet visible. When flight stops, it maintains a restrained side-to-side drift while keeping its subject centered. First-person remains available as an advanced pilot option.
+
+Live flight markers and playback bodies use the bundled modern quadcopter model: a rounded graphite shell, smoked-black canopy, exposed carbon arms, motor pods, landing rails, slim crossed blades, and a red nose stripe. Its four propellers are separate animated GLB nodes, with adjacent rotors spinning in opposite directions while the body remains stable. Automatic framing stays close for one drone, expands with fleet spread, and includes playback bodies. Movement leaves no trailing particles: the continuous route line stays hidden and complete route history remains internal for replay. Start/release markers remain available for route operations.
 
 Survey visuals weaken with distance: full base opacity through 100 m, 60% through 250 m, 30% through 500 m and 12% beyond that. Cone faces are split into those range bands. Coverage triangles use their farthest sampled vertex's range when recorded, and keep that strength through group color changes and undo. This is visual attenuation, not a calibrated detection probability.
 
@@ -56,7 +67,7 @@ Choose **Normal** or **Survey** during single or bulk deployment. Normal drones 
 
 Photorealistic-map collisions use the tile mesh, not the hidden fallback globe: valid flight positions can have negative ellipsoid heights. Failed geometry queries display a warning rather than freezing movement; building protection is unavailable while those queries fail. Fallback-globe ground checks still run independently, and drones starting inside the clearance margin can climb out.
 
-The local screen uses only one short translucent text command line centered at the bottom. Type `/` to see direct commands such as `/deploy`, `/fly`, `/speed`, `/goto`, `/return`, and `/reset`. Plain phrases execute too: “go to the Washington Monument, wait 5 seconds, then go forward 50 meters and return home” compiles into one ordered mission on the selected drone. The built-in DC landmark catalog uses safe nearby approach points for the Washington Monument, Lincoln Memorial, White House, U.S. Capitol, Jefferson Memorial, MLK Memorial, World War II Memorial, and Smithsonian Castle. With a Cesium ion token, other named DC places use ion's Google place search. Other open-ended instructions go through the backend's validated local-LLM mission compiler. Command feedback becomes the empty input's placeholder instead of occupying another panel. WASD pilots relative to the screen, Q/E turns, R/F or Space/Shift changes altitude, and Escape releases.
+The local screen uses one compact translucent control dock at the bottom, combining the text command, gesture guess, and selected-drone telemetry. Type `/` to see direct commands such as `/deploy`, `/fly`, `/speed`, `/goto`, `/return`, and `/reset`. Plain phrases execute too: “go to the Washington Monument, wait 5 seconds, then go forward 50 meters and return home” compiles into one ordered mission on the selected drone. The built-in DC landmark catalog uses safe nearby approach points for the Washington Monument, Lincoln Memorial, White House, U.S. Capitol, Jefferson Memorial, MLK Memorial, World War II Memorial, and Smithsonian Castle. With a Cesium ion token, other named DC places use ion's Google place search. Other open-ended instructions go through the backend's validated local-LLM mission compiler. Command feedback becomes the empty input's placeholder instead of occupying another panel. WASD pilots relative to the screen, Q/E turns, R/F or Space/Shift changes altitude, and Escape releases.
 
 The command line now sits in an edge-to-edge bottom bar with selected-drone latitude, longitude, altitude, configured speed, flight state, and fleet count. Telemetry refreshes at 10 Hz while drone physics and camera movement continue at the display frame rate. Quadcopter parts share one cached pose per render frame, terrain and photogrammetry use performance-oriented screen-space error settings, and Cesium uses FXAA instead of multisample antialiasing.
 
@@ -68,9 +79,9 @@ Use **Deploy a new drone** for one drone or **Deploy a batch** for a grid (defau
 
 **Run all paths** replays the manually recorded trails with colored prisms, launching every routed drone together at its currently assigned mph. The elapsed counter stops at the last arrival; drones without a recorded route stay parked. Playback preserves routes and release markers, and can be repeated. Speeds and route-editing controls are locked during playback; automatic framing follows every playback body. Text-only previews must be flown/recorded before they are included in this recorded-trail replay.
 
-The scene starts with an empty fleet and the camera circling the Washington Monument. Enter `/deploy` (or “deploy a drone”), then click one visible map surface: a normal drone is placed there immediately at the safe 20 m default height. `/deploy 5 survey` places a five-drone survey batch with one map click. Enter `/fly 1` to pilot drone 1. Colors cycle through eight choices; `/reset all` removes the fleet and its routes. Release markers are prisms.
+Local mode ground-samples one graphite-and-black drone onto the plaza immediately south of the Washington Monument. It remains parked until commanded. Enter `/deploy` (or “deploy a drone”), then click one visible map surface to add another at the safe 20 m default height. `/deploy 5 survey` places a five-drone survey batch with one map click. Enter `/fly 1` to pilot drone 1. Colors cycle through eight accent choices while the black airframe panels remain visible; `/reset all` removes the fleet and its routes. Release markers are prisms.
 
-Each drone starts at **60 mph (26.8224 m/s)**. Type a positive decimal into **Selected drone speed (mph)** to change its cruising speed. Manual movement uses local east/north/up meters on the globe with smooth acceleration and normalized diagonal inputs. The speed also supplies the default for goto/return-home missions; an explicit `speed_mps` in a mission overrides it. Orbit timing remains governed by radius and duration. Altitudes are ellipsoid heights; placement adds the chosen height to the picked surface.
+Each drone starts at **60 mph (26.8224 m/s)**. Type a positive decimal into **Selected drone speed (mph)** to change its cruising speed. Manual and held-gesture movement use local east/north/up velocity with smooth acceleration and normalized diagonal inputs. Goto and return-home missions accelerate toward cruise speed, keep a persistent local avoidance waypoint instead of zig-zagging toward the destination every frame, smooth the displayed heading, and brake into arrival; an explicit `speed_mps` overrides the configured cruise speed. Orbits approach their ring smoothly and use tangential cruise speed. Altitudes are ellipsoid heights; placement adds the chosen height to the picked surface.
 
 Run `npm test` to verify fleet isolation, colors, cleanup and physical speed at multiple frame rates.
 
@@ -90,16 +101,20 @@ local browser-simulator contract, not the canonical distributed-runtime
 `simulation.models.MissionCommand` contract; movement remains deterministic in
 the browser.
 
-## Text flight preview
+## Optional standalone flight bridge
 
-Start the Python flight bridge from the repository root with
-`.venv/Scripts/python.exe -m integrations.flight_bridge` after installing
-`requirements-flight.txt`. Deploy a drone, enter an instruction, and click
-**Preview text path** to draw its validated route and populate the mission editor.
-**Run mission** animates it locally. Preview zero is the selected drone's
-deployment height; landing in this preview returns to that height.
-
-The default bridge URL is `http://127.0.0.1:8765`; override it with
-`VITE_FLIGHT_BRIDGE_URL` in your local environment. See
-[the bridge guide](../docs/flight-bridge.md) for HTTP/WebSocket contracts,
+The compact local control dock does not require or display the old waypoint
+planner bridge. The separate Python bridge remains available for integration
+work by running `.venv/bin/python -m integrations.flight_bridge --port 8766`.
+See [the bridge guide](../docs/flight-bridge.md) for its HTTP/WebSocket contract,
 ArduPilot telemetry setup, and Mission Planner export.
+
+## Optional PC battery simulation
+
+Open `?mode=local&input=camera`, expand **Battery simulation** in the bottom control dock, and enable it. It is off on every new page load and is not exposed in phone or backend runtime modes. Existing controls are unchanged when disabled.
+
+Every PC drone has its own pack. Select a drone, choose Lightweight (35 Wh / 0.22 kg), Standard (60 Wh / 0.38 kg), Endurance (95 Wh / 0.62 kg), or enter custom capacity, weight, and health; press **Replace selected battery** to fit a full pack and stop flight/replay. The panel displays the fitted pack separately from the editable replacement fields. Resetting a drone does not recharge it; undo restores captured battery state. Turning the mode off suspends consumption and depletion restrictions without refilling.
+
+The demo model uses a 0.85 kg airframe, mass-scaled hover power, a modest forward-flight efficiency benefit, cubic speed drag, climb/descent costs, and acceleration cost. Ground idle draws 2 W. Consumption integrates observed movement over the capped flight-update interval; replay pause suspends consumption. Instant repositioning is excluded from motion costs. No wind, payload, voltage sag, thermal effects, regenerative descent, or calibrated aircraft performance is modeled. Battery mass changes energy demand, not existing flight handling.
+
+At 20% reserve (including a straight-line return estimate), the panel warns. At zero, motion is blocked and telemetry reports BATTERY_EMPTY. This is a simulation freeze, not an emergency landing model. The direct-return estimate excludes obstacle detours and is advisory; full mission preflight certification and automatic return are not implemented in this mode.

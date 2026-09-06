@@ -1,0 +1,7 @@
+platform :ios, '17.0'
+project 'SignalMap.xcodeproj'
+
+target 'SignalMap' do
+  use_frameworks! :linkage => :static
+  pod 'MediaPipeTasksVision', '0.10.21'
+end

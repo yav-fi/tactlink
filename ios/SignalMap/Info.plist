@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Signal Map</string>
+	<string>TactLink</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -23,13 +23,15 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSNearbyInteractionUsageDescription</key>
-	<string>Signal Map measures distances to members of your room using Ultra Wideband.</string>
+	<string>TactLink measures distances to members of your team using Ultra Wideband.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Signal Map connects directly to phones in your room and shares encrypted ranging measurements without internet access.</string>
+	<string>TactLink connects directly to phones on your team and shares encrypted ranging measurements without internet access.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_signal-room._tcp</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>TactLink recognizes your hand gestures on this phone to control the simulated drone. Camera frames stay on this device.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIApplicationSceneManifest</key>

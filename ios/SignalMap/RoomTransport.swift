@@ -10,11 +10,17 @@ final class RoomTransport {
 #endif
     static let serviceType = "_signal-room._tcp"
     static let alphabet = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
-    static func newCode(threePhone: Bool = false) -> String { (threePhone ? "3" : "5") + String((0..<15).map { _ in alphabet.randomElement()! }) }
+    static func newCode(threePhone: Bool = false, twoPhone: Bool = false) -> String {
+        (twoPhone ? "2" : threePhone ? "3" : "5") + (0..<5).map { _ in String(Int.random(in: 0...9)) }.joined()
+    }
     static func normalized(_ code: String) -> String { code.uppercased().filter { !$0.isWhitespace && $0 != "-" } }
-    static func validCode(_ code: String) -> Bool { code.count == 16 && code.allSatisfy { alphabet.contains($0) } }
+    static func validCode(_ code: String) -> Bool {
+        (code.count == 6 && code.utf8.allSatisfy { (48...57).contains($0) }) ||
+        (code.count == 16 && code.allSatisfy { alphabet.contains($0) })
+    }
     static func displayCode(_ code: String) -> String {
-        stride(from: 0, to: code.count, by: 4).map { String(Array(code)[$0..<min($0+4,code.count)]) }.joined(separator: " ")
+        if code.count == 6 { return code }
+        return stride(from: 0, to: code.count, by: 4).map { String(Array(code)[$0..<min($0+4,code.count)]) }.joined(separator: " ")
     }
 
     let localID: String

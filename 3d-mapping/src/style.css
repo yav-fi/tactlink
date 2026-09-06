@@ -46,6 +46,24 @@ label[for="pilot-camera"] { display: block; margin: 14px 0 6px; font-size: .82re
 #pilot-camera { width: 100%; padding: 9px; color: #edf6ff; background: #203c56; border: 1px solid #31516d; border-radius: 8px; }
 * { box-sizing: border-box; }
 body { margin: 0; overflow: hidden; }
+.gesture-hud {
+  display: grid;
+  grid-template-columns: auto auto minmax(150px, 1fr) 90px auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 1px 8px 4px 10px;
+  border-bottom: 1px solid rgba(183, 226, 255, .12);
+  pointer-events: none;
+}
+.gesture-hud-heading { display: flex; align-items: center; gap: 7px; color: #8299ad; font-size: .56rem; font-weight: 850; letter-spacing: .12em; white-space: nowrap; }
+.gesture-dot { width: 7px; height: 7px; border-radius: 50%; background: #69727d; box-shadow: 0 0 0 3px rgba(105, 114, 125, .12); }
+.gesture-hud.connected .gesture-dot { background: #ff2b43; box-shadow: 0 0 12px rgba(255, 43, 67, .9); }
+.gesture-hud strong { overflow: hidden; color: #f6f9fc; font: 750 .68rem/1.1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .04em; text-overflow: ellipsis; white-space: nowrap; }
+.gesture-hud > span { overflow: hidden; color: #8299ad; font-size: .61rem; text-overflow: ellipsis; white-space: nowrap; }
+.gesture-progress { height: 3px; overflow: hidden; border-radius: 4px; background: rgba(255,255,255,.1); }
+.gesture-progress span { display: block; width: 0; height: 100%; background: linear-gradient(90deg, #ff263f, #ff6a55); box-shadow: 0 0 9px rgba(255, 38, 63, .8); transition: width 90ms linear; }
+#gesture-action { max-width: 170px; color: #f0a2ac; text-align: right; }
 .visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 #app, #cesiumContainer { width: 100vw; height: 100vh; }
 .mission-panel { position: fixed; top: 18px; left: 18px; width: min(370px, calc(100vw - 36px)); padding: 20px; border: 1px solid rgba(122, 215, 255, .3); border-radius: 16px; background: rgba(4, 14, 28, .88); box-shadow: 0 18px 56px rgba(0,0,0,.36); backdrop-filter: blur(14px); }
@@ -84,7 +102,8 @@ body:not(.runtime-mode) .mission-panel > #world-status,
 body:not(.runtime-mode) .mission-panel > .mode-switch,
 body:not(.runtime-mode) .mission-panel > section,
 body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !important; }
-#local-command-dock { position: relative; display: grid; grid-template-columns: minmax(280px, 1fr) auto; gap: 16px; align-items: center; }
+#local-command-dock { position: relative; display: grid; grid-template-columns: minmax(460px, 1fr) auto auto; gap: 16px; align-items: center; }
+.dock-command-stack { min-width: 0; }
 .command-form { display: grid; grid-template-columns: auto 1fr; height: 32px; align-items: center; }
 .command-prompt { padding-left: 10px; color: #6cdcff; font: 700 1.25rem/1 ui-monospace, monospace; }
 #command-input {
@@ -97,6 +116,13 @@ body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !imp
 .flight-hud dt { margin-bottom: 2px; color: #7793aa; font-size: .58rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .flight-hud dd { overflow: hidden; max-width: 126px; color: #edf6ff; font: 650 .72rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .flight-hud > div:first-child dd, .flight-hud > div:nth-child(6) dd { text-transform: uppercase; }
+/* Switching the gesture source is a page reload, so it uses links like .mode-switch. */
+.input-switch { display: grid; align-content: center; gap: 4px; padding: 2px 12px; border-left: 1px solid rgba(183, 226, 255, .18); }
+.input-switch-label { color: #7793aa; font-size: .58rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.input-switch-options { display: flex; gap: 4px; }
+.input-switch a { padding: 3px 8px; border: 1px solid #31516d; border-radius: 6px; color: #bfefff; text-decoration: none; font: 650 .68rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.input-switch a:hover { background: rgba(82, 216, 255, .14); }
+.input-switch a[aria-current="page"] { border-color: #52d8ff; background: #173b50; color: #eaf9ff; }
 .command-suggestions {
   position: absolute; left: 0; right: 0; bottom: 39px; padding: 5px;
   border: 1px solid rgba(122, 215, 255, .3); border-radius: 11px;
@@ -155,11 +181,63 @@ body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !imp
   backdrop-filter: blur(18px);
 }
 @media (max-width: 600px) {
+  .gesture-hud { grid-template-columns: auto minmax(80px, 1fr) 70px; padding-inline: 6px; }
+  .gesture-hud-heading { font-size: .5rem; }
+  #gesture-confidence, #gesture-action { display: none; }
   body:not(.runtime-mode) .mission-panel { bottom: 0; width: 100vw; padding: 5px 8px; }
   #local-command-dock { grid-template-columns: 1fr; gap: 3px; }
   .flight-hud { overflow-x: auto; }
   .flight-hud > div { min-width: 72px; padding-inline: 9px; }
+  .input-switch { border-left: 0; padding-inline: 9px; }
   .dock-row { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
   .dock-row > button { padding-inline: 9px; }
   .dock-status { font-size: .7rem; }
+}
+/* Phone demo keeps the established flight surface and exposes the live input chain. */
+#phone-panel { position: absolute; top: 100px; right: 20px; width: min(350px, calc(100vw - 40px)); max-height: calc(100vh - 240px); overflow: auto; padding: 18px; background: rgba(7, 12, 17, .93); border: 1px solid #3c5964; border-radius: 12px; z-index: 20; color: #e6f3f0; font: 14px/1.5 system-ui, sans-serif; }
+#phone-panel strong { color: #64edd0; font-size: 14px; }
+#phone-panel p { margin: 10px 0; }
+#phone-panel #phone-owner { font-weight: 600; }
+#phone-members div { padding: 6px 0; border-bottom: 1px solid #25353c; }
+#phone-panel details { margin-top: 12px; }
+#phone-panel label { display: block; margin: 8px 0; }
+#phone-panel select { width: 100%; }
+#phone-panel input[type=range] { width: 100%; }
+#phone-panel .phone-help, #phone-panel details p { color: #a4bac4; font-size: 13px; }
+#phone-stop { width: 100%; margin-top: 12px; }
+.phone-mode .gesture-hud { pointer-events: none; }
+.phone-mode #command-form, .phone-mode #command-drawer, .phone-mode .dock-row, .phone-mode #command-suggestions { display: none !important; }
+.phone-mode #local-command-dock { grid-template-columns: minmax(0, 1fr) auto auto; }
+
+.phone-view-controls { display: flex; gap: 6px; }
+.phone-view-controls button { padding: 7px 12px; }
+#phone-panel .phone-scale { color: #a4bac4; font-size: 12px; }
+#phone-height { font: 12px ui-monospace, monospace; color: #64edd0; }
+#phone-guide { position: absolute; top: 100px; left: 20px; width: 290px; max-height: calc(100vh - 200px); overflow-y: auto; padding: 16px; background: rgba(7,12,17,.93); border: 1px solid #3c5964; border-radius: 12px; z-index: 20; color: #e6f3f0; font: 12px/1.5 system-ui, sans-serif; }
+#phone-guide > strong { color: #64edd0; font-size: 14px; }
+#phone-guide p { color: #b7cbc7; }
+#phone-guide dl { margin: 0; }
+#phone-guide dl > div { padding: 9px 8px; border-top: 1px solid #25353c; border-radius: 4px; }
+#phone-guide dt { font-weight: 700; font-size: 13px; }
+#phone-guide dd { margin: 3px 0 0; color: #b7cbc7; }
+#phone-guide .active { background: #644714; border-color: #f2b134; }
+@media (max-width: 900px) { #phone-guide { top: auto; bottom: 90px; width: 260px; max-height: 30vh; } #phone-panel { width: 280px; } }
+
+/* Optional PC battery controls live alongside the bottom telemetry. */
+#local-command-dock.has-battery { grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 10px; }
+#battery-panel { position: relative; align-self: stretch; display: flex; align-items: center; min-width: 95px; max-width: 180px; font-size: 12px; color: #edf6ff; border-left: 1px solid rgba(183,226,255,.18); }
+#battery-panel > summary { cursor: pointer; list-style: none; padding: 5px 12px; border-radius: 5px; }
+#battery-panel > summary::-webkit-details-marker { display: none; }
+#battery-panel > summary:hover, #battery-panel[open] > summary { background: rgba(82,216,255,.12); }
+#battery-panel > summary:focus-visible { outline: 2px solid #52d8ff; outline-offset: -2px; }
+.battery-label { display: block; margin-bottom: 2px; color: #7793aa; font-size: .58rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.battery-label::after { content: ' ▴'; }
+#battery-summary { display: block; font: 650 .72rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.battery-drawer { position: absolute; bottom: calc(100% + 14px); right: 0; z-index: 50; width: min(330px, calc(100vw - 28px)); box-sizing: border-box; padding: 16px; border: 1px solid rgba(122,215,255,.3); border-radius: 12px; background: rgba(7,17,31,.97); max-height: calc(100dvh - 160px); overflow-y: auto; box-shadow: 0 -8px 28px rgba(0,0,0,.28); }
+#battery-panel p, #battery-readout { line-height: 1.5; color: #b6cadf; }
+#battery-panel button { margin-top: 10px; }
+@media (max-width: 1100px) {
+  #local-command-dock.has-battery { grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px; }
+  .has-battery .dock-command-stack { grid-column: 1 / -1; }
+  .has-battery .flight-hud { min-width: 0; overflow-x: auto; }
 }
