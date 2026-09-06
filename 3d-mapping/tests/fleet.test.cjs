@@ -481,6 +481,28 @@ test("Survey mesh uses underside mount and records only surface hits", () => {
   fleet.clear(); assert.equal(entities.values.length, 0);
 });
 
+test("a blocked gesture climb resumes itself instead of ending the command", () => {
+  let ceiling = true;
+  const viewer = { entities: new Cesium.EntityCollection(), scene: {
+    globe: { show: false },
+    pickFromRay: ray => ceiling ? { position: Cesium.Ray.getPoint(ray, 1) } : undefined,
+  } };
+  const drone = new Fleet(viewer).deploy(home);
+  drone.startGestureMotion(0, 0, 1, 18);
+  for (let frame = 0; frame < 30; frame++) drone.update(1 / 60);
+  // Straight up has no sideways deflection to fall back on, so it simply holds.
+  assert.equal(drone.snapshot().state, "BLOCKED");
+  assert.equal(drone.collisionBlocked, true);
+  assert(Math.abs(drone.snapshot().altitude - home.altitude) < 0.001, "a blocked climb must not rise");
+
+  // The pose is still held, so clearing the obstruction resumes the climb on
+  // its own rather than waiting for the gesture to be issued again.
+  ceiling = false;
+  for (let frame = 0; frame < 60; frame++) drone.update(1 / 60);
+  assert.equal(drone.snapshot().state, "GESTURE_CONTROL");
+  assert(drone.snapshot().altitude > home.altitude + 1, "the held climb should carry on by itself");
+});
+
 test("both drone types report when no safe avoidance route exists and reset clears it", () => {
   for (const type of ["normal", "survey"]) {
     const entities = new Cesium.EntityCollection();
@@ -574,11 +596,13 @@ test("a drone with no safe route stops re-searching every frame", () => {
   const search = queries;
   assert.equal(drone.collisionBlocked, true);
   assert(search > 1, "the first pinned frame probes ahead and then looks for a detour");
-  // Pinned in place against the same wall on the same heading: nothing has
-  // changed, so repeating the nine-query search would only stall the frame.
+  // Pinned in place against the same wall on the same heading. The nine-query
+  // deflection search must not repeat, but the straight path is re-checked now
+  // and then with a single query so the drone notices when the way clears.
   for (let frame = 0; frame < 30; frame++) drone.moveManually(1, 0, 0, 1 / 60);
   assert.equal(drone.collisionBlocked, true);
-  assert.equal(queries, search, `expected no repeat searches, got ${queries - search}`);
+  const repeats = queries - search;
+  assert(repeats > 0 && repeats <= 4, `expected a few cheap re-checks over half a second, got ${repeats}`);
   // The world can change around a stationary drone, so a stale result expires.
   for (let frame = 0; frame < 40; frame++) drone.moveManually(1, 0, 0, 1 / 60);
   assert(queries > search, "a failed route is retried once it goes stale");

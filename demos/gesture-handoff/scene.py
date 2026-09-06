@@ -19,6 +19,7 @@ _DRONE = (90, 230, 90)
 _DRONE_IDLE = (150, 150, 150)
 _TRAIL = (150, 110, 60)
 _ANCHOR = (255, 210, 90)      # operator holding the drone (BGR: cyan-ish gold)
+_TARGET = (90, 220, 255)      # operator being aimed at (orange)
 _OP = (150, 150, 150)
 _TEXT = (225, 225, 225)
 
@@ -59,8 +60,9 @@ class Scene:
         self._grid(img)
 
         # operators, far to near
+        aim = float(hud.get("aim", 0.0))
         for i in sorted(range(ops.n), key=lambda k: -ops.pos[k][1]):
-            self._operator(img, ops, i)
+            self._operator(img, ops, i, aim)
 
         self._trail(img, quad.trail)
         self._shadow(img, quad)
@@ -88,28 +90,34 @@ class Scene:
             self._line(img, (-extent, y, 0), (extent, y, 0),
                        _GRID_AXIS if abs(y) < 1e-6 else _GRID, 2 if abs(y) < 1e-6 else 1)
 
-    def _operator(self, img, ops, i):
+    def _operator(self, img, ops, i, aim=0.0):
         base = (float(ops.pos[i][0]), float(ops.pos[i][1]), 0.0)
         head = (base[0], base[1], 1.75)
         anchor = i == ops.anchor
-        col, thick = (_ANCHOR, 3) if anchor else (_OP, 2)
+        target = i == ops.target
+        col, thick = (_ANCHOR, 3) if anchor else (_TARGET, 3) if target else (_OP, 2)
         self._line(img, base, head, col, thick)
         p = self.cam.project(head)
         if p:
-            cv2.circle(img, p, 6 if anchor else 5, col, -1, cv2.LINE_AA)
+            cv2.circle(img, p, 6 if thick == 3 else 5, col, -1, cv2.LINE_AA)
             cv2.putText(img, ops.names[i], (p[0] + 9, p[1] + 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1, cv2.LINE_AA)
         if anchor:
             self._ground_ring(img, base, 0.7, _ANCHOR)
+        if target:
+            self._ground_ring(img, base, 1.0, _TARGET)
+            if aim > 0.01:
+                self._ground_ring(img, base, 1.0, (150, 255, 255), arc=aim, thick=3)
 
-    def _ground_ring(self, img, centre, r, col, thick=1):
+    def _ground_ring(self, img, centre, r, col, thick=1, arc=1.0):
         pts = []
-        for a in np.linspace(0, 2 * math.pi, 26):
+        for a in np.linspace(-math.pi / 2, -math.pi / 2 + 2 * math.pi * arc, 30):
             pts.append(self.cam.project((centre[0] + r * math.cos(a),
                                          centre[1] + r * math.sin(a), 0.02)))
         pts = [q for q in pts if q]
-        if len(pts) > 2:
-            cv2.polylines(img, [np.array(pts, np.int32)], True, col, thick, cv2.LINE_AA)
+        if len(pts) > 1:
+            cv2.polylines(img, [np.array(pts, np.int32)], arc >= 0.999, col, thick,
+                          cv2.LINE_AA)
 
     def _trail(self, img, trail):
         pts = [self.cam.project((p[0], p[1], 0.0)) for p in trail]
@@ -153,6 +161,13 @@ class Scene:
                     (80, 210, 255) if mode not in ("IDLE",) else _TEXT, 2, cv2.LINE_AA)
         cv2.putText(img, f"CTRL -> {ops.names[ops.anchor]}", (self.w - 150, 26), f, 0.5,
                     _ANCHOR, 1, cv2.LINE_AA)
+        if ops.target is not None and ops.target != ops.anchor:
+            cv2.putText(img, f"aim: {ops.names[ops.target]}  hold to send",
+                        (self.w - 220, 48), f, 0.45, _TARGET, 1, cv2.LINE_AA)
+        swing = hud.get("swing", "")
+        if swing:
+            cv2.putText(img, f"wiper {swing}", (self.w - 180, 66), f, 0.45,
+                        (150, 255, 255), 1, cv2.LINE_AA)
 
         note = hud.get("note", "")
         if note:
@@ -164,5 +179,5 @@ class Scene:
             cv2.rectangle(img, (170, self.h - 44), (170 + 150, self.h - 34), (60, 60, 60), -1)
             cv2.rectangle(img, (170, self.h - 44),
                           (170 + int(150 * prog), self.h - 34), (90, 230, 90), -1)
-        cv2.putText(img, "hold a Victory sign ~2 s to send the drone to another operator",
-                    (14, self.h - 14), f, 0.4, (140, 140, 140), 1, cv2.LINE_AA)
+        cv2.putText(img, "point at an operator & hold, or Victory ~2 s (random) - two-finger wiper dashes L/R",
+                    (14, self.h - 14), f, 0.36, (140, 140, 140), 1, cv2.LINE_AA)
