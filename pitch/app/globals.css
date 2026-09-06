@@ -1,6 +1,6 @@
-@import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -121,7 +121,7 @@ button {
 .footer-bottom,
 .mesh-top,
 .mesh-bottom {
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
 }
 .eyebrow {
   font-size: 12px;
@@ -155,9 +155,9 @@ button {
   z-index: 1;
 }
 h1 {
-  font-size: clamp(68px, 6.8vw, 100px);
+  font-size: clamp(52px, 5.4vw, 78px);
   line-height: 0.99;
-  letter-spacing: -6px;
+  letter-spacing: -4px;
   margin: 29px 0 27px;
   font-weight: 500;
 }
@@ -467,7 +467,7 @@ h4 {
   font-family: monospace;
   color: #a7b59b;
 }
-.constraint-controls button[aria-pressed="true"] {
+.constraint-controls button[aria-pressed='true'] {
   border-color: var(--lime);
   color: var(--lime);
   background: #b4ef7411;
@@ -613,7 +613,7 @@ h4 {
 .round-buttons button > span:first-child {
   font-size: 10px;
 }
-.round-buttons button[aria-pressed="true"] {
+.round-buttons button[aria-pressed='true'] {
   background: #b4ef7410;
   color: var(--lime);
   box-shadow: inset 2px 0 var(--lime);
@@ -986,7 +986,7 @@ footer p {
     grid-template-columns: 1fr 1fr;
   }
   h1 {
-    font-size: 76px;
+    font-size: clamp(48px, 5.4vw, 62px);
     letter-spacing: -4px;
   }
   .hero-description {
@@ -1073,8 +1073,8 @@ footer p {
     font-size: 10px;
   }
   .hero h1 {
-    font-size: 79px;
-    letter-spacing: -4px;
+    font-size: clamp(40px, 9vw, 68px);
+    letter-spacing: -2px;
     margin: 24px 0;
   }
   .hero-description {
@@ -1378,6 +1378,16 @@ footer p {
 }
 .hero-tags {
   font-size: 12px;
+}
+#prototype .metric-cards h3 {
+  margin-top: 18px;
+}
+#prototype .metric-cards p,
+.roadmap p {
+  font-size: 16px;
+}
+.roadmap h4 {
+  font-size: 18px;
 }
 @media (max-width: 760px) {
   .hero-tags {
