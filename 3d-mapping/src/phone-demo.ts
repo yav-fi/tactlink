@@ -17,10 +17,10 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
   panel.id = "phone-panel";
   panel.innerHTML = `<strong>PHONE CONTROL · ONE DRONE</strong>
     <p id="phone-status" role="status">Connecting to the phone receiver…</p>
+    <label>Live room <select id="phone-room"></select></label>
     <p id="phone-owner">Waiting for the group</p><div id="phone-members"></div>
     <button id="phone-stop" type="button">Stop drone</button>
     <details><summary>Group alignment</summary>
-      <label>Room <select id="phone-room"></select></label>
       <label>Stationary anchor <select id="phone-anchor"></select></label>
       <label>Rotate group <input id="phone-rotation" type="range" min="-180" max="180" value="0" step="1"></label>
       <label><input id="phone-mirror" type="checkbox"> Mirror group</label>
@@ -62,7 +62,11 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       if (!data.phone_demo || data.host === "127.0.0.1") throw new Error("Old server is running — stop it and restart ./start");
       const all = data.phones;
       const rooms = [...new Set(all.map(phone => phone.room))];
-      if (!room && rooms.length) room = rooms[0];
+      if (!rooms.includes(room)) {
+        room = rooms[0] ?? "";
+        alignment.anchor = "";
+        reset();
+      }
       updateOptions(roomSelect, rooms.map(id => [id, `${id.slice(0, 8)}${id === "mock" ? " (synthetic)" : ""}`]), room);
       const phones = all.filter(phone => phone.room === room);
       if (!alignment.anchor) alignment.anchor = phones.find(phone => phone.pos && phone.age <= PHONE_TIMEOUT)?.id ?? "";
@@ -86,7 +90,9 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
         row.textContent = `${phone.name}${phone.id === owner?.operator_id ? " · controlling" : ""} — ${health}`;
         return row;
       }));
-      text("phone-status", `${live.length}/${mode} phones connected · ${tracked.length} positioned · ${mode === 2 ? "2-phone test · axis assumed" : flat ? "3-phone flat (Z = 0)" : "5-phone"}`);
+      text("phone-status", all.length === 0
+        ? "No phone telemetry. Set Visualizer host on each phone to this Mac’s Wi-Fi IP:9870, connect to the same Wi-Fi, and keep the app open."
+        : `${live.length}/${mode} phones connected · ${tracked.length} positioned · ${mode === 2 ? "2-phone test · axis assumed" : flat ? "3-phone flat (Z = 0)" : "5-phone"}`);
       text("phone-owner", paused ? "Phone control paused" : owner ? `${owner.name} controls ${target.id.replace("_", " ")} · ${owner.gesture.replaceAll("_", " ")}` : "Waiting for fresh UWB positions");
       const hud = document.querySelector<HTMLElement>("#gesture-connection");
       if (hud) hud.textContent = live.length ? `PHONE CAMERAS · ${live.length} CONNECTED` : "WAITING FOR PHONES";
