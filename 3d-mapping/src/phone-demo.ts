@@ -18,6 +18,7 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
   panel.id = "phone-panel";
   panel.innerHTML = `<strong>PHONE CONTROL · ONE DRONE</strong>
     <p id="phone-status" role="status">Connecting to the phone receiver…</p>
+    <p id="phone-feed-warning" class="phone-help"></p>
     <label>Live room <select id="phone-room"></select></label>
     <div class="phone-view-controls"><button id="phone-closer" title="Zoom in">＋</button><button id="phone-wider" title="Zoom out">−</button><button id="phone-frame">Frame group</button></div>
     <p class="phone-scale">1 square = 1 m · people 1.75 m · drone 0.8 m rotor envelope</p>
@@ -120,9 +121,13 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
         row.textContent = `${phone.name}${phone.id === owner?.operator_id ? " · controlling" : ""} — ${health}`;
         return row;
       }));
+      const reportedMembers = Math.max(0, ...live.map(phone => phone.members));
+      text("phone-feed-warning", reportedMembers > live.length
+        ? "Your phones see each other, but this Mac is missing a feed. Check Visualizer host on the missing phone: it must be this Mac’s Wi-Fi address, port 9870."
+        : "");
       text("phone-status", all.length === 0
         ? "No phone telemetry. Set Visualizer host on each phone to this Mac’s Wi-Fi IP:9870, connect to the same Wi-Fi, and keep the app open."
-        : `${live.length}/${mode} phones connected · ${tracked.length} positioned · ${mode === 2 ? "2-phone test · axis assumed" : flat ? "3-phone flat (Z = 0)" : "5-phone"}`);
+        : `${reportedMembers}/${mode} in phone room · ${live.length}/${mode} feeds reaching Mac · ${tracked.length} positioned · ${mode === 2 ? "2-phone test · axis assumed" : flat ? "3-phone flat (Z = 0)" : "5-phone"}`);
       text("phone-owner", paused ? "Phone control paused" : owner ? control.following ? `Following ${owner.name} · open palm to stop` : `${owner.name} controls ${target.id.replace("_", " ")} · ${owner.gesture.replaceAll("_", " ")}` : "Waiting for fresh UWB positions");
       const hud = document.querySelector<HTMLElement>("#gesture-connection");
       if (hud) hud.textContent = live.length ? `PHONE CAMERAS · ${live.length} CONNECTED` : "WAITING FOR PHONES";
@@ -138,6 +143,7 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       reset(); layer.update({ operators: [] }); scene.update([]);
       text("phone-status", error instanceof Error ? error.message : "Phone receiver disconnected");
       text("phone-owner", "Drone holding — no live phone feed");
+      text("phone-feed-warning", "");
     } finally { busy = false; }
   };
   const visibility = () => { if (document.hidden) reset(); };
