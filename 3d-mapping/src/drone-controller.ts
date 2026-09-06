@@ -551,11 +551,17 @@ export class DroneController {
       this.collisionBlocked = !resolved;
       this.avoidanceActive = resolved?.detoured ?? false;
       if (!resolved) {
+        // Hold still but stay under command, the way manual flight does.
+        // Tearing the command down here made a held gesture unflyable: a
+        // straight climb has no sideways deflection to fall back on, so a
+        // single blocked frame ended it, and the held pose only rebuilt it on
+        // the next repeat. That is what made a climb rise in steps.
         this.showAvoidance(false);
-        this.stopCommand();
+        this.stopManualMotion();
         this.state = "BLOCKED";
       } else {
         this.position = resolved.coordinates;
+        this.state = "GESTURE_CONTROL";
         if (resolved.detoured) this.showAvoidance(true, resolved.cartesian);
         this.syncEntity();
       }

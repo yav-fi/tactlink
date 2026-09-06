@@ -9,15 +9,7 @@ import type { WorkerReply, WorkerRequest } from "./gesture-worker";
 const MODEL_PATH = "/models/gesture_recognizer.task";
 
 let activeDelegate = "—";
-// How confident the canned classifier must be before a pose counts at all.
-// Raising it makes gestures harder to trigger; lowering it makes them easier
-// but lets briefly-wrong poses in. A deliberate hold still gates every command,
-// so ?score=0.35 is a safe thing to try if a pose is hard to register on a
-// particular camera or in poor light.
-const DEFAULT_MIN_SCORE = 0.5;
-const scoreOverride = Number(new URLSearchParams(window.location.search).get("score"));
-const MIN_SCORE = Number.isFinite(scoreOverride) && scoreOverride > 0 && scoreOverride < 1
-  ? scoreOverride : DEFAULT_MIN_SCORE;
+const MIN_SCORE = 0.5;
 const FRAME_INTERVAL_MS = 60;
 
 export type BrowserGestureState = {

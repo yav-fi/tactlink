@@ -101,6 +101,11 @@ const SAME_HEADING_DOT = 0.9995;
 // down exactly when the view is already struggling.
 const FAILED_ROUTE_SECONDS = 1;
 const FAILED_ROUTE_METERS = 0.05;
+// While a drone is held up, re-check only the straight path, and only this
+// often: one query rather than the whole deflection search. A held gesture now
+// waits in place instead of being cancelled, so it has to notice promptly when
+// whatever was in the way goes away.
+const FAILED_RETRY_SECONDS = 0.2;
 
 /**
  * Clears a straight corridor ahead of a drone once, then flies inside it for
@@ -118,6 +123,7 @@ export class MotionGuard {
   private failedFrom?: Cesium.Cartesian3;
   private failedHeading?: Cesium.Cartesian3;
   private failedAge = 0;
+  private retryAge = 0;
 
   /** Drop the corridor whenever the flight mode, route, or position changes. */
   clear(): void {
@@ -126,6 +132,7 @@ export class MotionGuard {
     this.failedFrom = undefined;
     this.failedHeading = undefined;
     this.failedAge = 0;
+    this.retryAge = 0;
   }
 
   /** Retire the cleared corridor but keep what was learned about the obstacle. */
@@ -161,17 +168,28 @@ export class MotionGuard {
     }
 
     this.dropCorridor();
-    if (this.failedFrom && this.failedHeading) {
-      this.failedAge += elapsed;
-      if (this.failedAge <= FAILED_ROUTE_SECONDS
-        && Cesium.Cartesian3.distance(from, this.failedFrom) <= FAILED_ROUTE_METERS
-        && Cesium.Cartesian3.dot(this.failedHeading, heading) >= SAME_HEADING_DOT) return undefined;
-      this.failedFrom = this.failedHeading = undefined;
-      this.failedAge = 0;
-    }
-
     const speed = seconds > 0 ? step / seconds : 0;
     const lookahead = Math.min(MAX_LOOKAHEAD_METERS, Math.max(step, MIN_LOOKAHEAD_METERS, speed * LOOKAHEAD_SECONDS));
+    if (this.failedFrom && this.failedHeading) {
+      this.failedAge += elapsed;
+      this.retryAge += elapsed;
+      if (this.failedAge <= FAILED_ROUTE_SECONDS
+        && Cesium.Cartesian3.distance(from, this.failedFrom) <= FAILED_ROUTE_METERS
+        && Cesium.Cartesian3.dot(this.failedHeading, heading) >= SAME_HEADING_DOT) {
+        if (this.retryAge < FAILED_RETRY_SECONDS) return undefined;
+        this.retryAge = 0;
+        if (movementBlocked(viewer, from, advance(from, heading, lookahead))) return undefined;
+        this.failedFrom = this.failedHeading = undefined;
+        this.failedAge = 0;
+        this.requested = this.travel = heading;
+        this.remaining = lookahead - step;
+        return { position: Cesium.Cartesian3.clone(to), detoured: false };
+      }
+      this.failedFrom = this.failedHeading = undefined;
+      this.failedAge = 0;
+      this.retryAge = 0;
+    }
+
     const probe = advance(from, heading, lookahead);
     if (!movementBlocked(viewer, from, probe)) {
       this.requested = this.travel = heading;
@@ -186,6 +204,7 @@ export class MotionGuard {
       this.failedFrom = Cesium.Cartesian3.clone(from);
       this.failedHeading = Cesium.Cartesian3.clone(heading);
       this.failedAge = 0;
+      this.retryAge = 0;
       return undefined;
     }
     if (detour.sign !== 0) this.turnSign = detour.sign;
