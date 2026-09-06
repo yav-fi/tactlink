@@ -88,7 +88,9 @@ def main() -> None:
                     "gesture": gesture,
                     "gestureConfidence": 0.9 if gesture != "None" else 0.0,
                     "gestureSource": "mock" if gesture != "None" else "none",
-                    "flat": True,
+                    "flat": args.phones == 3,
+                    "members": args.phones,
+                    "geometryAge": 0.0,
                 }
                 sock.sendto(json.dumps(msg).encode("utf-8"), dst)
             time.sleep(period)

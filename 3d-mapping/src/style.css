@@ -185,3 +185,17 @@ body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !imp
   .dock-row > button { padding-inline: 9px; }
   .dock-status { font-size: .7rem; }
 }
+/* Phone demo keeps the established flight surface and exposes the live input chain. */
+#phone-panel { position: absolute; top: 100px; right: 20px; width: min(350px, calc(100vw - 40px)); max-height: calc(100vh - 240px); overflow: auto; padding: 18px; background: rgba(7, 12, 17, .93); border: 1px solid #3c5964; border-radius: 12px; z-index: 20; color: #e6f3f0; font: 14px/1.5 system-ui, sans-serif; }
+#phone-panel strong { color: #64edd0; font-size: 14px; }
+#phone-panel p { margin: 10px 0; }
+#phone-panel #phone-owner { font-weight: 600; }
+#phone-members div { padding: 6px 0; border-bottom: 1px solid #25353c; }
+#phone-panel details { margin-top: 12px; }
+#phone-panel label { display: block; margin: 8px 0; }
+#phone-panel select { width: 100%; }
+#phone-panel input[type=range] { width: 100%; }
+#phone-panel .phone-help, #phone-panel details p { color: #a4bac4; font-size: 13px; }
+#phone-stop { width: 100%; margin-top: 12px; }
+.phone-mode .gesture-hud { pointer-events: none; }
+.phone-mode #command-form, .phone-mode #command-drawer, .phone-mode .dock-row, .phone-mode #command-suggestions { display: none !important; }

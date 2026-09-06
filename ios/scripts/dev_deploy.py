@@ -171,7 +171,7 @@ def build(*, force=False, register=None):
         return publish(products / 'SignalMap.app', source)
 
 
-def deploy(device, manifest, room, installed):
+def deploy(device, manifest, room, installed, bridge=None):
     identifier = device['identifier']
     name = device.get('deviceProperties', {}).get('name', identifier)
     receipt = STATE / 'receipts' / f'{identifier}.json'
@@ -186,6 +186,8 @@ def deploy(device, manifest, room, installed):
     args = ['device', 'process', 'launch', '--device', identifier, '--terminate-existing', BUNDLE]
     if room:
         args += ['--room', room]
+    if bridge:
+        args += ['--sim-bridge', bridge]
     # devicectl options must precede the application arguments.
     with tempfile.TemporaryDirectory(prefix='signalmap-launch-') as folder:
         output = Path(folder) / 'result.json'
@@ -193,6 +195,8 @@ def deploy(device, manifest, room, installed):
         if read_json(output, {}).get('info', {}).get('outcome') != 'success':
             raise RuntimeError('Launch did not report success.')
     mark['launched'] = True
+    mark['room'] = room
+    mark['bridge'] = bridge
     atomic_json(receipt, mark)
     say(f'{name}: app running. Total {time.monotonic()-started:.1f}s.')
 
@@ -231,9 +235,9 @@ def watch(args):
                                 continue
                             mark = read_json(STATE / 'receipts' / f'{identifier}.json', {})
                             installed = mark.get('fingerprint') == latest['fingerprint']
-                            if installed and mark.get('launched'):
+                            if installed and mark.get('launched') and mark.get('room') == args.room and mark.get('bridge') == args.bridge:
                                 continue
-                            jobs[identifier] = pool.submit(deploy, device, latest, args.room, installed)
+                            jobs[identifier] = pool.submit(deploy, device, latest, args.room, installed, args.bridge)
                     elif not jobs:
                         say('No published build. Run ./scripts/dev ship in another terminal.')
                     if args.once and not jobs:
@@ -252,6 +256,7 @@ def main():
     ship.add_argument('--force', action='store_true', help='Rebuild even when source is unchanged')
     watcher = sub.add_parser('watch', help='Install latest build on reachable phones as they appear')
     watcher.add_argument('--room', help='Automatically open a test room after each update')
+    watcher.add_argument('--bridge', help='Set the phone Visualizer host automatically, e.g. 192.168.1.115:9870')
     watcher.add_argument('--once', action='store_true', help='Deploy currently reachable devices, then exit')
     adopt = sub.add_parser('adopt', help='Publish an existing signed physical-device .app')
     adopt.add_argument('app', type=Path)

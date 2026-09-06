@@ -482,12 +482,13 @@ final class RoomSession: ObservableObject {
             if geometryAge>8 { geometry=nil; geometryStatus="Position estimate expired. Waiting for a fresh complete cycle." }
         }
         if now-lastSnapshot>=1 { updateGeometry(now); writeSnapshot(); lastSnapshot=now }
-        if let mine=geometry?.positions[localID] {
+        if joined {
             bridge.send(id:localID,name:displayName,room:transport.room,cycle:cycle,
-                        position:mine,heading:motionHeading,
+                        position:geometry?.positions[localID],heading:motionHeading,
                         compassDegrees:compass.compassDegrees,
                         gesture:gestureCamera.gesture,
-                        gestureConfidence:gestureCamera.confidence,flat:threePhoneMode)
+                        gestureConfidence:gestureCamera.confidence,flat:threePhoneMode,
+                        geometryAge:geometryAge,members:participantCount)
         }
     }
 
