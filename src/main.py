@@ -166,10 +166,10 @@ def run(args: argparse.Namespace) -> int:
     viz = None if (runtime_mode or check_mode) else Visualizer()
     operators = OperatorPool(max(args.operators, 4) if args.demo else args.operators)
     operators.wander_enabled = args.wander and not args.demo
-    if args.demo:                        # deterministic: a line of people facing east
+    if args.demo:                        # deterministic: a line of people facing north
         for i, op in enumerate(operators.operators):
             op.pos[:] = [i * 12.0 - (operators.n - 1) * 6.0, 0.0]
-            op.heading = 0.0
+            op.heading = math.pi / 2
     event_log: list[str] = []
     mission_adapter = mission_client = mission_error_cls = None
     if runtime_mode:

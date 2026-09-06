@@ -48,7 +48,7 @@ class OperatorPool:
         for i in range(self.n):
             a = 2 * math.pi * i / self.n
             pos = (7.0 * math.cos(a), 7.0 * math.sin(a))
-            self.operators.append(Operator(f"op{i + 1}", pos, a + math.pi))  # face inward
+            self.operators.append(Operator(f"op{i + 1}", pos, math.pi / 2))  # face north (+y)
         self.active = 0
         self.wander_enabled = False   # off until real phone positions drive it
 

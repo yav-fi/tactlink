@@ -62,6 +62,7 @@ class GestureController:
         self._dash_dir = np.zeros(2)
         self._dash_start = np.zeros(2)
         self._anchor = np.zeros(2)   # point orbit / return-home are relative to
+        self._leashed = False        # trail the operator when idle? (off after a dash)
 
     def update(self, hand: HandState, gstate: GestureState, state) -> ControlInput:
         if gstate.follow_pos is not None:
@@ -73,7 +74,7 @@ class GestureController:
             target = self._run_maneuver(state)
         elif HAND_FLIGHT_ENABLED and hand.present:
             target = self._fly(hand, gstate)
-        elif self._armed and gstate.follow_pos is not None:
+        elif self._armed and self._leashed and gstate.follow_pos is not None:
             target = self._follow_point(state, gstate.follow_pos)
         else:
             # Gestures-only, no target: hold position, seek the target altitude.
@@ -151,6 +152,7 @@ class GestureController:
             else:                       # already airborne: step up
                 self._alt_target = min(self._alt_target + _CLIMB_STEP, _MAX_ALT)
             self.maneuver = "climb"
+            self._leashed = True        # after takeoff, sit with the operator
         elif event == "land":
             self._alt_target = 0.0
             self.maneuver = "land"
@@ -159,18 +161,20 @@ class GestureController:
             self.maneuver = "spin360"
         elif event == "return_home" and self._armed:
             self.maneuver = "return_home"
+            self._leashed = True        # come back and stay with the operator
         elif event == "orbit" and self._armed:
-            # Repeat the gesture to stop orbiting and hover.
+            # Repeat the gesture to stop orbiting and hover in place.
             self.maneuver = "" if self.maneuver == "orbit" else "orbit"
-        elif event in _COMPASS and self._armed:
-            self._dash_dir = _COMPASS[event]
+            self._leashed = False
+        elif (event in _COMPASS or event.startswith("fly_bearing:")) and self._armed:
+            if event in _COMPASS:
+                self._dash_dir = _COMPASS[event]
+            else:
+                bearing = float(event.split(":", 1)[1])
+                self._dash_dir = np.array([math.cos(bearing), math.sin(bearing)])
             self._dash_start = np.array(state.pos[:2], dtype=float)
-            self.maneuver = event
-        elif event.startswith("fly_bearing:") and self._armed:
-            bearing = float(event.split(":", 1)[1])
-            self._dash_dir = np.array([math.cos(bearing), math.sin(bearing)])
-            self._dash_start = np.array(state.pos[:2], dtype=float)
-            self.maneuver = "fly_bearing"
+            self.maneuver = "fly_bearing" if event.startswith("fly_bearing:") else event
+            self._leashed = False       # hold position after the dash, don't drift back
 
     def _run_maneuver(self, state) -> ControlInput:
         cmd = ControlInput(armed=self._armed, event=self.maneuver)

@@ -124,9 +124,13 @@ by default (real phone positions will drive them); `--wander` makes them walk.
 - **Control = proximity.** The drone obeys whichever operator it is currently
   **nearest** to (with hysteresis so it doesn't flicker mid-pass). The HUD shows
   `CTRL opN`, and that operator is cyan in the 3D view.
-- **Everything is relative to the controlling operator.** Idle → the drone
-  trails them. `orbit` → circles them. `return_home` → flies back to them. The
-  three-finger "forward" dash → along their facing.
+- **Anchored to the controlling operator.** Right after **take off** (or
+  **return-home**) the drone trails them ("leashed"); `orbit` circles them;
+  `return_home` flies back to them. Operators face **north** by default, so the
+  three-finger "forward" dash goes north.
+- **A dash leaves the drone where it lands.** `fly_east` / `fly_west` /
+  three-finger forward drop the leash — the drone hovers at the new spot instead
+  of drifting back. `return_home` re-leashes it.
 - **Handoff is emergent.** Dash the drone toward someone else; when it arrives it
   is nearest to them, so they take control. No dedicated handoff gesture.
 
