@@ -26,3 +26,6 @@ runs/
 3d-mapping/dist/
 ios/Pods/
 ios/SignalMap/gesture_recognizer.task
+demos/gesture-handoff/gesture_recognizer.task
+demos/gesture-handoff/*.download
+demos/gesture-handoff/__pycache__/

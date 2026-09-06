@@ -1,0 +1,303 @@
+"""Webcam gesture control demo: operator 1 flies one drone among N static
+operators (scattered at random through the scene) and hands it to a random
+other operator by holding a Victory sign.
+
+    python demos/gesture-handoff/gesture_demo.py            # live webcam
+    python demos/gesture-handoff/gesture_demo.py --demo     # no camera: scripted flight
+    python demos/gesture-handoff/gesture_demo.py --check    # load the model and exit
+
+Gestures (hold ~0.4 s): thumbs up = take off / climb, thumbs down = land,
+open palm = halt, point up = orbit the controlling operator, I-love-you =
+return to them. Hold a Victory sign ~2 s to hand the drone to a random operator.
+Runs on the repo's deps (mediapipe / opencv / numpy); imports nothing from src/.
+Recognition is local; webcam frames are neither recorded nor uploaded.
+"""
+
+from __future__ import annotations
+
+import argparse
+import time
+import urllib.request
+from pathlib import Path
+
+MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task'
+CANNED = {'Open_Palm', 'Thumb_Up', 'Thumb_Down', 'Pointing_Up', 'ILoveYou', 'Victory'}
+FRIENDLY = {'Open_Palm': 'Open palm', 'Thumb_Up': 'Thumbs up',
+            'Thumb_Down': 'Thumbs down', 'Pointing_Up': 'Pointing up',
+            'ILoveYou': 'I love you', 'Victory': 'Victory'}
+EDGES = [(0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8),
+         (5, 9), (9, 10), (10, 11), (11, 12), (9, 13), (13, 14), (14, 15),
+         (15, 16), (13, 17), (0, 17), (17, 18), (18, 19), (19, 20)]
+
+PANEL_W, PANEL_H = 640, 480
+
+
+class StableLabel:
+    """Time-based settling for the label shown on the webcam panel."""
+
+    def __init__(self, hold=0.35):
+        self.hold = hold
+        self.candidate = 'Unknown'
+        self.since = 0.0
+        self.score = 0.0
+
+    def update(self, label, score, now):
+        if label != self.candidate:
+            self.candidate, self.since, self.score = label, now, score
+        else:
+            self.score = 0.25 * score + 0.75 * self.score
+        if label == 'Unknown':
+            return 'Unknown', 0.0, 0.0
+        progress = min(1.0, max(0.0, (now - self.since) / self.hold))
+        return (label if progress == 1 else 'Settling...'), self.score, progress
+
+
+# --- the control demo ------------------------------------------------------
+
+class Sim:
+    """Operators + drone + autopilot + gesture gate, advanced one frame at a time."""
+
+    def __init__(self, n_operators=4, seed=None):
+        from flight import Autopilot, Operators, Quad
+        from gestures import GestureGate
+
+        self.ops = Operators(n_operators, seed=seed)
+        self.quad = Quad(self.ops.anchor_pos())
+        self.pilot = Autopilot(self.ops)
+        self.gate = GestureGate()
+        self.hud = {'mode': 'idle', 'gesture': 'None', 'progress': 0.0, 'note': ''}
+        self._note_until = 0.0
+
+    def advance(self, raw_label, dt, now):
+        command, progress, held = self.gate.update(raw_label, now)
+        if command:
+            note = self.pilot.command(command, self.quad, now)
+            if note:
+                self.hud['note'] = note
+                self._note_until = now + 2.5
+        self.pilot.update(self.quad, dt, now)
+
+        if now > self._note_until:
+            self.hud['note'] = ''
+        self.hud['mode'] = self.pilot.mode
+        self.hud['gesture'] = FRIENDLY.get(held, held if held != 'None' else 'None')
+        self.hud['progress'] = progress
+
+    def render_scene(self, scene):
+        return scene.render(self.quad, self.ops, self.hud)
+
+
+# --- scripted demo input -------------------------------------------------
+
+# (start, end) seconds -> gesture label held during the scripted demo.
+_DEMO = [
+    (1.5, 2.6, 'Thumb_Up'),       # take off
+    (4.0, 5.0, 'Thumb_Up'),       # climb a step
+    (6.5, 8.0, 'Pointing_Up'),    # orbit the starting operator
+    (9.5, 10.5, 'Open_Palm'),     # halt / stop orbiting
+    (12.0, 16.0, 'Victory'),      # hold ~2 s -> hand off to a random operator
+    (19.5, 21.0, 'Pointing_Up'),  # orbit the new operator
+    (23.5, 24.5, 'ILoveYou'),     # return to them
+    (26.5, 30.5, 'Victory'),      # hold ~2 s -> hand off again
+    (33.5, 34.7, 'Thumb_Down'),   # land
+]
+
+
+def _demo_input(t):
+    for a, b, label in _DEMO:
+        if a <= t < b:
+            return label
+    return 'None'
+
+
+# --- panels + compositing ---------------------------------------------------
+
+def _webcam_panel(cv2, np, frame, hands, stable_label, score, progress, raw_hint=''):
+    panel = cv2.resize(frame, (PANEL_W, PANEL_H))
+    for hand in hands:
+        pts = [(int(p[0] * PANEL_W), int(p[1] * PANEL_H)) for p in hand]
+        for a, b in EDGES:
+            cv2.line(panel, pts[a], pts[b], (170, 230, 60), 2, cv2.LINE_AA)
+        for p in pts:
+            cv2.circle(panel, p, 3, (240, 255, 220), -1, cv2.LINE_AA)
+    cv2.rectangle(panel, (0, PANEL_H - 54), (PANEL_W, PANEL_H), (24, 20, 17), -1)
+    cv2.putText(panel, stable_label, (14, PANEL_H - 28), cv2.FONT_HERSHEY_SIMPLEX,
+                0.7, (170, 230, 60), 2, cv2.LINE_AA)
+    if stable_label not in ('Unknown', 'Settling...'):
+        cv2.putText(panel, f'{score:.0%}', (PANEL_W - 90, PANEL_H - 28),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (220, 220, 220), 1, cv2.LINE_AA)
+    elif raw_hint:                              # what the model sees below threshold
+        cv2.putText(panel, raw_hint, (PANEL_W - 200, PANEL_H - 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (110, 110, 110), 1, cv2.LINE_AA)
+    cv2.rectangle(panel, (14, PANEL_H - 16), (PANEL_W - 14, PANEL_H - 10), (60, 60, 60), -1)
+    cv2.rectangle(panel, (14, PANEL_H - 16),
+                  (14 + int((PANEL_W - 28) * progress), PANEL_H - 10),
+                  (170, 230, 60), -1)
+    return panel
+
+
+def _demo_panel(cv2, np, raw_label):
+    panel = np.full((PANEL_H, PANEL_W, 3), (30, 28, 26), dtype=np.uint8)
+    cv2.putText(panel, 'DEMO MODE (no camera)', (60, 220), cv2.FONT_HERSHEY_SIMPLEX,
+                0.9, (200, 200, 200), 2, cv2.LINE_AA)
+    if raw_label != 'None':
+        cv2.putText(panel, FRIENDLY.get(raw_label, raw_label), (60, 262),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (140, 240, 140), 2, cv2.LINE_AA)
+    return panel
+
+
+# --- run loops ------------------------------------------------------------
+
+def run_demo(args):
+    import cv2
+    import numpy as np
+    from scene import Scene
+
+    sim = Sim(args.operators)
+    scene = Scene(PANEL_W, PANEL_H)
+
+    if args.headless:                       # virtual clock: renders immediately
+        dt, vt = 1 / 60, 0.0
+        raw_label = 'None'
+        while vt < args.seconds:
+            vt += dt
+            raw_label = _demo_input(vt)
+            sim.advance(raw_label, dt, vt)
+        composite = np.hstack([_demo_panel(cv2, np, raw_label), sim.render_scene(scene)])
+        if args.out:
+            cv2.imwrite(args.out, composite)
+            print(f'wrote {args.out}')
+        return
+
+    window = 'Gesture control demo'
+    cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+    start = time.monotonic()
+    prev = start
+    while True:
+        now = time.monotonic()
+        t = now - start
+        dt = min(0.05, now - prev)
+        prev = now
+        raw_label = _demo_input(t)
+        sim.advance(raw_label, dt if dt > 0 else 1 / 60, now)
+        composite = np.hstack([_demo_panel(cv2, np, raw_label), sim.render_scene(scene)])
+        cv2.imshow(window, composite)
+        if cv2.waitKey(16) & 0xFF in (27, ord('q')):
+            break
+        if cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) < 1:
+            break
+    cv2.destroyAllWindows()
+
+
+def run_live(args):
+    import cv2
+    import mediapipe as mp
+    import numpy as np
+    from scene import Scene
+
+    model = Path(__file__).with_name('gesture_recognizer.task')
+    if not model.exists():
+        print('Downloading gesture model once from Google...')
+        tmp = model.with_suffix('.download')
+        try:
+            with urllib.request.urlopen(MODEL_URL, timeout=60) as response:
+                tmp.write_bytes(response.read())
+            tmp.replace(model)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    options = mp.tasks.vision.GestureRecognizerOptions(
+        base_options=mp.tasks.BaseOptions(model_asset_path=str(model)),
+        running_mode=mp.tasks.vision.RunningMode.VIDEO, num_hands=1)
+    with mp.tasks.vision.GestureRecognizer.create_from_options(options) as recognizer:
+        if args.check:
+            blank = mp.Image(image_format=mp.ImageFormat.SRGB,
+                             data=np.zeros((480, 640, 3), dtype=np.uint8))
+            assert not recognizer.recognize_for_video(blank, 1).hand_landmarks
+            print('Model loaded; blank-frame inference passed.')
+            return
+
+        camera = cv2.VideoCapture(args.camera)
+        if not camera.isOpened():
+            raise RuntimeError('Cannot open webcam. Check camera permissions or try --camera 1.')
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 960)
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 540)
+
+        sim = Sim(args.operators)
+        scene = Scene(PANEL_W, PANEL_H)
+        stable = StableLabel(args.hold)
+        window = 'Gesture control demo'
+        cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+        prev_ms = -1
+        prev = time.monotonic()
+        try:
+            while True:
+                ok, frame = camera.read()
+                if not ok:
+                    raise RuntimeError('Webcam stopped. Close other camera apps and restart.')
+                frame = cv2.flip(frame, 1)
+                now = time.monotonic()
+                dt = min(0.05, now - prev)
+                prev = now
+                timestamp = max(prev_ms + 1, int(now * 1000))
+                prev_ms = timestamp
+
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                result = recognizer.recognize_for_video(
+                    mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), timestamp)
+
+                raw, score, hint = 'None', 0.0, ''
+                if result.gestures and result.gestures[0]:
+                    top = max(result.gestures[0], key=lambda c: c.score)
+                    if top.category_name in CANNED:
+                        if top.score >= args.threshold:
+                            raw, score = top.category_name, top.score
+                        else:
+                            hint = f'{FRIENDLY[top.category_name]}? {top.score:.0%}'
+
+                hands = [[(p.x, p.y) for p in h] for h in result.hand_landmarks]
+                sim.advance(raw, dt if dt > 0 else 1 / 60, now)
+
+                disp = FRIENDLY.get(raw, 'Unknown') if raw != 'None' else 'Unknown'
+                label, conf, prog = stable.update(disp, score, now)
+                panel = _webcam_panel(cv2, np, frame, hands, label, conf, prog, hint)
+                composite = np.hstack([panel, sim.render_scene(scene)])
+                cv2.imshow(window, composite)
+                if cv2.waitKey(1) & 0xFF in (27, ord('q')):
+                    break
+                if cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) < 1:
+                    break
+        finally:
+            camera.release()
+            cv2.destroyAllWindows()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--camera', type=int, default=0)
+    parser.add_argument('--threshold', type=float, default=0.5)
+    parser.add_argument('--hold', type=float, default=0.35)
+    parser.add_argument('--operators', type=int, default=4)
+    parser.add_argument('--demo', action='store_true', help='no webcam: scripted flight')
+    parser.add_argument('--check', action='store_true', help='load the model and exit')
+    parser.add_argument('--headless', action='store_true', help='with --demo: no window')
+    parser.add_argument('--out', default='', help='with --headless: save a frame here')
+    parser.add_argument('--seconds', type=float, default=14.0, help='--headless run length')
+    args = parser.parse_args()
+    if not 0 <= args.threshold <= 1 or args.hold <= 0:
+        parser.error('threshold must be 0..1 and hold must be positive')
+    if not 2 <= args.operators <= 8:
+        parser.error('operators must be 2..8')
+
+    if args.demo:
+        run_demo(args)
+    else:
+        run_live(args)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (RuntimeError, OSError, ImportError, ValueError, AssertionError) as exc:
+        raise SystemExit(f'Gesture control demo: {exc}') from exc

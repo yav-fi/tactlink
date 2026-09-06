@@ -915,6 +915,24 @@ export default function Home() {
             </div>
           </div>
           <div className="architecture-detail">
+            <div className="custom-training-story">
+              <Tag>CUSTOM MACHINE LEARNING</Tag>
+              <h3>A gesture vocabulary we can train.</h3>
+              <p>
+                We built a custom gesture-training pipeline and trained a model
+                on our own hand signals, demonstrating that the command
+                vocabulary can expand beyond preset gestures.
+              </p>
+              <p>
+                Record examples. Label the signals. Train the model. Connect
+                recognized gestures to commands. That makes the vocabulary
+                something we can develop around the people using it.
+              </p>
+              <p className="fine">
+                Demonstrated in desktop experiments. The current phone demo uses
+                a separate gesture-rule layer.
+              </p>
+            </div>
             <div className="detail-heading">
               <div>
                 <Tag>THE TECHNOLOGY BEHIND THE INTERACTION</Tag>
