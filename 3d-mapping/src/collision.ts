@@ -79,13 +79,20 @@ function detourAround(viewer: Cesium.Viewer, from: Cesium.Cartesian3, to: Cesium
 // the GPU, which stalls the frame it runs on. Probing one per animation frame
 // per drone is what makes flight look jagged while a parked drone looks smooth.
 const MIN_LOOKAHEAD_METERS = 4;
-const MAX_LOOKAHEAD_METERS = 30;
-// The whole corridor is swept by the ray, so a longer one costs no accuracy;
-// it only commits the drone further ahead of the last look at the map. Four
-// tenths of a second is still well inside the half-second corridor lifetime,
-// and it noticeably thins out the queries while skirting a long wall.
-const LOOKAHEAD_SECONDS = 0.4;
-const CORRIDOR_MAX_SECONDS = 0.5;
+const MAX_LOOKAHEAD_METERS = 45;
+// One building query costs tens of milliseconds: it renders an offscreen pick
+// pass over the whole photorealistic tileset and reads the result back from the
+// GPU. That is several whole frames, so every probe is a visible jolt, and the
+// old quarter-corridor re-probed about four times a second in a straight climb
+// — four jolts a second, which is the stutter you feel.
+//
+// The ray already sweeps the entire lookahead distance, so clearing a longer
+// corridor costs nothing in accuracy. It only commits the drone further ahead
+// of its last look at the map, and the corridor is still abandoned the moment
+// the drone turns out of it. This trades a bounded amount of staleness for
+// roughly a sixth of the probes.
+const LOOKAHEAD_SECONDS = 2.5;
+const CORRIDOR_MAX_SECONDS = 3;
 // Roughly 1.8 degrees, so drift across a full corridor stays inside the ray sweep.
 const SAME_HEADING_DOT = 0.9995;
 // A search that found no route is repeated only after the drone has actually
