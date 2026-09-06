@@ -199,3 +199,17 @@ body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !imp
 #phone-stop { width: 100%; margin-top: 12px; }
 .phone-mode .gesture-hud { pointer-events: none; }
 .phone-mode #command-form, .phone-mode #command-drawer, .phone-mode .dock-row, .phone-mode #command-suggestions { display: none !important; }
+
+.phone-view-controls { display: flex; gap: 6px; }
+.phone-view-controls button { padding: 7px 12px; }
+#phone-panel .phone-scale { color: #a4bac4; font-size: 12px; }
+#phone-height { font: 12px ui-monospace, monospace; color: #64edd0; }
+#phone-guide { position: absolute; top: 100px; left: 20px; width: 290px; max-height: calc(100vh - 200px); overflow-y: auto; padding: 16px; background: rgba(7,12,17,.93); border: 1px solid #3c5964; border-radius: 12px; z-index: 20; color: #e6f3f0; font: 12px/1.5 system-ui, sans-serif; }
+#phone-guide > strong { color: #64edd0; font-size: 14px; }
+#phone-guide p { color: #b7cbc7; }
+#phone-guide dl { margin: 0; }
+#phone-guide dl > div { padding: 9px 8px; border-top: 1px solid #25353c; border-radius: 4px; }
+#phone-guide dt { font-weight: 700; font-size: 13px; }
+#phone-guide dd { margin: 3px 0 0; color: #b7cbc7; }
+#phone-guide .active { background: #644714; border-color: #f2b134; }
+@media (max-width: 900px) { #phone-guide { top: auto; bottom: 90px; width: 260px; max-height: 30vh; } #phone-panel { width: 280px; } }

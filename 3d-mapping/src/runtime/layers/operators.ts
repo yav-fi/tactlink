@@ -19,7 +19,7 @@ import type { RuntimeOperator, RuntimeSnapshot } from "../types";
  * shared ENU conversion every other runtime layer uses.
  */
 
-export type OperatorOptions = { show: boolean; showControlLinks: boolean };
+export type OperatorOptions = { show: boolean; showControlLinks: boolean; humanModels: boolean };
 
 const ACTIVE = "#f2b134";      // commanding at least one drone
 const IDLE = "#8fa6bd";        // present, not currently in charge
@@ -31,6 +31,8 @@ const STALE_SECONDS = 1.5;     // marker dims once a phone stops reporting
 type Visual = {
   id: string;
   position: Cesium.Cartesian3;
+  ground: { x: number; y: number; z: number };
+  heading: number;
   facing: Cesium.Cartesian3[];
   links: Cesium.Cartesian3[];
   label: string;
@@ -44,7 +46,7 @@ type Visual = {
 export class OperatorLayer {
   private readonly visuals = new Map<string, Visual>();
   private readonly entities = new Map<string, Cesium.Entity[]>();
-  private options: OperatorOptions = { show: true, showControlLinks: true };
+  private options: OperatorOptions = { show: true, showControlLinks: true, humanModels: false };
 
   constructor(
     private readonly viewer: Cesium.Viewer,
@@ -75,6 +77,7 @@ export class OperatorLayer {
         visual = {
           id: operator.operator_id,
           position: new Cesium.Cartesian3(),
+          ground: { x: 0, y: 0, z: 0 }, heading: 0,
           facing: [],
           links: [],
           label: "",
@@ -99,6 +102,8 @@ export class OperatorLayer {
   }
 
   private updateOne(visual: Visual, operator: RuntimeOperator): void {
+    visual.ground = { ...operator.position };
+    visual.heading = operator.heading;
     // Lift the marker slightly so it sits on the lawn rather than inside it.
     this.frame.toFixedAt(operator.position, operator.position.z + 1.7, visual.position);
 
@@ -114,8 +119,8 @@ export class OperatorLayer {
     visual.facing = [
       this.frame.toFixedAt(operator.position, operator.position.z + 0.3),
       this.frame.toFixedAt({
-        x: operator.position.x + FACING_METRES * Math.cos(heading),
-        y: operator.position.y + FACING_METRES * Math.sin(heading),
+        x: operator.position.x + (this.options.humanModels ? 1.2 : FACING_METRES) * Math.cos(heading),
+        y: operator.position.y + (this.options.humanModels ? 1.2 : FACING_METRES) * Math.sin(heading),
         z: operator.position.z,
       }, operator.position.z + 0.3),
     ];
@@ -154,7 +159,7 @@ export class OperatorLayer {
         scale: 0.5,
         color: new Cesium.CallbackProperty(() => Cesium.Color.WHITE.withAlpha(alpha()), false),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        show: new Cesium.CallbackProperty(() => visual.visible, false),
+        show: new Cesium.CallbackProperty(() => visual.visible && !options().humanModels, false),
       },
       label: {
         text: new Cesium.CallbackProperty(() => visual.label, false),
@@ -166,8 +171,8 @@ export class OperatorLayer {
         showBackground: true,
         backgroundColor: Cesium.Color.fromCssColorString("#070c11").withAlpha(0.78),
         backgroundPadding: new Cesium.Cartesian2(8, 5),
-        pixelOffset: new Cesium.Cartesian2(0, 20),
-        verticalOrigin: Cesium.VerticalOrigin.TOP,
+        pixelOffset: new Cesium.CallbackProperty(() => new Cesium.Cartesian2(0, options().humanModels ? -12 : 20), false),
+        verticalOrigin: new Cesium.CallbackProperty(() => options().humanModels ? Cesium.VerticalOrigin.BOTTOM : Cesium.VerticalOrigin.TOP, false),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
         translucencyByDistance: new Cesium.NearFarScalar(3000, 1, 14000, 0),
         show: new Cesium.CallbackProperty(() => visual.visible, false),
@@ -184,7 +189,7 @@ export class OperatorLayer {
             () => Cesium.Color.fromCssColorString(visual.color).withAlpha(0.75 * alpha()), false,
           ),
         ),
-        clampToGround: true,
+        clampToGround: new Cesium.CallbackProperty(() => !options().humanModels, false),
         show: new Cesium.CallbackProperty(() => visual.visible, false),
       },
     });
@@ -206,7 +211,33 @@ export class OperatorLayer {
       },
     });
 
-    return [marker, facing, control];
+    // Metre-sized 3D figures: head, torso, arms and legs, aligned with the phone heading.
+    const parts = [
+      { name: "head", side: 0, z: 1.57, radii: [0.16, 0.16, 0.18], skin: true },
+      { name: "body", side: 0, z: 1.12, radii: [0.16, 0.25, 0.34], skin: false },
+      { name: "arm-left", side: -0.31, z: 1.08, radii: [0.09, 0.09, 0.32], skin: false },
+      { name: "arm-right", side: 0.31, z: 1.08, radii: [0.09, 0.09, 0.32], skin: false },
+      { name: "leg-left", side: -0.13, z: 0.43, radii: [0.105, 0.105, 0.43], skin: false },
+      { name: "leg-right", side: 0.13, z: 0.43, radii: [0.105, 0.105, 0.43], skin: false },
+    ];
+    const humans = parts.map(part => this.viewer.entities.add({
+      id: `runtime-human-${visual.id}-${part.name}`,
+      position: new Cesium.CallbackPositionProperty(() => this.frame.toFixed({
+        x: visual.ground.x - Math.sin(visual.heading) * part.side,
+        y: visual.ground.y + Math.cos(visual.heading) * part.side,
+        z: visual.ground.z + part.z,
+      }), false),
+      orientation: new Cesium.CallbackProperty(() => Cesium.Transforms.headingPitchRollQuaternion(
+        this.frame.toFixed(visual.ground), new Cesium.HeadingPitchRoll(-visual.heading, 0, 0)), false),
+      ellipsoid: {
+        radii: new Cesium.Cartesian3(...part.radii),
+        material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() =>
+          Cesium.Color.fromCssColorString(part.skin ? "#dfb99a" : visual.color).withAlpha(alpha()), false)),
+        stackPartitions: 12, slicePartitions: 12,
+        show: new Cesium.CallbackProperty(() => visual.visible && options().humanModels, false),
+      },
+    }));
+    return [marker, facing, control, ...humans];
   }
 
   clear(): void {

@@ -34,6 +34,14 @@ TactLink brings together six hackathon workstreams:
   iPhones appear as people on the map and the nearest one commands each drone
   (`simulation/operators.py`, `server/phone_listener.py`).
 
+## Close-up phone demo
+
+Open `./start` at `?mode=local`. The phone scene uses real metre offsets: a 1 m grid, 1.75 m human figures, and a drone scaled to a 0.8 m spinning-rotor envelope. The camera frames the group and drone at a close distance for 1–10 m tests. Use **Frame group** to restore that view after dragging; +/− changes zoom. Drone models are not enlarged to a minimum screen size in this mode.
+
+The drone begins hovering 3.5 m above the scene ground. Movement stays between 2.5 m and 8 m above the highest positioned person's base; thumbs-down descends to that floor. Pointing with one index finger orbits at a target radius of 2 m. The visible **Gestures → Drone** guide lists exact finger poses, speeds, 0.4 s hold behavior, and which actions repeat. The gold person is the current controller. Release the pose to stop.
+
+These are chosen demo model dimensions, not measurements of a particular person or drone. UWB relative positions retain their measured metre separation; the two-phone axis and three-phone flat assumptions still apply. Five-phone shape height is relative group geometry, not measured gravity altitude. The legacy runtime controls documented below are separate from this browser-owned phone demo.
+
 ## One-command demo
 
 Run this from the repository root:

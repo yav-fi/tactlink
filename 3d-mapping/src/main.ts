@@ -580,7 +580,7 @@ async function groundStartingHome(): Promise<void> {
   }
   // The fallback globe is the zero-height ellipsoid, including before its tiles load.
   if (!Number.isFinite(height) && viewer.scene.globe.show) height = 0;
-  if (Number.isFinite(height)) home.altitude = height! + 0.62;
+  if (Number.isFinite(height)) home.altitude = height! + (phoneMode ? 0 : 0.62);
 }
 
 document.querySelector<HTMLButtonElement>("#run-mission")!.addEventListener("click", () => {
@@ -1010,7 +1010,7 @@ viewer.canvas.addEventListener("pointerdown", () => viewer.canvas.focus());
 
 if (!runtimeMode) void worldReady.then(async () => {
   await groundStartingHome();
-  drone = fleet.deploy(home);
+  drone = fleet.deploy(phoneMode ? { ...home, altitude: home.altitude + 3.5 } : home);
   selectedIds.add(drone.id);
   refreshFleet();
   if (phoneMode) {
@@ -1048,7 +1048,7 @@ let stillSeconds = 0;
 const previousSubjects = new Map<string, Cesium.Cartesian3>();
 
 function updateAutomaticCamera(deltaSeconds: number): void {
-  if (runtimeMode || cameraMode !== "auto" || deploying || (controllingDrone && pilotCameraMode === "first")) return;
+  if (runtimeMode || phoneMode || cameraMode !== "auto" || deploying || (controllingDrone && pilotCameraMode === "first")) return;
   const subjects = [...fleet.drones.values()].map(member => ({ id: member.id, position: member.cameraPosition }));
   if (!subjects.length) {
     orbitCamera.heading += deltaSeconds * 0.08;

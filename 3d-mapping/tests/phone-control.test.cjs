@@ -8,7 +8,7 @@ function loadSource(name) {
   const source = fs.readFileSync(path.resolve(__dirname, "../src", `${name}.ts`), "utf8");
   const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
   const module = { exports: {} };
-  new Function("require", "module", "exports", code)(id => id.startsWith("./") ? loadSource(id.slice(2)) : require(id), module, module.exports);
+  new Function("require", "module", "exports", code)(id => id.startsWith(".") ? loadSource(path.join(path.dirname(name), id)) : require(id), module, module.exports);
   return module.exports;
 }
 const { placePhones, PhoneControl } = loadSource("phone-control");
@@ -114,4 +114,64 @@ test("two-phone assumed-axis positions preserve the one distance and enter gestu
   control.update(placed, { x: 0, y: 0 }, 0);
   assert.equal(control.update(placed, { x: 0, y: 0 }, 400).action, "takeoff");
   assert.equal(placePhones([...phones, phone(2, { flat: true })], alignment).length, 2);
+});
+
+
+test("metre-scale people keep measured spacing and stand 1.75 m tall", () => {
+  const { GeoFrame } = loadSource("runtime/frame");
+  const { OperatorLayer } = loadSource("runtime/layers/operators");
+  const frame = new GeoFrame(); frame.update(38.889, -77.036, 80);
+  const viewer = { entities: new Cesium.EntityCollection() };
+  const layer = new OperatorLayer(viewer, frame, () => undefined);
+  layer.setOptions({ humanModels: true });
+  const operators = placePhones([phone(0, { flat: true }), phone(1, { flat: true })], alignment);
+  layer.update({ operators });
+  const time = Cesium.JulianDate.now();
+  const head = viewer.entities.getById("runtime-human-0-head");
+  const leg = viewer.entities.getById("runtime-human-0-leg-left");
+  const headZ = frame.toLocal(head.position.getValue(time)).z + head.ellipsoid.radii.getValue(time).z;
+  const footZ = frame.toLocal(leg.position.getValue(time)).z - leg.ellipsoid.radii.getValue(time).z;
+  assert(Math.abs(headZ - 1.75) < 1e-6);
+  assert(Math.abs(footZ) < 1e-6);
+  assert(Math.abs(Cesium.Cartesian3.distance(layer.positionOf("0"), layer.positionOf("1")) - 3) < 1e-6);
+  assert.equal(viewer.entities.getById("runtime-operator-0").billboard.show.getValue(time), false);
+  layer.clear(); assert.equal(viewer.entities.values.length, 0);
+});
+
+test("phone flight never descends through human models or exceeds the hover band", () => {
+  const { phoneFlightBand, constrainPhoneHeight } = loadSource("phone-flight");
+  const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
+  const drone = new Fleet({ entities: new Cesium.EntityCollection() }).deploy({ ...home, altitude: 83 });
+  const [owner] = placePhones([phone(0)], alignment);
+  const band = phoneFlightBand([{ position: { x: 0, y: 0, z: 1 } }]);
+  for (let i = 0; i < 240; i++) {
+    applyPhoneAction(drone, "land", owner, home, { x: 0, y: 0, z: drone.snapshot().altitude - home.altitude }, band);
+    drone.update(1 / 60); constrainPhoneHeight(drone, home, band);
+    assert(drone.snapshot().altitude >= home.altitude + band.floor);
+  }
+  drone.applyManualMove({ ...home, altitude: 100 });
+  constrainPhoneHeight(drone, home, band);
+  assert.equal(drone.snapshot().altitude, home.altitude + band.ceiling);
+});
+
+test("close camera and drone model use physical metres without screen-size enlargement", () => {
+  const { GeoFrame } = loadSource("runtime/frame");
+  const { startPhoneScene, phoneCameraFrame, PHONE_DRONE_SCALE } = loadSource("phone-scene");
+  const frame = new GeoFrame(); frame.update(38.889, -77.036, 80);
+  const render = new Cesium.Event();
+  let cameraRange;
+  const viewer = { entities: new Cesium.EntityCollection(), scene: { preRender: render },
+    canvas: { addEventListener() {}, removeEventListener() {} },
+    camera: { lookAt(center, offset) { cameraRange = offset.range; }, lookAtTransform() {} } };
+  const drone = new Fleet(viewer).deploy({ latitude: 38.889, longitude: -77.036, altitude: 83.5 });
+  const scene = startPhoneScene(viewer, drone, frame);
+  const model = viewer.entities.getById(drone.id).model;
+  const now = Cesium.JulianDate.now();
+  assert.equal(model.minimumPixelSize.getValue(now), 0);
+  assert.equal(model.scale.getValue(now), PHONE_DRONE_SCALE);
+  assert(Math.abs(PHONE_DRONE_SCALE * (1.48 + 2 * Math.hypot(0.52, 0.035)) - 0.8) < 1e-9);
+  const points = [frame.toFixed({ x: 0, y: 0, z: 0 }), frame.toFixed({ x: 0, y: 5, z: 1.75 }), drone.cameraPosition];
+  assert(phoneCameraFrame(points).range >= 12 && phoneCameraFrame(points).range < 20);
+  render.raiseEvent(); assert(cameraRange < 20);
+  scene.dispose(); assert.equal(render.numberOfListeners, 0);
 });
