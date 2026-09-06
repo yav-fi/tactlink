@@ -1,10 +1,9 @@
-"""Gesture debouncing, the finger-pointing vector, and the two-finger wiper.
+"""Gesture debouncing and the finger-pointing helpers for the control demo.
 
 No camera or MediaPipe here - this takes a gesture *label* per frame plus 21
-hand landmarks, and turns deliberate poses into commands: a held canned gesture
-(``GestureGate``), a steady sideways point (used by ``flight.Operators`` to aim
-a hand-off), and a vertical<->horizontal "wiper" swing (``FingerSwingDetector``)
-that dashes the drone left or right.
+hand landmarks and turns deliberate poses into commands: a held canned gesture
+(``GestureGate``) and an index finger held pointing left/right (``SidePointDash``
+-> dash the drone that way).
 """
 
 from __future__ import annotations
@@ -19,13 +18,13 @@ ACTIONS = {
     "Open_Palm": "halt",          # cancel the routine, hover in place
     "Pointing_Up": "orbit",       # circle the controlling operator (toggle)
     "ILoveYou": "return",         # fly back to the controlling operator
-    "Victory": "handoff_random",  # hold ~2 s -> hand the drone to a random operator
+    "Victory": "handoff_random",  # hand the drone to a random other operator
 }
 
 HOLD_SEC = 0.40
-RELEASE_SEC = 0.20
-GAP_SEC = 0.45             # a recognizer dropout shorter than this does not break a hold
-HOLDS = {"Victory": 2.0}   # per-gesture hold overrides
+RELEASE_SEC = 0.25
+GAP_SEC = 0.5              # a recognizer dropout shorter than this does not break a hold
+HOLDS = {"Victory": 1.5}   # per-gesture hold overrides
 
 
 class GestureGate:
@@ -80,7 +79,7 @@ class GestureGate:
 class Hand:
     present: bool = False
     fingers: tuple = (False,) * 5      # thumb, index, middle, ring, pinky extended?
-    point_dir: tuple = (0.0, 0.0)      # index+middle direction, image space (x right, y down)
+    point_dir: tuple = (0.0, 0.0)      # index (+ middle) direction, image space (x right, y down)
 
     @property
     def two_fingers(self) -> bool:
@@ -93,101 +92,75 @@ def _d(a, b) -> float:
 
 
 def hand_from_landmarks(pts) -> Hand:
-    """21 (x, y) normalized landmarks -> :class:`Hand`."""
+    """21 (x, y) normalized landmarks -> :class:`Hand`. A finger counts as
+    extended when its tip is farther from the wrist than its middle joint."""
     if not pts or len(pts) < 21:
         return Hand(present=False)
-    wrist = pts[0]
+    w = pts[0]
 
-    def extended(tip, pip):
-        return _d(pts[tip], wrist) > _d(pts[pip], wrist) * 1.06
+    def ext(tip, pip):
+        return _d(pts[tip], w) > _d(pts[pip], w) * 1.02
 
-    thumb = _d(pts[4], pts[0]) > _d(pts[3], pts[0]) * 1.10
-    fingers = (thumb, extended(8, 6), extended(12, 10),
-               extended(16, 14), extended(20, 18))
+    thumb = _d(pts[4], w) > _d(pts[2], w) * 1.05
+    fingers = (thumb, ext(8, 6), ext(12, 10), ext(16, 14), ext(20, 18))
 
-    dx = (pts[8][0] - pts[5][0]) + (pts[12][0] - pts[9][0])
-    dy = (pts[8][1] - pts[5][1]) + (pts[12][1] - pts[9][1])
+    # index direction, with the middle finger folded in only if it's also out
+    dx = pts[8][0] - pts[5][0]
+    dy = pts[8][1] - pts[5][1]
+    if fingers[2]:
+        dx += pts[12][0] - pts[9][0]
+        dy += pts[12][1] - pts[9][1]
     n = math.hypot(dx, dy)
     point_dir = (dx / n, dy / n) if n > 1e-6 else (0.0, 0.0)
     return Hand(present=True, fingers=fingers, point_dir=point_dir)
 
 
-# --- two-finger wiper ----------------------------------------------------
+# --- point-to-dash ------------------------------------------------------
 
-_WINDOW_SEC = 4.0
-_STABLE_SEC = 0.12
-_LOST_SEC = 0.6
-_V_MAX_DEG = 35.0
-_H_MIN_DEG = 55.0
-_H_MAX_DEG = 125.0
-_PATTERN = ["V", "H", "V", "H"]
-_POINT_HORIZONTAL = 0.5
+_DASH_HOLD = 0.45      # hold the sideways point this long to dash
+_DASH_RELEASE = 0.45   # drop it this long before it can dash again
+_DASH_MIN_DX = 0.45    # |horizontal| of the point that counts as "sideways"
 
 
-def orientation(point_dir) -> str | None:
-    dx, dy = point_dir
-    if dx == 0.0 and dy == 0.0:
-        return None
-    angle = abs(math.degrees(math.atan2(dx, -dy)))    # 0 = up, 90 = horizontal
-    if angle <= _V_MAX_DEG:
-        return "V"
-    if _H_MIN_DEG <= angle <= _H_MAX_DEG:
-        return "H"
-    return None
+class SidePointDash:
+    """Point your index finger clearly left or right and hold ~0.45 s -> the
+    drone dashes that way. Held, not swung - easy to do on a webcam. Pointing
+    up (orbit) or a Victory sign point up, so they never trigger this."""
 
-
-def dash_from_point(point_dir) -> str | None:
-    """Which way the fingers point on the last horizontal -> a dash command.
-    Mirrored webcam: +x (your right) = the drone's +x (scene right)."""
-    dx, dy = point_dir
-    if abs(dx) >= _POINT_HORIZONTAL and abs(dx) >= abs(dy):
-        return "dash_east" if dx > 0 else "dash_west"
-    return None
-
-
-class FingerSwingDetector:
-    """Hold index+middle out and swing vertical->horizontal->vertical->horizontal
-    within a few seconds -> a dash the way the fingers point on the last swing."""
-
-    def __init__(self, window: float = _WINDOW_SEC):
-        self._window = window
-        self._orient = None
-        self._raw = None
-        self._raw_since = 0.0
-        self._history: list = []
-        self._last_seen = -1e9
+    def __init__(self):
+        self._dir = None
+        self._since = 0.0
+        self._seen = -1e9
+        self._fired = None
+        self._rest_since = None
 
     def update(self, hand: Hand | None, now: float):
-        if hand is None or not hand.present or not hand.two_fingers:
-            if now - self._last_seen > _LOST_SEC:
-                self._orient = self._raw = None
-                self._history.clear()
-            return None
-        self._last_seen = now
+        """Returns ``(command | None, hold_progress 0..1)``."""
+        want = None
+        if hand is not None and hand.present:
+            f = hand.fingers
+            index_out = f[1] and not f[3] and not f[4]     # index up, ring + pinky down
+            dx, dy = hand.point_dir
+            if index_out and abs(dx) >= _DASH_MIN_DX and abs(dx) >= abs(dy) * 1.2:
+                want = "dash_east" if dx > 0 else "dash_west"
 
-        raw = orientation(hand.point_dir)
-        if raw is None:
-            return None
-        if raw != self._raw:
-            self._raw, self._raw_since = raw, now
-        if raw == self._orient or now - self._raw_since < _STABLE_SEC:
-            return None
+        if want is None:
+            if now - self._seen > 0.35:
+                self._dir = None
+            if self._rest_since is None:
+                self._rest_since = now
+            if now - self._rest_since >= _DASH_RELEASE:
+                self._fired = None
+            return None, 0.0
 
-        self._orient = raw
-        self._history.append((raw, now))
-        self._history = [(o, t) for o, t in self._history if now - t <= self._window]
-
-        if len(self._history) >= 4 and [o for o, _ in self._history[-4:]] == _PATTERN:
-            self._history.clear()
-            self._orient = self._raw = None
-            return dash_from_point(hand.point_dir)
-        return None
-
-    @property
-    def active(self) -> bool:
-        return bool(self._history)
-
-    @property
-    def progress(self) -> str:
-        seq = [o for o, _ in self._history[-4:]]
-        return ">".join(seq) + (">.." if 0 < len(seq) < 4 else "")
+        self._rest_since = None
+        self._seen = now
+        if want != self._dir:
+            self._dir, self._since = want, now
+        if want == self._fired:
+            return None, 1.0
+        progress = min(1.0, (now - self._since) / _DASH_HOLD)
+        if progress >= 1.0:
+            self._fired = want
+            return want, 1.0
+        return None, progress

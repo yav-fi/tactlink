@@ -2,8 +2,8 @@
 
 Operator 1 flies one drone with webcam hand signals among **N static operators**
 (4 by default, scattered at random through the scene each run), hands the drone
-between them, and dashes it left/right. One window: the webcam with the tracked
-hand on the left, a 3D view of the operators and the drone on the right.
+to a random operator, and dashes it left/right. One window: the webcam with the
+tracked hand on the left, a 3D view of the operators and the drone on the right.
 
 Standalone: this folder imports nothing from `src/`. It runs on the repo's
 dependencies (`mediapipe`, `opencv`, `numpy` from `requirements.txt`), so no
@@ -31,28 +31,30 @@ Escape quits.
 | Open palm | ~0.4 s | Halt — cancel the current move and hover in place |
 | Point up (index finger) | ~0.4 s | Orbit the controlling operator; point up again to stop |
 | I-love-you sign | ~0.4 s | Fly back to the controlling operator and hover |
-| **Victory sign** | **~2 s** | **Hand off** — send the drone to a random other operator |
-| **Two-finger wiper** | — | **Dash** the drone left/right |
+| **Victory sign** | **~1.5 s** | **Hand off** — send the drone to a random other operator |
+| **Point index left / right** | **~0.5 s** | **Dash** the drone that way ~5 m |
 
-**Hand-off.** Hold a Victory sign ~2 s — the bar at the bottom of the scene
+**Hand-off.** Hold a Victory sign ~1.5 s — the bar at the bottom of the scene
 fills — and the drone flies to a random other operator (`CTRL -> OPn`, gold).
 Only operator 1 has a camera; a hand-off just moves which operator the drone
 orbits, returns to, and hovers above.
 
-**Wiper dash.** Hold index + middle out and swing them vertical → horizontal →
-vertical → horizontal within a few seconds. On the last swing the drone dashes
-~5 m the way the fingers point and holds there (it does not spring back).
+**Dash.** Point your index finger clearly to your left or right (roughly
+horizontal) and hold ~0.5 s — the drone dashes that way and holds there. Point
+*up* is orbit, so it never triggers a dash.
 
 The drone's nose always turns to face the nearest operator. Brief recognizer
-dropouts don't reset a hold. If the webcam panel shows e.g. `Victory? 42%`, the
-model sees the pose but below the accept threshold — hold it more squarely, or
-pass `--threshold 0.4`.
+dropouts don't reset a hold. The webcam panel always shows what the model sees
+(`model: Victory 71%   fingers -IM--`); if a gesture won't fire, check that line
+or run with **`--diag`** to print it every frame. `--threshold 0.35` is more
+forgiving.
 
 ## Options
 
 ```
 --camera N        webcam index (default 0)
---threshold F     min model score to accept a gesture (default 0.5)
+--threshold F     min model score to accept a gesture (default 0.45)
+--diag            print what the recognizer sees each frame
 --hold F          settle time for the on-screen label (default 0.35)
 --operators N     number of static operators, 2..8 (default 4)
 --demo            scripted flight, no webcam
@@ -64,7 +66,7 @@ pass `--threshold 0.4`.
 | File | Role |
 | --- | --- |
 | `gesture_demo.py` | entry point: webcam loop, MediaPipe recognizer, compositing, `--demo` |
-| `gestures.py` | `GestureGate` (dropout-tolerant hold), `FingerSwingDetector` (wiper), landmark helpers |
+| `gestures.py` | `GestureGate` (dropout-tolerant hold), `SidePointDash`, landmark helpers |
 | `flight.py` | `Quad` physics, `Operators` (random scatter), `Autopilot` |
 | `scene.py` | pinhole-camera 3D render of the grid, operators, drone + HUD |
 | `test_gesture_demo.py` | `python -m unittest` from this folder — 13 tests |

@@ -5,7 +5,7 @@ import numpy as np
 
 from flight import Autopilot, Operators, Quad
 from gesture_demo import StableLabel
-from gestures import FingerSwingDetector, GestureGate, Hand, hand_from_landmarks
+from gestures import GestureGate, Hand, SidePointDash, hand_from_landmarks
 
 
 def _row(*xs):
@@ -16,10 +16,9 @@ def _row(*xs):
     return ops
 
 
-def _point(dx, dy):
-    n = math.hypot(dx, dy)
-    return Hand(present=True, fingers=(False, True, True, False, False),
-                point_dir=(dx / n, dy / n))
+def _point(dx, dy, fingers=(False, True, False, False, False)):
+    n = math.hypot(dx, dy) or 1.0
+    return Hand(present=True, fingers=fingers, point_dir=(dx / n, dy / n))
 
 
 class SettlingTests(unittest.TestCase):
@@ -37,23 +36,23 @@ class GestureGateTests(unittest.TestCase):
         self.assertEqual(gate.update('Thumb_Up', 0.45)[0], 'takeoff')
         self.assertIsNone(gate.update('Thumb_Up', 0.9)[0])
 
-    def test_victory_needs_a_long_hold(self):
-        gate = GestureGate(holds={'Victory': 2.0})
+    def test_victory_hold_time(self):
+        gate = GestureGate(holds={'Victory': 1.5})
         t = 0.0
-        while t < 1.9:
+        while t < 1.4:
             self.assertIsNone(gate.update('Victory', t)[0])
             t += 0.1
-        self.assertEqual(gate.update('Victory', 2.05)[0], 'handoff_random')
+        self.assertEqual(gate.update('Victory', 1.55)[0], 'handoff_random')
 
     def test_brief_recognizer_dropout_does_not_reset_the_hold(self):
-        gate = GestureGate(holds={'Victory': 2.0}, gap=0.45)
+        gate = GestureGate(holds={'Victory': 1.5}, gap=0.5)
         fired, t = None, 0.0
         while fired is None and t < 3.0:
             label = 'None' if (round(t, 1) % 0.5 == 0.0 and t > 0) else 'Victory'
             fired, _, _ = gate.update(label, t)
             t += 0.1
         self.assertEqual(fired, 'handoff_random')
-        self.assertLess(t, 2.8)
+        self.assertLess(t, 2.3)
 
     def test_fist_does_nothing(self):
         gate = GestureGate()
@@ -61,29 +60,28 @@ class GestureGateTests(unittest.TestCase):
             self.assertIsNone(gate.update('Closed_Fist', t * 0.2)[0])
 
 
-class WiperTests(unittest.TestCase):
-    def _swing(self, order):
-        sw = FingerSwingDetector()
-        t, fired = 0.0, None
-        for phase in order:
-            pd = (0.05, -1.0) if phase == 'V' else (1.0, 0.05) if phase == 'Hr' else (-1.0, 0.05)
-            for _ in range(6):
-                t += 0.05
-                fired = sw.update(_point(*pd), t) or fired
+class SidePointDashTests(unittest.TestCase):
+    def _hold(self, dx, dy, seconds=0.7, fingers=(False, True, False, False, False)):
+        d = SidePointDash()
+        fired, t = None, 0.0
+        while fired is None and t < seconds:
+            t += 0.05
+            fired, _ = d.update(_point(dx, dy, fingers), t)
         return fired
 
-    def test_full_swing_dashes_the_way_the_fingers_point(self):
-        self.assertEqual(self._swing(['V', 'Hr', 'V', 'Hr']), 'dash_east')
-        self.assertEqual(self._swing(['V', 'Hl', 'V', 'Hl']), 'dash_west')
+    def test_hold_index_right_or_left_dashes(self):
+        self.assertEqual(self._hold(1.0, 0.05), 'dash_east')
+        self.assertEqual(self._hold(-1.0, 0.05), 'dash_west')
 
-    def test_partial_swing_does_not_fire(self):
-        self.assertIsNone(self._swing(['V', 'Hr', 'V']))
+    def test_pointing_up_or_victory_up_never_dashes(self):
+        self.assertIsNone(self._hold(0.05, -1.0))                       # index up
+        self.assertIsNone(self._hold(0.05, -1.0, fingers=(False, True, True, False, False)))  # V up
 
-    def test_one_finger_point_is_ignored(self):
-        sw = FingerSwingDetector()
-        one = Hand(present=True, fingers=(False, True, False, False, False), point_dir=(1.0, 0.0))
-        for k in range(40):
-            self.assertIsNone(sw.update(one, k * 0.05))
+    def test_needs_the_hold(self):
+        d = SidePointDash()
+        self.assertIsNone(d.update(_point(1.0, 0.0), 0.0)[0])
+        self.assertIsNone(d.update(_point(1.0, 0.0), 0.2)[0])           # not held long enough
+        self.assertGreater(d.update(_point(1.0, 0.0), 0.3)[1], 0.5)     # progress rising
 
 
 class DashTests(unittest.TestCase):

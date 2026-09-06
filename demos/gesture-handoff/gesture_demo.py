@@ -7,15 +7,13 @@ other operator by holding a Victory sign.
     python demos/gesture-handoff/gesture_demo.py --check    # load the model and exit
 
 Gestures (hold ~0.4 s): thumbs up = take off / climb, thumbs down = land,
-open palm = halt, point up = orbit the controlling operator, I-love-you =
-return to them.
+open palm = halt, point up = orbit, I-love-you = return. Hold a Victory sign
+~1.5 s to hand the drone to a random operator. Point your index finger clearly
+left or right and hold ~0.5 s to dash the drone that way.
 
-Hold a Victory sign ~2 s to hand the drone to a random other operator. Two-finger
-"wiper" - swing index+middle vertical<->horizontal<->vertical<->horizontal -
-dashes the drone left or right the way the fingers point.
-
-Runs on the repo's deps (mediapipe / opencv / numpy); imports nothing from src/.
-Recognition is local; webcam frames are neither recorded nor uploaded.
+``--diag`` prints what the recognizer sees each frame. Runs on the repo's deps
+(mediapipe / opencv / numpy); imports nothing from src/. Recognition is local;
+webcam frames are neither recorded nor uploaded.
 """
 
 from __future__ import annotations
@@ -64,15 +62,15 @@ class Sim:
 
     def __init__(self, n_operators=4, seed=None):
         from flight import Autopilot, Operators, Quad
-        from gestures import FingerSwingDetector, GestureGate
+        from gestures import GestureGate, SidePointDash
 
         self.ops = Operators(n_operators, seed=seed)
         self.quad = Quad(self.ops.anchor_pos())
         self.pilot = Autopilot(self.ops)
         self.gate = GestureGate()
-        self.swing = FingerSwingDetector()
+        self.dash = SidePointDash()
         self.hud = {'mode': 'idle', 'gesture': 'None', 'progress': 0.0,
-                    'note': '', 'swing': ''}
+                    'note': '', 'dash': 0.0}
         self._note_until = 0.0
 
     def _note(self, text, now):
@@ -81,13 +79,12 @@ class Sim:
             self._note_until = now + 2.5
 
     def advance(self, raw_label, hand, dt, now):
-        # Two-finger wiper -> dash. While a swing is in progress, don't let a
-        # transient Victory read (2 fingers up) start the hand-off timer.
-        dash = self.swing.update(hand, now)
+        # Index finger held pointing left/right -> dash. It points sideways;
+        # Victory / point-up point up, so the two never collide.
+        dash, dash_prog = self.dash.update(hand, now)
         if dash:
             self._note(self.pilot.command(dash, self.quad, now), now)
-        gate_label = 'None' if (raw_label == 'Victory' and self.swing.active) else raw_label
-        command, progress, held = self.gate.update(gate_label, now)
+        command, progress, held = self.gate.update(raw_label, now)
         if command:
             self._note(self.pilot.command(command, self.quad, now), now)
 
@@ -98,7 +95,7 @@ class Sim:
         self.hud['mode'] = self.pilot.mode
         self.hud['gesture'] = FRIENDLY.get(held, held if held != 'None' else 'None')
         self.hud['progress'] = progress
-        self.hud['swing'] = self.swing.progress if self.swing.active else ''
+        self.hud['dash'] = dash_prog
 
     def render_scene(self, scene):
         return scene.render(self.quad, self.ops, self.hud)
@@ -156,9 +153,9 @@ def _webcam_panel(cv2, np, frame, hands, stable_label, score, progress, raw_hint
     if stable_label not in ('Unknown', 'Settling...'):
         cv2.putText(panel, f'{score:.0%}', (PANEL_W - 90, PANEL_H - 28),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (220, 220, 220), 1, cv2.LINE_AA)
-    elif raw_hint:                              # what the model sees below threshold
-        cv2.putText(panel, raw_hint, (PANEL_W - 200, PANEL_H - 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (110, 110, 110), 1, cv2.LINE_AA)
+    if raw_hint:                                # what the model sees, every frame
+        cv2.putText(panel, raw_hint, (14, 24), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5, (150, 200, 255), 1, cv2.LINE_AA)
     cv2.rectangle(panel, (14, PANEL_H - 16), (PANEL_W - 14, PANEL_H - 10), (60, 60, 60), -1)
     cv2.rectangle(panel, (14, PANEL_H - 16),
                   (14 + int((PANEL_W - 28) * progress), PANEL_H - 10),
@@ -277,22 +274,27 @@ def run_live(args):
                 result = recognizer.recognize_for_video(
                     mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), timestamp)
 
-                raw, score, hint = 'None', 0.0, ''
+                raw, score, top_name, top_score = 'None', 0.0, '-', 0.0
                 if result.gestures and result.gestures[0]:
                     top = max(result.gestures[0], key=lambda c: c.score)
-                    if top.category_name in CANNED:
-                        if top.score >= args.threshold:
-                            raw, score = top.category_name, top.score
-                        else:
-                            hint = f'{FRIENDLY[top.category_name]}? {top.score:.0%}'
+                    top_name, top_score = top.category_name, top.score
+                    if top.category_name in CANNED and top.score >= args.threshold:
+                        raw, score = top.category_name, top.score
 
                 hands = [[(p.x, p.y) for p in h] for h in result.hand_landmarks]
                 hand = hand_from_landmarks(hands[0]) if hands else None
                 sim.advance(raw, hand, dt if dt > 0 else 1 / 60, now)
 
+                fs = ''.join('TIMRP'[k] if hand and hand.fingers[k] else '-'
+                             for k in range(5)) if hand else '-----'
+                readout = f'model: {top_name} {top_score:.0%}   fingers {fs}'
+                if args.diag and int(now * 4) != int((now - dt) * 4):
+                    pd = hand.point_dir if hand else (0, 0)
+                    print(f'{readout}   point ({pd[0]:+.2f},{pd[1]:+.2f})', flush=True)
+
                 disp = FRIENDLY.get(raw, 'Unknown') if raw != 'None' else 'Unknown'
                 label, conf, prog = stable.update(disp, score, now)
-                panel = _webcam_panel(cv2, np, frame, hands, label, conf, prog, hint)
+                panel = _webcam_panel(cv2, np, frame, hands, label, conf, prog, readout)
                 composite = np.hstack([panel, sim.render_scene(scene)])
                 cv2.imshow(window, composite)
                 if cv2.waitKey(1) & 0xFF in (27, ord('q')):
@@ -308,7 +310,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--camera', type=int, default=0)
-    parser.add_argument('--threshold', type=float, default=0.5)
+    parser.add_argument('--threshold', type=float, default=0.45)
+    parser.add_argument('--diag', action='store_true',
+                        help='print what the recognizer sees each frame')
     parser.add_argument('--hold', type=float, default=0.35)
     parser.add_argument('--operators', type=int, default=4)
     parser.add_argument('--demo', action='store_true', help='no webcam: scripted flight')
