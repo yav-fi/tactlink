@@ -97,31 +97,3 @@ def test_control_failure_is_simulated_without_stopping_api() -> None:
         state = client.get("/api/state").json()
         assert state["control_available"] is False
         assert state["running"] is True
-
-
-def test_gesture_bridge_contract_numbers_events_and_reports_disconnect() -> None:
-    app = create_app(engine_for_test(), start_runner=False)
-    store = app.state.gesture_store
-    with TestClient(app) as client:
-        assert client.get("/api/gesture").json()["connected"] is False
-        response = client.post(
-            "/api/gesture",
-            json={
-                "present": True,
-                "gesture": "Thumb_Up",
-                "score": 0.94,
-                "source": "canned",
-                "hold_progress": 1,
-                "events": ["takeoff"],
-            },
-        )
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["connected"] is True
-        assert payload["gesture"] == "Thumb_Up"
-        assert payload["events"] == [{"sequence": 1, "action": "takeoff"}]
-        store._last_update -= store.disconnect_seconds + 0.1
-        disconnected = client.get("/api/gesture").json()
-        assert disconnected["connected"] is False
-        assert disconnected["gesture"] == "None"
-        assert disconnected["events"] == payload["events"]

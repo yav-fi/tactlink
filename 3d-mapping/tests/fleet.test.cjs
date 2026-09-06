@@ -23,7 +23,35 @@ const { parseCommandInput, parseCommandSequence } = loadSource("command-console"
 const { compileMissionSequence } = loadSource("mission-sequence");
 const { resolveLandmark } = loadSource("landmarks");
 const { MOTION_TRACE_LIFETIME_MS, motionTraceAlpha } = loadSource("motion-trace");
+const { GestureHoldInterpreter } = loadSource("gesture-hold");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
+
+test("browser gestures fire once after a deliberate hold and re-arm after release", () => {
+  const gestures = new GestureHoldInterpreter();
+  assert.deepEqual(gestures.update("Thumb_Up", 0), { progress: 0 });
+  assert.deepEqual(gestures.update("Thumb_Up", 200), { progress: 0.5 });
+  assert.deepEqual(gestures.update("Thumb_Up", 400), { progress: 1, action: "takeoff" });
+  assert.deepEqual(gestures.update("Thumb_Up", 800), { progress: 0 });
+
+  gestures.update("None", 900);
+  gestures.update("None", 1050);
+  gestures.update("Thumb_Up", 1100);
+  assert.equal(gestures.update("Thumb_Up", 1500).action, "takeoff");
+});
+
+test("browser canned gestures map to the primary flight actions", () => {
+  const expected = {
+    Thumb_Down: "land",
+    Pointing_Up: "orbit",
+    ILoveYou: "return_home",
+    Open_Palm: "halt",
+  };
+  for (const [gesture, action] of Object.entries(expected)) {
+    const interpreter = new GestureHoldInterpreter();
+    interpreter.update(gesture, 0);
+    assert.equal(interpreter.update(gesture, 400).action, action);
+  }
+});
 
 test("command bar understands slash commands and common plain English", () => {
   assert.deepEqual(parseCommandInput("/deploy 4 survey"), { type: "deploy", count: 4, survey: true });

@@ -12,6 +12,7 @@ import { previewCoordinate } from "./flight-preview";
 import { startPlannerLink } from './planner-link';
 import { COMMANDS, parseCommandSequence, type CommandIntent } from "./command-console";
 import { compileMissionSequence, isFlightSequenceIntent } from "./mission-sequence";
+import { startGestureCamera, type BrowserGestureState } from "./gesture-camera";
 
 const monument = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
 // The south side of the monument plaza: visibly at the base, but outside the
@@ -620,20 +621,6 @@ function runLocalMission(target: DroneController, mission: Parameters<DroneContr
   refreshFleet();
 }
 
-type GestureSnapshot = {
-  connected: boolean;
-  present: boolean;
-  gesture: string;
-  score: number;
-  source: string;
-  hold_progress: number;
-  sequence_hint: string;
-  events: { sequence: number; action: string }[];
-};
-
-let lastGestureSequence: number | undefined;
-let gesturePollRunning = false;
-
 function gestureOffset(action: string, meters = 65): { east: number; north: number } | undefined {
   if (action === "fly_north") return { east: 0, north: meters };
   if (action === "fly_south") return { east: 0, north: -meters };
@@ -681,44 +668,35 @@ function executeGestureAction(action: string): void {
   setCommandMessage(`Gesture received · ${action.replaceAll("_", " ")}`);
 }
 
-async function pollGestures(): Promise<void> {
-  if (runtimeMode || gesturePollRunning) return;
-  gesturePollRunning = true;
-  try {
-    const response = await fetch(`${runtimeApiBase}/api/gesture`, { cache: "no-store" });
-    if (!response.ok) throw new Error("gesture bridge unavailable");
-    const payload = await response.json() as GestureSnapshot;
-    gestureHud.root.classList.toggle("connected", payload.connected);
-    gestureHud.connection.textContent = payload.connected ? "CAMERA ACTIVE · LOCAL ONLY" : "CAMERA OFFLINE";
-    gestureHud.name.textContent = payload.present ? payload.gesture.replaceAll("_", " ").toUpperCase() : "NO HAND";
-    gestureHud.confidence.textContent = payload.present
-      ? `${Math.round(payload.score * 100)}% confidence · ${payload.source}${payload.sequence_hint ? ` · ${payload.sequence_hint}` : ""}`
-      : payload.connected ? "Show a gesture to control drone 1" : "Start with ./start to enable hand control";
-    gestureHud.progress.style.width = `${Math.round(payload.hold_progress * 100)}%`;
-    const newest = payload.events.at(-1)?.sequence ?? 0;
-    if (lastGestureSequence === undefined) {
-      lastGestureSequence = newest;
-    } else {
-      for (const event of payload.events) {
-        if (event.sequence > lastGestureSequence) executeGestureAction(event.action);
-      }
-      lastGestureSequence = Math.max(lastGestureSequence, newest);
-    }
-  } catch {
-    gestureHud.root.classList.remove("connected");
-    gestureHud.connection.textContent = "CAMERA OFFLINE";
-    gestureHud.name.textContent = "NO HAND";
-    gestureHud.confidence.textContent = "Start with ./start to enable hand control";
-    gestureHud.progress.style.width = "0%";
-  } finally {
-    gesturePollRunning = false;
-  }
+function updateGestureHud(state: BrowserGestureState): void {
+  const active = state.status === "active";
+  gestureHud.root.classList.toggle("connected", active);
+  gestureHud.connection.textContent = active ? "CAMERA ACTIVE · ON-DEVICE" : state.status === "loading" ? "LOADING GESTURE MODEL" : "CAMERA OFFLINE";
+  gestureHud.name.textContent = state.present
+    ? state.gesture === "None" ? "HAND DETECTED" : state.gesture.replaceAll("_", " ").toUpperCase()
+    : "NO HAND";
+  gestureHud.confidence.textContent = state.message ?? (state.present && state.gesture !== "None"
+    ? `${Math.round(state.score * 100)}% confidence · hold to command`
+    : active ? "Show a gesture to control drone 1" : "Waiting for browser camera permission");
+  gestureHud.progress.style.width = `${Math.round(state.holdProgress * 100)}%`;
 }
 
+let stopGestureCamera: (() => void) | undefined;
 if (!runtimeMode) {
-  void pollGestures();
-  window.setInterval(() => { void pollGestures(); }, 120);
+  void startGestureCamera(updateGestureHud, executeGestureAction)
+    .then(stop => { stopGestureCamera = stop; })
+    .catch(error => updateGestureHud({
+      status: "error",
+      present: false,
+      gesture: "None",
+      score: 0,
+      holdProgress: 0,
+      message: error instanceof DOMException && error.name === "NotAllowedError"
+        ? "Camera permission denied · allow it in browser settings, then reload"
+        : `Gesture camera failed · ${error instanceof Error ? error.message : "reload to retry"}`,
+    }));
 }
+window.addEventListener("beforeunload", () => stopGestureCamera?.());
 
 type AiObjective = {
   type: string;

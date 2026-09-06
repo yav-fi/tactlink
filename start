@@ -6,14 +6,12 @@ PYTHON="$ROOT/.venv/bin/python"
 BACKEND_PID=""
 FRONTEND_PID=""
 CHAT_PID=""
-GESTURE_PID=""
 
 cleanup() {
   trap - EXIT INT TERM
   [ -z "$FRONTEND_PID" ] || kill "$FRONTEND_PID" 2>/dev/null || true
   [ -z "$BACKEND_PID" ] || kill "$BACKEND_PID" 2>/dev/null || true
   [ -z "$CHAT_PID" ] || kill "$CHAT_PID" 2>/dev/null || true
-  [ -z "$GESTURE_PID" ] || kill "$GESTURE_PID" 2>/dev/null || true
   wait 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
@@ -22,11 +20,11 @@ if [ ! -x "$PYTHON" ]; then
   echo "Setting up Python…"
   python3 -m venv "$ROOT/.venv"
 fi
-if ! "$PYTHON" -c "import fastapi, uvicorn, simulation, cv2, mediapipe" >/dev/null 2>&1; then
+if ! "$PYTHON" -c "import fastapi, uvicorn, simulation" >/dev/null 2>&1; then
   echo "Installing Python dependencies…"
-  "$PYTHON" -m pip install -e "$ROOT[gesture,test]"
+  "$PYTHON" -m pip install -e "$ROOT[test]"
 fi
-if [ ! -d "$ROOT/3d-mapping/node_modules" ]; then
+if [ ! -d "$ROOT/3d-mapping/node_modules" ] || ! npm --prefix "$ROOT/3d-mapping" ls --depth=0 >/dev/null 2>&1; then
   echo "Setting up the 3D frontend…"
   npm --prefix "$ROOT/3d-mapping" install
 fi
@@ -55,15 +53,12 @@ else
   BACKEND_PID=$!
 fi
 
-echo "Starting webcam gesture control in the background…"
-env MPLCONFIGDIR="${TMPDIR:-/tmp}/dnhacks-matplotlib" "$PYTHON" "$ROOT/src/gesture_bridge.py" &
-GESTURE_PID=$!
-
+echo "Building optimized 3D mission control…"
+npm --prefix "$ROOT/3d-mapping" run build
 if curl -fsS http://127.0.0.1:5173/ >/dev/null 2>&1; then
   echo "Using the 3D frontend already running on port 5173."
 else
-  echo "Building and starting optimized 3D mission control…"
-  npm --prefix "$ROOT/3d-mapping" run build
+  echo "Starting 3D mission control…"
   "$PYTHON" -m http.server 5173 --bind 127.0.0.1 --directory "$ROOT/3d-mapping/dist" &
   FRONTEND_PID=$!
 fi
@@ -81,6 +76,7 @@ fi
 
 URL="http://127.0.0.1:5173/?mode=local"
 echo "Ready: $URL"
+echo "Gesture control runs in the browser; allow camera access when prompted."
 if [ "${1:-}" != "--no-open" ]; then
   if command -v open >/dev/null 2>&1; then open "$URL"
   elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$URL"
@@ -88,7 +84,7 @@ if [ "${1:-}" != "--no-open" ]; then
 fi
 echo "Press Ctrl+C to stop."
 
-if [ -n "$BACKEND_PID$FRONTEND_PID$CHAT_PID$GESTURE_PID" ]; then
+if [ -n "$BACKEND_PID$FRONTEND_PID$CHAT_PID" ]; then
   wait
 else
   while true; do sleep 3600; done
