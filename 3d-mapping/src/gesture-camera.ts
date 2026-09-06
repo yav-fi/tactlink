@@ -2,6 +2,7 @@ import { GestureRecognizer, type GestureRecognizerResult } from "@mediapipe/task
 import wasmLoaderPath from "@mediapipe/tasks-vision/vision_wasm_internal.js?url";
 import wasmBinaryPath from "@mediapipe/tasks-vision/vision_wasm_internal.wasm?url";
 import { GestureHoldInterpreter } from "./gesture-hold";
+import { deriveFingerMotionInput, FingerMotionInterpreter } from "./finger-motion";
 
 const MODEL_PATH = "/models/gesture_recognizer.task";
 const MIN_SCORE = 0.5;
@@ -65,6 +66,7 @@ export async function startGestureCamera(
   }
 
   const interpreter = new GestureHoldInterpreter();
+  const fingerMotion = new FingerMotionInterpreter();
   let stopped = false;
   let animationFrame = 0;
   let lastRun = -Infinity;
@@ -79,14 +81,17 @@ export async function startGestureCamera(
     const result = recognizer.recognizeForVideo(video, now);
     const classified = topGesture(result);
     const held = interpreter.update(classified.gesture, now);
+    const motion = fingerMotion.update(deriveFingerMotionInput(result.landmarks[0]), now);
     onState({
       status: "active",
       present: result.landmarks.length > 0,
-      gesture: classified.gesture,
+      gesture: motion.label ?? classified.gesture,
       score: classified.score,
-      holdProgress: held.progress,
+      holdProgress: Math.max(held.progress, motion.progress),
+      message: motion.hint || undefined,
     });
     if (held.action) onAction(held.action);
+    for (const action of motion.actions) onAction(action);
   };
   animationFrame = requestAnimationFrame(update);
 

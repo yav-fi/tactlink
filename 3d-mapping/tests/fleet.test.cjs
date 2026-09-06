@@ -24,6 +24,7 @@ const { compileMissionSequence } = loadSource("mission-sequence");
 const { resolveLandmark } = loadSource("landmarks");
 const { MOTION_TRACE_LIFETIME_MS, motionTraceAlpha } = loadSource("motion-trace");
 const { GestureHoldInterpreter } = loadSource("gesture-hold");
+const { deriveFingerMotionInput, FingerMotionInterpreter, resolvePointedDirection } = loadSource("finger-motion");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
 
 test("browser gestures fire once after a deliberate hold and re-arm after release", () => {
@@ -67,6 +68,62 @@ test("automatic camera coasts briefly and comes to a complete stop", () => {
   assert.equal(idleOrbitRate(2), 0.015);
   assert.equal(idleOrbitRate(4), 0);
   assert.equal(idleOrbitRate(20), 0);
+});
+
+function motionHand(pointDirection, fingers = [false, true, true, false, false], present = true) {
+  return { present, fingers, pointDirection };
+}
+
+function feedMotion(interpreter, input, start, duration = 400) {
+  const actions = [];
+  let now = start;
+  for (let elapsed = 0; elapsed < duration; elapsed += 50) {
+    now += 50;
+    actions.push(...interpreter.update(input, now).actions);
+  }
+  return { actions, now };
+}
+
+test("two-finger V-H-V-H wiper flies toward its final point", () => {
+  for (const [horizontal, expected] of [[[0.98, 0.05], "fly_east"], [[-0.98, 0.05], "fly_west"]]) {
+    const interpreter = new FingerMotionInterpreter();
+    let now = 0;
+    const actions = [];
+    for (const direction of [[0.03, -0.99], horizontal, [0.03, -0.99], horizontal]) {
+      const result = feedMotion(interpreter, motionHand(direction), now);
+      now = result.now;
+      actions.push(...result.actions);
+    }
+    assert.deepEqual(actions, [expected]);
+  }
+  assert.equal(resolvePointedDirection([0.1, -0.99]), "fly_north");
+});
+
+test("three-finger W pose fires one forward dash per deliberate hold", () => {
+  const interpreter = new FingerMotionInterpreter();
+  const three = motionHand([0, -1], [false, true, true, true, false]);
+  let result = feedMotion(interpreter, three, 0, 800);
+  assert.deepEqual(result.actions, ["fly_forward"]);
+  const stillHeld = feedMotion(interpreter, three, result.now, 500);
+  assert.deepEqual(stillHeld.actions, []);
+  result = feedMotion(interpreter, motionHand([0, 0], [false, false, false, false, false]), stillHeld.now, 450);
+  assert.deepEqual(feedMotion(interpreter, three, result.now, 800).actions, ["fly_forward"]);
+});
+
+test("browser landmarks recover the original three-finger geometry", () => {
+  const landmarks = Array.from({ length: 21 }, () => ({ x: 0.5, y: 0.8 }));
+  landmarks[0] = { x: 0.5, y: 0.9 };
+  for (const [mcp, pip, tip, x] of [[5, 6, 8, 0.40], [9, 10, 12, 0.50], [13, 14, 16, 0.60]]) {
+    landmarks[mcp] = { x, y: 0.68 };
+    landmarks[pip] = { x, y: 0.46 };
+    landmarks[tip] = { x, y: 0.20 };
+  }
+  landmarks[17] = { x: 0.70, y: 0.68 };
+  landmarks[18] = { x: 0.70, y: 0.48 };
+  landmarks[20] = { x: 0.70, y: 0.72 };
+  const geometry = deriveFingerMotionInput(landmarks);
+  assert.deepEqual(geometry.fingers.slice(1), [true, true, true, false]);
+  assert(geometry.pointDirection[1] < -0.95);
 });
 
 test("command bar understands slash commands and common plain English", () => {

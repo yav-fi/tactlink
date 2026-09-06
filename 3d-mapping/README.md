@@ -42,6 +42,13 @@ reset. These are local HTTP calls to port 8000.
 
 Open <http://127.0.0.1:5173/?mode=local> for the original browser simulator.
 
+The hidden browser camera supports the five static signs from the root gesture
+guide plus both geometric motion controls from the original Python tracker:
+hold index + middle + ring with the pinky curled for 0.45 seconds to dash
+forward, or hold index + middle and swing vertical → horizontal → vertical →
+horizontal within four seconds to dash north/east/west based on the final point.
+The mission HUD shows the three-finger hold and each confirmed V/H swing stage.
+
 All four propeller assemblies spin continuously, with adjacent rotors turning in opposite directions. The cinematic camera begins by circling the Washington Monument. Once drones exist, it smoothly follows their collective center and adjusts its range to keep the full fleet visible. When flight stops, the camera coasts through a short final turn, eases down, and becomes completely still after four seconds. First-person remains available as an advanced pilot option.
 
 Live flight markers and playback bodies use a compact quadcopter: a 36 × 24 × 12 cm center body, four arms and four crossed-blade rotor assemblies, under one meter across. Parts follow the drone's pose and color for both Normal and Survey types. Automatic framing stays close for one drone, expands with fleet spread, and includes playback bodies. Movement leaves a short segmented streak that fades fully in 1.3 seconds; complete route history remains internal for replay instead of cluttering the map. Start/release prisms remain route markers.

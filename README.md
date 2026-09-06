@@ -45,7 +45,9 @@ downloaded model is present, and opens the flight sandbox. The main browser page
 camera stream and runs MediaPipe gesture recognition on-device. It shows the
 recognized hand signal in the mission HUD and drives the selected drone; camera
 frames are not displayed, recorded, uploaded, or sent to Python, and no
-secondary OpenCV simulation window is rendered.
+secondary OpenCV simulation window is rendered. The browser controller includes
+the same landmark-driven three-finger forward dash and two-finger V-H-V-H
+pointing motion documented below, in addition to the canned static signs.
 Type `/` in the bottom command line for direct commands, or enter a
 plain-language mission for the AI compiler. Press `Ctrl+C` once to stop
 everything it started. Use `./start --no-open` when you do not want it to open

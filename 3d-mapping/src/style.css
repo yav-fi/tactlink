@@ -66,7 +66,7 @@ body { margin: 0; overflow: hidden; }
 .gesture-hud > span { display: block; margin-top: 5px; color: #9ba9b8; font-size: .68rem; }
 .gesture-progress { height: 3px; margin-top: 10px; overflow: hidden; border-radius: 4px; background: rgba(255,255,255,.1); }
 .gesture-progress span { display: block; width: 0; height: 100%; background: linear-gradient(90deg, #ff263f, #ff6a55); box-shadow: 0 0 9px rgba(255, 38, 63, .8); transition: width 90ms linear; }
-#gesture-action { overflow: hidden; color: #d6dde5; text-overflow: ellipsis; white-space: nowrap; }
+#gesture-action { color: #d6dde5; line-height: 1.45; white-space: normal; }
 .visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 #app, #cesiumContainer { width: 100vw; height: 100vh; }
 .mission-panel { position: fixed; top: 18px; left: 18px; width: min(370px, calc(100vw - 36px)); padding: 20px; border: 1px solid rgba(122, 215, 255, .3); border-radius: 16px; background: rgba(4, 14, 28, .88); box-shadow: 0 18px 56px rgba(0,0,0,.36); backdrop-filter: blur(14px); }
