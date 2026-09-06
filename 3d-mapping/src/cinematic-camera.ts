@@ -35,3 +35,9 @@ export function blendHeading(current: number, target: number, amount: number): n
   const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current));
   return current + delta * Math.max(0, Math.min(1, amount));
 }
+
+/** A short cinematic coast that eases completely to rest after flight stops. */
+export function idleOrbitRate(stillSeconds: number): number {
+  const progress = Math.max(0, Math.min(1, stillSeconds / 4));
+  return 0.06 * (1 - progress) ** 2;
+}

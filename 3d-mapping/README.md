@@ -42,7 +42,7 @@ reset. These are local HTTP calls to port 8000.
 
 Open <http://127.0.0.1:5173/?mode=local> for the original browser simulator.
 
-All four propeller assemblies spin continuously, with adjacent rotors turning in opposite directions. The cinematic camera begins by circling the Washington Monument. Once drones exist, it smoothly follows their collective center and adjusts its range to keep the full fleet visible; it circles the fleet while motion is minimal. First-person remains available as an advanced pilot option.
+All four propeller assemblies spin continuously, with adjacent rotors turning in opposite directions. The cinematic camera begins by circling the Washington Monument. Once drones exist, it smoothly follows their collective center and adjusts its range to keep the full fleet visible. When flight stops, the camera coasts through a short final turn, eases down, and becomes completely still after four seconds. First-person remains available as an advanced pilot option.
 
 Live flight markers and playback bodies use a compact quadcopter: a 36 × 24 × 12 cm center body, four arms and four crossed-blade rotor assemblies, under one meter across. Parts follow the drone's pose and color for both Normal and Survey types. Automatic framing stays close for one drone, expands with fleet spread, and includes playback bodies. Movement leaves a short segmented streak that fades fully in 1.3 seconds; complete route history remains internal for replay instead of cluttering the map. Start/release prisms remain route markers.
 
@@ -68,7 +68,7 @@ Use **Deploy a new drone** for one drone or **Deploy a batch** for a grid (defau
 
 **Run all paths** replays the manually recorded trails with colored prisms, launching every routed drone together at its currently assigned mph. The elapsed counter stops at the last arrival; drones without a recorded route stay parked. Playback preserves routes and release markers, and can be repeated. Speeds and route-editing controls are locked during playback; automatic framing follows every playback body. Text-only previews must be flown/recorded before they are included in this recorded-trail replay.
 
-The scene starts with an empty fleet and the camera circling the Washington Monument. Enter `/deploy` (or “deploy a drone”), then click one visible map surface: a normal drone is placed there immediately at the safe 20 m default height. `/deploy 5 survey` places a five-drone survey batch with one map click. Enter `/fly 1` to pilot drone 1. Colors cycle through eight choices; `/reset all` removes the fleet and its routes. Release markers are prisms.
+Local mode starts with one graphite-and-black drone already flying from the base of the Washington Monument. Enter `/deploy` (or “deploy a drone”), then click one visible map surface to add another at the safe 20 m default height. `/deploy 5 survey` places a five-drone survey batch with one map click. Enter `/fly 1` to pilot drone 1. Colors cycle through eight accent choices while the black airframe panels remain visible; `/reset all` removes the fleet and its routes. Release markers are prisms.
 
 Each drone starts at **60 mph (26.8224 m/s)**. Type a positive decimal into **Selected drone speed (mph)** to change its cruising speed. Manual movement uses local east/north/up meters on the globe with smooth acceleration and normalized diagonal inputs. The speed also supplies the default for goto/return-home missions; an explicit `speed_mps` in a mission overrides it. Orbit timing remains governed by radius and duration. Altitudes are ellipsoid heights; placement adds the chosen height to the picked surface.
 
@@ -92,14 +92,15 @@ the browser.
 
 ## Text flight preview
 
-Start the Python flight bridge from the repository root with
-`.venv/Scripts/python.exe -m integrations.flight_bridge` after installing
-`requirements-flight.txt`. Deploy a drone, enter an instruction, and click
+`./start` launches the Python flight bridge on port 8766 and the map reconnects
+to it automatically. For a standalone Windows session, run
+`.venv/Scripts/python.exe -m integrations.flight_bridge --port 8766` after
+installing `requirements-flight.txt`. Deploy a drone, enter an instruction, and click
 **Preview text path** to draw its validated route and populate the mission editor.
 **Run mission** animates it locally. Preview zero is the selected drone's
 deployment height; landing in this preview returns to that height.
 
-The default bridge URL is `http://127.0.0.1:8765`; override it with
+The main demo bridge URL is `http://127.0.0.1:8766`; override it with
 `VITE_FLIGHT_BRIDGE_URL` in your local environment. See
 [the bridge guide](../docs/flight-bridge.md) for HTTP/WebSocket contracts,
 ArduPilot telemetry setup, and Mission Planner export.

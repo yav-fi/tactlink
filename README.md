@@ -39,9 +39,9 @@ Run this from the repository root:
 ./start
 ```
 
-It creates/installs missing local dependencies, starts the Python runtime and
-3D frontend, starts the local mission AI when its downloaded model is present,
-and opens the flight sandbox. The main browser page privately opens a hidden
+It creates/installs missing local dependencies, starts the Python runtime,
+waypoint-planner bridge, and 3D frontend, starts the local mission AI when its
+downloaded model is present, and opens the flight sandbox. The main browser page privately opens a hidden
 camera stream and runs MediaPipe gesture recognition on-device. It shows the
 recognized hand signal in the mission HUD and drives the selected drone; camera
 frames are not displayed, recorded, uploaded, or sent to Python, and no

@@ -18,7 +18,7 @@ function loadSource(name) {
   return module.exports;
 }
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
-const { blendHeading, fleetCameraFrame, screenRelativeMovement } = loadSource("cinematic-camera");
+const { blendHeading, fleetCameraFrame, idleOrbitRate, screenRelativeMovement } = loadSource("cinematic-camera");
 const { parseCommandInput, parseCommandSequence } = loadSource("command-console");
 const { compileMissionSequence } = loadSource("mission-sequence");
 const { resolveLandmark } = loadSource("landmarks");
@@ -34,9 +34,18 @@ test("browser gestures fire once after a deliberate hold and re-arm after releas
   assert.deepEqual(gestures.update("Thumb_Up", 800), { progress: 0 });
 
   gestures.update("None", 900);
-  gestures.update("None", 1050);
-  gestures.update("Thumb_Up", 1100);
-  assert.equal(gestures.update("Thumb_Up", 1500).action, "takeoff");
+  gestures.update("None", 1100);
+  gestures.update("None", 1250);
+  gestures.update("Thumb_Up", 1300);
+  assert.equal(gestures.update("Thumb_Up", 1700).action, "takeoff");
+});
+
+test("browser gesture holds survive a brief low-confidence frame", () => {
+  const gestures = new GestureHoldInterpreter();
+  gestures.update("Pointing_Up", 0);
+  assert.equal(gestures.update("Pointing_Up", 200).progress, 0.5);
+  assert.equal(gestures.update("None", 300).progress, 0.75);
+  assert.equal(gestures.update("Pointing_Up", 400).action, "orbit");
 });
 
 test("browser canned gestures map to the primary flight actions", () => {
@@ -51,6 +60,13 @@ test("browser canned gestures map to the primary flight actions", () => {
     interpreter.update(gesture, 0);
     assert.equal(interpreter.update(gesture, 400).action, action);
   }
+});
+
+test("automatic camera coasts briefly and comes to a complete stop", () => {
+  assert.equal(idleOrbitRate(0), 0.06);
+  assert.equal(idleOrbitRate(2), 0.015);
+  assert.equal(idleOrbitRate(4), 0);
+  assert.equal(idleOrbitRate(20), 0);
 });
 
 test("command bar understands slash commands and common plain English", () => {
@@ -186,6 +202,18 @@ test("bundled aircraft model follows the controller during flight and playback",
   drone.setColor("#ff6666");
   assert.equal(aircraft.model.silhouetteColor.getValue().toCssHexString(), "#ff6666");
   fleet.clear(); assert.equal(entities.values.length, 0);
+});
+
+test("bundled aircraft keeps a black canopy and a red accent material", () => {
+  const bytes = fs.readFileSync(path.resolve(__dirname, "../public/models/uav.glb"));
+  assert.equal(bytes.readUInt32LE(0), 0x46546c67);
+  const jsonLength = bytes.readUInt32LE(12);
+  const gltf = JSON.parse(bytes.subarray(20, 20 + jsonLength).toString("utf8").trim());
+  const black = gltf.materials.find(material => material.name === "blackPanel");
+  const red = gltf.materials.find(material => material.name === "accent");
+  assert(black.pbrMetallicRoughness.baseColorFactor.slice(0, 3).every(channel => channel < 0.02));
+  assert(red.pbrMetallicRoughness.baseColorFactor[0] > 0.9);
+  assert(gltf.meshes[0].primitives.some(primitive => primitive.material === gltf.materials.indexOf(black)));
 });
 
 test("Survey effect weakens beyond 100, 250 and 500 meters", () => {

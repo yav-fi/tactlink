@@ -5,14 +5,14 @@ import {previewCoordinate, type FlightPreview} from './flight-preview';
 export function startPlannerLink(viewer: Cesium.Viewer) {
   const panel=document.createElement('div');
   panel.style.cssText='background:#182b25;color:white;padding:12px;margin:12px 0;border-radius:8px';
-  const button=document.createElement('button');button.textContent='Connect waypoint planner';
-  const label=document.createElement('p');label.textContent='Read-only Python simulation overlay. Home altitude uses map terrain.';
+  const button=document.createElement('button');button.textContent='Disconnect planner';
+  const label=document.createElement('p');label.textContent='Connecting to the local waypoint planner…';
   panel.append(button,label);
   const worldStatus=document.getElementById('world-status');
   if(worldStatus)worldStatus.insertAdjacentElement('afterend',panel);
   else document.body.append(panel);
   const base=(import.meta.env.VITE_FLIGHT_BRIDGE_URL as string|undefined)||'http://127.0.0.1:8766';
-  let connected=false, route:Cesium.Entity|undefined, marker:Cesium.Entity|undefined;
+  let connected=true, route:Cesium.Entity|undefined, marker:Cesium.Entity|undefined;
   let mission='', anchor:{latitude:number;longitude:number;altitude:number}|undefined;
   function clear(){if(route)viewer.entities.remove(route);if(marker)viewer.entities.remove(marker);route=marker=undefined;mission='';anchor=undefined;}
   button.onclick=()=>{connected=!connected;button.textContent=connected?'Disconnect planner':'Connect waypoint planner';if(!connected){clear();label.textContent='Disconnected';}};
@@ -46,7 +46,7 @@ export function startPlannerLink(viewer: Cesium.Viewer) {
         const g=previewCoordinate(sim,anchor);marker.position=new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(g.longitude,g.latitude,g.altitude));
       }
       label.textContent=data.stale?'Route loaded. Python simulation disconnected or needs L to reload.':`Python simulation: ${sim.complete?'complete':sim.paused?'paused':'playing'} · ${sim.z.toFixed(1)} m above home`;
-    }catch{if(marker)marker.show=false;label.textContent='Cannot reach planner. Check local bridge and connection settings.';}
+    }catch{if(marker)marker.show=false;label.textContent='Planner bridge is starting. It will reconnect automatically.';}
     finally{setTimeout(poll,500);}
     else setTimeout(poll,500);
   }

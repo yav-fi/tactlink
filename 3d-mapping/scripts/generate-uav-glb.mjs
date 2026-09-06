@@ -120,6 +120,7 @@ const MATERIAL_SHELL = 0;
 const MATERIAL_ACCENT = 1;
 const MATERIAL_ROTOR = 2;
 const MATERIAL_DARK = 3;
+const MATERIAL_PANEL = 4;
 
 // --- Airframe ---------------------------------------------------------------
 // Nose points +X. Span is ~2.6 m so entity scale reads directly in metres.
@@ -141,6 +142,20 @@ triangle(tip, [0.62, -0.16, -0.30], [0.62, -0.16, 0.30]);
 triangle(tip, [0.62, 0.20, -0.30], [0.62, -0.16, -0.30]);
 triangle(tip, [0.62, -0.16, 0.30], [0.62, 0.20, 0.30]);
 box([-1.30, -0.04, -0.04], [-1.00, 0.46, 0.04]); // vertical fin, breaks nose/tail symmetry
+endPrimitive();
+
+// Raised stealth canopy and centerline racing stripe make the body read as a
+// designed aircraft rather than one solid block, even at Cesium's minimum size.
+beginPrimitive(MATERIAL_PANEL);
+box([-0.46, 0.20, -0.22], [0.38, 0.31, 0.22]); // black upper canopy
+box([-0.70, -0.17, -0.25], [0.45, -0.145, -0.18]); // black lower side panel
+box([-0.70, -0.17, 0.18], [0.45, -0.145, 0.25]);
+endPrimitive();
+
+beginPrimitive(MATERIAL_ACCENT);
+box([-0.40, 0.312, -0.035], [0.46, 0.335, 0.035]); // red canopy streak
+box([-0.62, 0.19, -0.305], [0.40, 0.23, -0.285]); // red side streak
+box([-0.62, 0.19, 0.285], [0.40, 0.23, 0.305]);
 endPrimitive();
 
 beginPrimitive(MATERIAL_DARK);
@@ -205,10 +220,11 @@ const gltf = {
   nodes: [{ mesh: 0, name: "uav" }],
   meshes: [{ name: "uav", primitives: meshPrimitives }],
   materials: [
-    { name: "shell", pbrMetallicRoughness: { baseColorFactor: [0.018, 0.022, 0.03, 1], metallicFactor: 0.72, roughnessFactor: 0.24 } },
+    { name: "shell", pbrMetallicRoughness: { baseColorFactor: [0.075, 0.082, 0.095, 1], metallicFactor: 0.38, roughnessFactor: 0.48 } },
     { name: "accent", pbrMetallicRoughness: { baseColorFactor: [0.95, 0.012, 0.035, 1], metallicFactor: 0.3, roughnessFactor: 0.18 }, emissiveFactor: [0.8, 0.008, 0.018], doubleSided: true },
     { name: "rotor", pbrMetallicRoughness: { baseColorFactor: [0.16, 0.17, 0.2, 0.38], metallicFactor: 0.32, roughnessFactor: 0.5 }, alphaMode: "BLEND", doubleSided: true },
     { name: "dark", pbrMetallicRoughness: { baseColorFactor: [0.035, 0.04, 0.05, 1], metallicFactor: 0.82, roughnessFactor: 0.2 } },
+    { name: "blackPanel", pbrMetallicRoughness: { baseColorFactor: [0.006, 0.008, 0.012, 1], metallicFactor: 0.62, roughnessFactor: 0.3 } },
   ],
   bufferViews: [
     { buffer: 0, byteOffset: positionOffset, byteLength: positionArray.byteLength, target: 34962 },

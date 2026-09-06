@@ -4,8 +4,8 @@ import wasmBinaryPath from "@mediapipe/tasks-vision/vision_wasm_internal.wasm?ur
 import { GestureHoldInterpreter } from "./gesture-hold";
 
 const MODEL_PATH = "/models/gesture_recognizer.task";
-const MIN_SCORE = 0.55;
-const FRAME_INTERVAL_MS = 80;
+const MIN_SCORE = 0.5;
+const FRAME_INTERVAL_MS = 60;
 
 export type BrowserGestureState = {
   status: "loading" | "active" | "error";
@@ -53,8 +53,8 @@ export async function startGestureCamera(
         baseOptions: { modelAssetPath: MODEL_PATH, delegate: "CPU" },
         runningMode: "VIDEO",
         numHands: 1,
-        minHandDetectionConfidence: 0.6,
-        minHandPresenceConfidence: 0.55,
+        minHandDetectionConfidence: 0.5,
+        minHandPresenceConfidence: 0.5,
         minTrackingConfidence: 0.5,
         cannedGesturesClassifierOptions: { scoreThreshold: MIN_SCORE },
       },

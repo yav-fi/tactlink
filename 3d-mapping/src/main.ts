@@ -5,7 +5,7 @@ import { DroneController } from "./drone-controller";
 import { Fleet, DRONE_COLORS } from "./fleet";
 import { formationSlots } from "./formation";
 import { collisionWarning } from "./collision";
-import { blendHeading, fleetCameraFrame, screenRelativeMovement } from "./cinematic-camera";
+import { blendHeading, fleetCameraFrame, idleOrbitRate, screenRelativeMovement } from "./cinematic-camera";
 import { parseMission, sampleMission, type MissionStep } from "./mission";
 import { startRuntimeMode } from "./runtime/index";
 import { previewCoordinate } from "./flight-preview";
@@ -1024,8 +1024,8 @@ function updateAutomaticCamera(deltaSeconds: number): void {
   const flightHeading = controllingDrone ? headingDrone?.heading : headingDrone?.horizontalFlightHeading;
   if (flightHeading !== undefined && (controllingDrone || movement >= 0.04)) {
     orbitCamera.heading = blendHeading(orbitCamera.heading, flightHeading, 1 - Math.exp(-4.5 * deltaSeconds));
-  } else if (stillSeconds > 0.65) {
-    orbitCamera.heading += deltaSeconds * 0.065;
+  } else {
+    orbitCamera.heading += deltaSeconds * idleOrbitRate(stillSeconds);
   }
 
   const frame = fleetCameraFrame(subjects.map(subject => subject.position))!;
