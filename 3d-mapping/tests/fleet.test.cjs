@@ -18,7 +18,7 @@ function loadSource(name) {
   return module.exports;
 }
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
-const { fleetCameraFrame, screenRelativeMovement } = loadSource("cinematic-camera");
+const { blendHeading, fleetCameraFrame, screenRelativeMovement } = loadSource("cinematic-camera");
 const { MOTION_TRACE_LIFETIME_MS, motionTraceAlpha } = loadSource("motion-trace");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
 
@@ -44,6 +44,13 @@ test("WASD movement follows the camera's screen axes", () => {
   const right = screenRelativeMovement(position, north, east, 0, 1);
   assert(Math.abs(forward.east) < 1e-9 && Math.abs(forward.north - 1) < 1e-9);
   assert(Math.abs(right.east - 1) < 1e-9 && Math.abs(right.north) < 1e-9);
+});
+
+test("cinematic heading takes the shortest turn behind a flying drone", () => {
+  const almostLeft = Cesium.Math.toRadians(179);
+  const almostRight = Cesium.Math.toRadians(-179);
+  const blended = blendHeading(almostLeft, almostRight, 0.5);
+  assert(Math.abs(Cesium.Math.toDegrees(blended) - 180) < 0.001);
 });
 
 test("motion trace fades quickly to transparent", () => {

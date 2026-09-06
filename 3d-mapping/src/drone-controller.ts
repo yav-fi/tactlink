@@ -86,6 +86,12 @@ export class DroneController {
     return this.trailPoints.slice(1).reduce((sum, p, i) => sum + Cesium.Cartesian3.distance(this.trailPoints[i], p), 0);
   }
   get cameraPosition(): Cesium.Cartesian3 { return Cesium.Cartesian3.clone(this.visualPosition()); }
+  get horizontalFlightHeading(): number | undefined {
+    if (!this.travelDirection) return undefined;
+    const inverse = Cesium.Matrix4.inverseTransformation(Cesium.Transforms.eastNorthUpToFixedFrame(this.visualPosition()), new Cesium.Matrix4());
+    const local = Cesium.Matrix4.multiplyByPointAsVector(inverse, this.travelDirection, new Cesium.Cartesian3());
+    return Math.hypot(local.x, local.y) > 0.01 ? Math.atan2(local.x, local.y) : undefined;
+  }
   get coverageCount(): number { return this.coverage.length; }
   capture() {
     return { id: this.id, home: this.homeCoordinates, type: this.droneType, position: { ...this.position }, heading: this.manualHeading, color: this.colorHex, speed: this.speedMph,

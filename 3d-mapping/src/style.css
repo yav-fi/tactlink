@@ -84,9 +84,12 @@ body:not(.runtime-mode) .mission-panel > section,
 body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !important; }
 #local-command-dock { display: grid; gap: 8px; }
 .dock-status { margin: 0 6px; overflow: hidden; color: #d7e9f8; text-overflow: ellipsis; white-space: nowrap; }
-.dock-row { display: grid; grid-template-columns: auto minmax(150px, 1fr) auto auto; gap: 8px; align-items: center; }
+.dock-row { display: grid; grid-template-columns: auto minmax(150px, 1fr) auto auto auto; gap: 8px; align-items: center; }
 .dock-row > button, .dock-row > select { height: 42px; margin: 0; }
 .dock-row > select { background: rgba(27, 52, 75, .72); }
+.rotation-controls { display: flex; gap: 4px; }
+.rotation-controls button { width: 38px; height: 42px; padding: 0; color: #dcefff; background: rgba(32, 60, 86, .82); font-size: 1.15rem; }
+.rotation-controls button:active { color: #052033; background: #52d8ff; }
 .command-drawer { position: relative; }
 .command-drawer > summary {
   display: grid;
@@ -129,7 +132,7 @@ body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !imp
 }
 @media (max-width: 600px) {
   body:not(.runtime-mode) .mission-panel { bottom: 10px; width: calc(100vw - 20px); }
-  .dock-row { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+  .dock-row { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
   .dock-row > button { padding-inline: 9px; }
   .dock-status { font-size: .7rem; }
 }

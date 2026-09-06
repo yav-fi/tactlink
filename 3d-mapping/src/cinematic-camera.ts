@@ -30,3 +30,8 @@ export function screenRelativeMovement(
     north: forward * view.y / viewLength + right * side.y / sideLength,
   };
 }
+
+export function blendHeading(current: number, target: number, amount: number): number {
+  const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current));
+  return current + delta * Math.max(0, Math.min(1, amount));
+}

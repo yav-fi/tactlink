@@ -5,7 +5,7 @@ import { DroneController } from "./drone-controller";
 import { Fleet, DRONE_COLORS } from "./fleet";
 import { formationSlots } from "./formation";
 import { collisionWarning } from "./collision";
-import { fleetCameraFrame, screenRelativeMovement } from "./cinematic-camera";
+import { blendHeading, fleetCameraFrame, screenRelativeMovement } from "./cinematic-camera";
 import { parseMission, sampleMission } from "./mission";
 import { startRuntimeMode } from "./runtime/index";
 import { previewCoordinate, previewMission, type FlightPreview } from "./flight-preview";
@@ -117,6 +117,7 @@ let pendingIds: string[] = [];
 let pendingGroup = "";
 const activeCameraKeys = new Set<string>();
 const controlDroneButton = document.querySelector<HTMLButtonElement>("#control-drone")!;
+const rotationControls = document.querySelector<HTMLDivElement>("#rotation-controls")!;
 let controllingDrone = false;
 const pilotView = { heading: 0 };
 const pilotCameraSelect = document.querySelector<HTMLSelectElement>("#pilot-camera")!;
@@ -133,6 +134,17 @@ function clearInput(): void {
   steering = false;
   drone?.stopManualMotion();
   for (const member of fleet.manualBatch) member.stopManualMotion();
+}
+
+for (const [id, code] of [["rotate-left", "KeyQ"], ["rotate-right", "KeyE"]] as const) {
+  const button = document.querySelector<HTMLButtonElement>(`#${id}`)!;
+  button.addEventListener("pointerdown", event => {
+    event.preventDefault();
+    if (controllingDrone) activeCameraKeys.add(code);
+  });
+  for (const eventName of ["pointerup", "pointercancel", "pointerleave"]) {
+    button.addEventListener(eventName, () => activeCameraKeys.delete(code));
+  }
 }
 
 function releaseDrone(): void {
@@ -228,6 +240,7 @@ function refreshFleet(): void {
   replayButton.disabled = deploying || fleet.replay.running || !fleet.drones.size;
   stopReplayButton.disabled = !fleet.replay.running;
   controlDroneButton.disabled ||= fleet.manualBatch.length > 0;
+  rotationControls.hidden = !controllingDrone;
   document.querySelector<HTMLButtonElement>("#bulk-deploy")!.disabled = fleet.replay.running;
   refreshGroups();
 }
@@ -587,16 +600,26 @@ function updateAutomaticCamera(deltaSeconds: number): void {
   }
 
   let movement = 0;
+  let movingId: string | undefined;
   for (const subject of subjects) {
     const previous = previousSubjects.get(subject.id);
-    if (previous) movement = Math.max(movement, Cesium.Cartesian3.distance(previous, subject.position));
+    if (previous) {
+      const distance = Cesium.Cartesian3.distance(previous, subject.position);
+      if (distance > movement) { movement = distance; movingId = subject.id; }
+    }
     previousSubjects.set(subject.id, Cesium.Cartesian3.clone(subject.position));
   }
   for (const id of previousSubjects.keys()) {
     if (!subjects.some(subject => subject.id === id)) previousSubjects.delete(id);
   }
   stillSeconds = movement < 0.04 ? stillSeconds + deltaSeconds : 0;
-  if (stillSeconds > 0.65) orbitCamera.heading += deltaSeconds * 0.065;
+  const headingDrone = controllingDrone ? drone : movingId ? fleet.drones.get(movingId) : undefined;
+  const flightHeading = controllingDrone ? headingDrone?.heading : headingDrone?.horizontalFlightHeading;
+  if (flightHeading !== undefined && (controllingDrone || movement >= 0.04)) {
+    orbitCamera.heading = blendHeading(orbitCamera.heading, flightHeading, 1 - Math.exp(-4.5 * deltaSeconds));
+  } else if (stillSeconds > 0.65) {
+    orbitCamera.heading += deltaSeconds * 0.065;
+  }
 
   const frame = fleetCameraFrame(subjects.map(subject => subject.position))!;
   const blend = 1 - Math.exp(-2.8 * deltaSeconds);

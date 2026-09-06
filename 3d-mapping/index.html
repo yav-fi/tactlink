@@ -53,6 +53,10 @@
         <div class="dock-row">
           <button id="deploy-drone" type="button">+ Deploy</button>
           <select id="selected-drone" aria-label="Selected drone" disabled><option>No drones deployed</option></select>
+          <div id="rotation-controls" class="rotation-controls" hidden>
+            <button id="rotate-left" type="button" aria-label="Rotate drone left" title="Rotate left (Q)">↶</button>
+            <button id="rotate-right" type="button" aria-label="Rotate drone right" title="Rotate right (E)">↷</button>
+          </div>
           <button id="control-drone" type="button" aria-pressed="false" disabled>Fly</button>
           <details id="command-drawer" class="command-drawer">
             <summary aria-label="More commands">More</summary>
