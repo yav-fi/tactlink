@@ -1,3 +1,5 @@
+import { resolveLandmark } from "./landmarks";
+
 export type CommandIntent =
   | { type: "help" }
   | { type: "deploy"; count: number; survey: boolean }
@@ -8,7 +10,10 @@ export type CommandIntent =
   | { type: "return"; all: boolean }
   | { type: "reset"; all: boolean }
   | { type: "goto"; latitude: number; longitude: number; altitude?: number; all: boolean }
+  | { type: "landmark"; name: string; latitude: number; longitude: number }
+  | { type: "place"; query: string }
   | { type: "move"; direction: "forward" | "back" | "left" | "right"; meters: number }
+  | { type: "turn"; direction: "left" | "right"; degrees: number }
   | { type: "hover"; seconds: number }
   | { type: "orbit"; radius: number; seconds: number }
   | { type: "ai"; instruction: string };
@@ -19,7 +24,7 @@ export const COMMANDS = [
   { command: "/release", hint: "stop manual flight and hover" },
   { command: "/select", hint: "select a drone by number" },
   { command: "/speed", hint: "set selected drone speed in mph" },
-  { command: "/goto", hint: "fly to latitude, longitude, and optional altitude" },
+  { command: "/goto", hint: "fly to a landmark or latitude, longitude, altitude" },
   { command: "/hover", hint: "hover for a number of seconds" },
   { command: "/orbit", hint: "orbit with optional radius and duration" },
   { command: "/return", hint: "return selected drone home · add ‘all’ for the fleet" },
@@ -71,11 +76,24 @@ export function parseCommandInput(raw: string): CommandIntent {
     const direction = moveMatch[1].startsWith("back") ? "back" : moveMatch[1] as "forward" | "left" | "right";
     return { type: "move", direction, meters: Number(moveMatch[2] ?? 50) };
   }
-  const hover = body.match(/^hover(?:\s+(?:for\s+)?)?(\d+(?:\.\d+)?)?/);
+  const landmarkMatch = body.match(/^(?:go|goto|fly|send)(?:\s+(?:the\s+)?(?:selected\s+)?drone(?:\s+\d+)?)?\s+to\s+(.+)$/);
+  if (landmarkMatch) {
+    const landmark = resolveLandmark(landmarkMatch[1]);
+    if (landmark) return { type: "landmark", name: landmark.name, latitude: landmark.latitude, longitude: landmark.longitude };
+    return { type: "place", query: landmarkMatch[1].trim() };
+  }
+  const turn = body.match(/^turn\s+(left|right)(?:\s+(\d+(?:\.\d+)?)\s*(?:degrees?)?)?/);
+  if (turn) return { type: "turn", direction: turn[1] as "left" | "right", degrees: Number(turn[2] ?? 90) };
+  const hover = body.match(/^(?:hover|wait)(?:\s+(?:for\s+)?)?(\d+(?:\.\d+)?)?/);
   if (hover) return { type: "hover", seconds: Number(hover[1] ?? 10) };
   const orbit = body.match(/^orbit(?:\s+(?:at\s+)?)?(\d+(?:\.\d+)?)?(?:\s*m(?:eters?)?)?(?:\s+(?:for\s+)?(\d+(?:\.\d+)?)\s*s(?:econds?)?)?/);
   if (orbit) return { type: "orbit", radius: Number(orbit[1] ?? 30), seconds: Number(orbit[2] ?? 20) };
 
   if (slash) throw new Error(`Unknown command “/${body.split(" ")[0]}”. Type / to see commands.`);
   return { type: "ai", instruction };
+}
+
+export function parseCommandSequence(raw: string): CommandIntent[] {
+  const parts = raw.trim().split(/\s+(?:and\s+)?then\s+|\s+and\s+(?=(?:wait|hover|go|goto|fly|move|return|orbit|turn)\b)|,\s*(?=(?:wait|hover|go|goto|fly|move|return|orbit|turn)\b)/i).filter(Boolean);
+  return parts.map(part => parseCommandInput(part));
 }

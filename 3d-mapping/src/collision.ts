@@ -56,7 +56,7 @@ export function movementBlocked(viewer: Cesium.Viewer, from: Cesium.Cartesian3, 
   if (distance < 0.00001) return false;
   queryWarnings.delete(viewer);
   const ray = new Cesium.Ray(from, Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(to, from, new Cesium.Cartesian3()), new Cesium.Cartesian3()));
-  // Exclude every application entity: trails, labels and release prisms are not buildings.
+  // Exclude every application entity: trails and map labels are not buildings.
   // Cesium's ray width sweeps a square footprint around the center ray.
   const originalView = scene.view;
   if (scene.pickFromRay) {

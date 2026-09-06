@@ -155,13 +155,7 @@ export class DroneController {
       position: Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, home.altitude),
       name: "Drone starting position",
       show: false,
-      box: {
-        dimensions: new Cesium.Cartesian3(16, 10, 4),
-        material: this.color.withAlpha(0.3),
-        outline: true,
-        outlineColor: this.color,
-      },
-      label: { text: "START", font: "600 13px system-ui", fillColor: this.color, showBackground: true, pixelOffset: new Cesium.Cartesian2(0, 28) },
+      label: { text: "START", font: "600 13px system-ui", fillColor: this.color, style: Cesium.LabelStyle.FILL_AND_OUTLINE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3 },
     });
     this.trailEntity = viewer.entities.add({
       id: `${this.id}_trail`,
@@ -269,9 +263,7 @@ export class DroneController {
       this.releases.push(this.viewer.entities.add({
         id: `${this.id}_release_${number}`,
         position: Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude),
-        box: { dimensions: new Cesium.Cartesian3(16, 10, 4), material: this.color.withAlpha(0.8), outline: true, outlineColor: this.color },
-        orientation: this.orientationAt(this.position),
-        label: { text: `RELEASE ${number}`, font: "600 12px system-ui", fillColor: this.color, showBackground: true, pixelOffset: new Cesium.Cartesian2(0, 22) },
+        label: { text: `RELEASE ${number}`, font: "600 12px system-ui", fillColor: this.color, style: Cesium.LabelStyle.FILL_AND_OUTLINE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3 },
       }));
     }
     if (enabled && this.trailPoints.length === 0) {

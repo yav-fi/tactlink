@@ -9,7 +9,8 @@ import { blendHeading, fleetCameraFrame, screenRelativeMovement } from "./cinema
 import { parseMission, sampleMission, type MissionStep } from "./mission";
 import { startRuntimeMode } from "./runtime/index";
 import { previewCoordinate } from "./flight-preview";
-import { COMMANDS, parseCommandInput, type CommandIntent } from "./command-console";
+import { COMMANDS, parseCommandSequence, type CommandIntent } from "./command-console";
+import { compileMissionSequence, isFlightSequenceIntent } from "./mission-sequence";
 
 const home = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
 const token = import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined;
@@ -20,6 +21,15 @@ const commandDrawer = document.querySelector<HTMLDetailsElement>("#command-drawe
 const commandForm = document.querySelector<HTMLFormElement>("#command-form")!;
 const commandInput = document.querySelector<HTMLInputElement>("#command-input")!;
 const commandSuggestions = document.querySelector<HTMLDivElement>("#command-suggestions")!;
+const hud = {
+  drone: document.querySelector<HTMLElement>("#hud-drone")!,
+  latitude: document.querySelector<HTMLElement>("#hud-latitude")!,
+  longitude: document.querySelector<HTMLElement>("#hud-longitude")!,
+  altitude: document.querySelector<HTMLElement>("#hud-altitude")!,
+  speed: document.querySelector<HTMLElement>("#hud-speed")!,
+  state: document.querySelector<HTMLElement>("#hud-state")!,
+  fleet: document.querySelector<HTMLElement>("#hud-fleet")!,
+};
 new MutationObserver(() => {
   if (commandStatus.textContent) commandInput.placeholder = commandStatus.textContent;
 }).observe(commandStatus, { childList: true, characterData: true, subtree: true });
@@ -78,6 +88,11 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
     backgroundColor: Cesium.Color.fromCssColorString("#233d34"),
   })),
 });
+const placeGeocoder = token ? new Cesium.IonGeocoderService({
+  scene: viewer.scene,
+  accessToken: token,
+  geocodeProviderType: Cesium.IonGeocodeProviderType.GOOGLE,
+}) : undefined;
 if (runtimeMode) startRuntimeMode(viewer);
 
 viewer.scene.globe.enableLighting = false;
@@ -254,6 +269,18 @@ function refreshFleet(): void {
   rotationControls.hidden = !controllingDrone;
   document.querySelector<HTMLButtonElement>("#bulk-deploy")!.disabled = fleet.replay.running;
   refreshGroups();
+  updateTelemetry();
+}
+
+function updateTelemetry(): void {
+  const snapshot = drone?.snapshot();
+  hud.drone.textContent = drone?.id.replace("_", " ") ?? "None";
+  hud.latitude.textContent = snapshot ? snapshot.latitude.toFixed(5) : "—";
+  hud.longitude.textContent = snapshot ? snapshot.longitude.toFixed(5) : "—";
+  hud.altitude.textContent = snapshot ? `${snapshot.altitude.toFixed(1)} m` : "—";
+  hud.speed.textContent = drone ? `${drone.speedMph.toFixed(1)} mph` : "—";
+  hud.state.textContent = snapshot?.state.replaceAll("_", " ") ?? "Idle";
+  hud.fleet.textContent = String(fleet.drones.size);
 }
 
 function refreshGroups(): void {
@@ -653,7 +680,7 @@ async function executeCommand(intent: CommandIntent): Promise<void> {
   if (intent.type === "help") {
     commandInput.value = "/";
     renderCommandSuggestions();
-    setCommandMessage("Try “deploy 3 survey drones”, “fly drone 1”, “move forward 50”, or type any mission for AI.");
+    setCommandMessage("Try “go to the Washington Monument, wait 5 seconds, then go back 50 meters”.");
     return;
   }
   if (intent.type === "deploy") {
@@ -742,7 +769,53 @@ async function executeCommand(intent: CommandIntent): Promise<void> {
     setCommandMessage(`${target.id.replace("_", " ")} orbiting at ${intent.radius} m for ${intent.seconds} seconds.`);
     return;
   }
+  if (intent.type === "landmark" || intent.type === "place" || intent.type === "turn") {
+    await executeCommandSequence([intent], intent.type === "turn" ? `turn ${intent.direction}` : `go to ${intent.type === "landmark" ? intent.name : intent.query}`);
+    return;
+  }
   await executeAiInstruction(intent.instruction);
+}
+
+async function executeCommandSequence(intents: CommandIntent[], original: string): Promise<void> {
+  const resolvedIntents = await Promise.all(intents.map(async intent => {
+    if (intent.type !== "place") return intent;
+    if (!placeGeocoder) throw new Error(`“${intent.query}” is not in the built-in DC landmarks; add a Cesium ion token to enable place search.`);
+    setCommandMessage(`Finding ${intent.query}…`);
+    const results = await placeGeocoder.geocode(`${intent.query}, Washington, DC`, Cesium.GeocodeType.SEARCH);
+    const result = results[0];
+    if (!result) throw new Error(`Could not find “${intent.query}”.`);
+    const center = result.destination instanceof Cesium.Rectangle
+      ? Cesium.Rectangle.center(result.destination)
+      : Cesium.Cartographic.fromCartesian(result.destination);
+    return {
+      type: "landmark" as const,
+      name: result.displayName,
+      latitude: Cesium.Math.toDegrees(center.latitude),
+      // Aim beside the returned feature center so collision avoidance does not
+      // try to enter the landmark's building geometry.
+      longitude: Cesium.Math.toDegrees(center.longitude) + 0.00065,
+    };
+  }));
+  if (resolvedIntents.length === 1 && !isFlightSequenceIntent(resolvedIntents[0])) {
+    await executeCommand(resolvedIntents[0]);
+    return;
+  }
+  if (resolvedIntents.some(intent => intent.type === "ai")) {
+    await executeAiInstruction(original);
+    return;
+  }
+  if (!resolvedIntents.every(isFlightSequenceIntent)) throw new Error("Deployment and pilot-mode commands cannot be mixed into an automatic flight sequence.");
+  const target = requireDrone();
+  const steps = compileMissionSequence(
+    resolvedIntents,
+    target.snapshot(),
+    target.homeCoordinates,
+    target.horizontalFlightHeading ?? target.heading,
+    target.speedMph * 0.44704,
+  );
+  runLocalMission(target, { drone_id: target.id, mission: steps }, "text flight sequence");
+  const landmark = resolvedIntents.find((intent): intent is Extract<CommandIntent, { type: "landmark" }> => intent.type === "landmark");
+  setCommandMessage(`${target.id.replace("_", " ")} running ${steps.length}-step mission${landmark ? ` via ${landmark.name}` : ""}.`);
 }
 
 function renderCommandSuggestions(): void {
@@ -770,7 +843,7 @@ commandForm.addEventListener("submit", event => {
   const value = commandInput.value;
   commandInput.value = "";
   commandSuggestions.hidden = true;
-  try { void executeCommand(parseCommandInput(value)).catch(error => setCommandMessage(error instanceof Error ? error.message : "Command failed.")); }
+  try { void executeCommandSequence(parseCommandSequence(value), value).catch(error => setCommandMessage(error instanceof Error ? error.message : "Command failed.")); }
   catch (error) { setCommandMessage(error instanceof Error ? error.message : "Command failed."); }
 });
 
@@ -880,6 +953,7 @@ pauseButton.addEventListener("click", () => { fleet.togglePause(performance.now(
 let surveyUpdateIndex = 0;
 let previousCameraTime = performance.now();
 let pilotStatusTime = 0;
+let telemetryTime = 0;
 viewer.clock.onTick.addEventListener((clock) => {
   const deltaSeconds = Math.max(0, Math.min(0.1, Cesium.JulianDate.secondsDifference(clock.currentTime, previousTime)));
   previousTime = Cesium.JulianDate.clone(clock.currentTime, previousTime);
@@ -892,6 +966,10 @@ viewer.clock.onTick.addEventListener((clock) => {
   updateFreeCamera(cameraDelta);
   updateAutomaticCamera(cameraDelta);
   previousCameraTime = cameraTime;
+  if (!runtimeMode && cameraTime - telemetryTime >= 100) {
+    telemetryTime = cameraTime;
+    updateTelemetry();
+  }
   if (!runtimeMode && controllingDrone && cameraTime - pilotStatusTime >= 250) {
     pilotStatusTime = cameraTime;
     setCommandMessage(drone?.collisionBlocked

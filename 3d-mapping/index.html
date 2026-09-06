@@ -55,6 +55,15 @@
           <input id="command-input" type="text" autocomplete="off" spellcheck="false" aria-label="Drone command" aria-controls="command-suggestions" placeholder="Tell the drones what to do · type / for commands" />
           <span id="command-status" class="visually-hidden" role="status">Ready · type / for commands</span>
         </form>
+        <dl class="flight-hud" aria-label="Selected drone telemetry">
+          <div><dt>Drone</dt><dd id="hud-drone">None</dd></div>
+          <div><dt>Lat</dt><dd id="hud-latitude">—</dd></div>
+          <div><dt>Long</dt><dd id="hud-longitude">—</dd></div>
+          <div><dt>Alt</dt><dd id="hud-altitude">—</dd></div>
+          <div><dt>Speed</dt><dd id="hud-speed">—</dd></div>
+          <div><dt>State</dt><dd id="hud-state">Idle</dd></div>
+          <div><dt>Fleet</dt><dd id="hud-fleet">0</dd></div>
+        </dl>
         <div class="dock-row" hidden>
           <button id="deploy-drone" type="button">+ Deploy</button>
           <select id="selected-drone" aria-label="Selected drone" disabled><option>No drones deployed</option></select>

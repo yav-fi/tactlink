@@ -63,17 +63,18 @@ textarea { width: 100%; min-height: 190px; resize: vertical; padding: 10px; bord
 /* Local mode is a single command dock. Secondary tools stay in the one drawer. */
 body:not(.runtime-mode) .mission-panel {
   top: auto;
-  bottom: 10px;
-  left: 50%;
-  width: min(620px, calc(100vw - 28px));
+  bottom: 0;
+  left: 0;
+  width: 100vw;
   max-height: none;
-  padding: 3px;
-  transform: translateX(-50%);
+  padding: 5px 14px;
+  transform: none;
   overflow: visible;
   border-color: rgba(183, 226, 255, .28);
-  border-radius: 11px;
-  background: rgba(7, 18, 32, .5);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, .28);
+  border-width: 1px 0 0;
+  border-radius: 0;
+  background: rgba(7, 18, 32, .82);
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, .28);
   backdrop-filter: blur(14px) saturate(125%);
   -webkit-backdrop-filter: blur(14px) saturate(125%);
 }
@@ -83,7 +84,7 @@ body:not(.runtime-mode) .mission-panel > #world-status,
 body:not(.runtime-mode) .mission-panel > .mode-switch,
 body:not(.runtime-mode) .mission-panel > section,
 body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !important; }
-#local-command-dock { position: relative; }
+#local-command-dock { position: relative; display: grid; grid-template-columns: minmax(280px, 1fr) auto; gap: 16px; align-items: center; }
 .command-form { display: grid; grid-template-columns: auto 1fr; height: 32px; align-items: center; }
 .command-prompt { padding-left: 10px; color: #6cdcff; font: 700 1.25rem/1 ui-monospace, monospace; }
 #command-input {
@@ -91,6 +92,11 @@ body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !imp
   color: #f3f8fc; background: transparent; font-size: .86rem;
 }
 #command-input::placeholder { color: rgba(207, 227, 242, .58); }
+.flight-hud { display: flex; gap: 0; align-items: stretch; margin: 0; }
+.flight-hud > div { min-width: 76px; padding: 2px 12px; border-left: 1px solid rgba(183, 226, 255, .18); }
+.flight-hud dt { margin-bottom: 2px; color: #7793aa; font-size: .58rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.flight-hud dd { overflow: hidden; max-width: 126px; color: #edf6ff; font: 650 .72rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.flight-hud > div:first-child dd, .flight-hud > div:nth-child(6) dd { text-transform: uppercase; }
 .command-suggestions {
   position: absolute; left: 0; right: 0; bottom: 39px; padding: 5px;
   border: 1px solid rgba(122, 215, 255, .3); border-radius: 11px;
@@ -149,7 +155,10 @@ body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !imp
   backdrop-filter: blur(18px);
 }
 @media (max-width: 600px) {
-  body:not(.runtime-mode) .mission-panel { bottom: 8px; width: calc(100vw - 16px); }
+  body:not(.runtime-mode) .mission-panel { bottom: 0; width: 100vw; padding: 5px 8px; }
+  #local-command-dock { grid-template-columns: 1fr; gap: 3px; }
+  .flight-hud { overflow-x: auto; }
+  .flight-hud > div { min-width: 72px; padding-inline: 9px; }
   .dock-row { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
   .dock-row > button { padding-inline: 9px; }
   .dock-status { font-size: .7rem; }

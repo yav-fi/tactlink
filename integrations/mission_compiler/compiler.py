@@ -48,7 +48,7 @@ class MissionPlanCompiler:
         completion: Callable[..., Any] = chat_sync,
         policy: MissionPolicy | None = None,
         chat_base_url: str | None = None,
-        n_predict: int = 900,
+        n_predict: int = 640,
     ) -> None:
         self._completion = completion
         self.policy = policy or MissionPolicy()
