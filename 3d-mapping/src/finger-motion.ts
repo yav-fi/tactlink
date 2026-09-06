@@ -19,6 +19,12 @@ const LOST_MS = 600;
 const THREE_HOLD_MS = 450;
 const THREE_RELEASE_MS = 400;
 const PATTERN = ["V", "H", "V", "H"] as const;
+// The finger heuristics below read a projected 2D hand, so a curled finger on a
+// rotating hand can register as straight for a frame or two. A label is what
+// names the gesture source, and swapping the source cancels whatever command is
+// being held, so a single noisy frame must not be able to do it. Shapes have to
+// hold still briefly before they are allowed to speak for the hand.
+const LABEL_STABLE_MS = 200;
 
 function distance(a: HandLandmark, b: HandLandmark): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
@@ -137,6 +143,18 @@ class FingerSwingDetector {
 export class FingerMotionInterpreter {
   private readonly swing = new FingerSwingDetector();
   private readonly three = new ThreeFingerForward();
+  private shape: "three" | "two" | undefined;
+  private shapeSince = 0;
+
+  /** The hand shape, but only once it has stopped flickering. */
+  private steadyShape(input: FingerMotionInput, nowMs: number): "three" | "two" | undefined {
+    const shape = threeFingers(input) ? "three" : twoFingers(input) ? "two" : undefined;
+    if (shape !== this.shape) {
+      this.shape = shape;
+      this.shapeSince = nowMs;
+    }
+    return shape && nowMs - this.shapeSince >= LABEL_STABLE_MS ? shape : undefined;
+  }
 
   update(input: FingerMotionInput, nowMs: number): FingerMotionState {
     const actions: string[] = [];
@@ -144,10 +162,11 @@ export class FingerMotionInterpreter {
     if (swingAction) actions.push(swingAction);
     const forward = this.three.update(input, nowMs);
     if (forward.action) actions.push(forward.action);
-    if (threeFingers(input)) {
+    const shape = this.steadyShape(input, nowMs);
+    if (shape === "three") {
       return { actions, hint: "Hold three-finger W to keep flying forward", label: "Three_Finger_Forward", progress: forward.progress };
     }
-    if (twoFingers(input)) {
+    if (shape === "two") {
       return { actions, hint: this.swing.hint ? `Two-finger swing ${this.swing.hint}` : "Swing two fingers vertical, then horizontal", label: "Two_Finger_Wiper", progress: this.swing.progress };
     }
     return { actions, hint: "", progress: 0 };

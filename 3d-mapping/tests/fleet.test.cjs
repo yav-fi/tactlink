@@ -164,6 +164,42 @@ test("three-finger W pose fires one forward dash per deliberate hold", () => {
   assert.deepEqual(feedMotion(interpreter, three, result.now, 800).actions, ["fly_forward"]);
 });
 
+test("a flickered hand shape cannot take over the gesture source", () => {
+  const interpreter = new FingerMotionInterpreter();
+  const three = motionHand([0, -1], [false, true, true, true, false]);
+  const curled = motionHand([0, 0], [false, false, false, false, false]);
+  // One or two stray frames of a misread shape must not be allowed to name the
+  // hand: the label is what the repeater treats as the gesture source, and
+  // swapping it cancels whatever command is being held.
+  assert.equal(interpreter.update(three, 0).label, undefined);
+  assert.equal(interpreter.update(curled, 60).label, undefined);
+  assert.equal(interpreter.update(three, 120).label, undefined);
+  assert.equal(interpreter.update(curled, 180).label, undefined);
+  // A shape that is genuinely held still names the hand, so the real
+  // finger gestures keep working.
+  interpreter.update(three, 240);
+  assert.equal(interpreter.update(three, 300).label, undefined);
+  assert.equal(interpreter.update(three, 460).label, "Three_Finger_Forward");
+});
+
+test("a hand in frame accumulates its hold across unclassified frames", () => {
+  const gestures = new GestureHoldInterpreter();
+  gestures.update("Thumb_Up", 0, true);
+  // Classification keeps dropping out while the hand is plainly still there.
+  assert.equal(gestures.update("None", 200, true).progress, 0.5);
+  assert.equal(gestures.update("Thumb_Up", 300, true).progress, 0.75);
+  assert.equal(gestures.update("None", 380, true).progress, 0.95);
+  // The hold completes instead of restarting from each recovery.
+  assert.equal(gestures.update("Thumb_Up", 420, true).action, "takeoff");
+
+  // With no hand in frame the original short window still applies.
+  const gone = new GestureHoldInterpreter();
+  gone.update("Thumb_Up", 0, false);
+  assert.equal(gone.update("None", 400, false).progress, 0);
+  assert.equal(gone.update("Thumb_Up", 500, false).progress, 0);
+  assert.equal(gone.update("Thumb_Up", 900, false).action, "takeoff");
+});
+
 test("browser landmarks recover the original three-finger geometry", () => {
   const landmarks = Array.from({ length: 21 }, () => ({ x: 0.5, y: 0.8 }));
   landmarks[0] = { x: 0.5, y: 0.9 };
