@@ -21,12 +21,24 @@ export type AvoidanceMove = {
  */
 export function avoidanceMove(viewer: Cesium.Viewer, from: Cesium.Cartesian3, to: Cesium.Cartesian3): AvoidanceMove | undefined {
   if (!movementBlocked(viewer, from, to)) return { position: Cesium.Cartesian3.clone(to), detoured: false };
-  const position = detourAround(viewer, from, to);
-  return position ? { position, detoured: true } : undefined;
+  const detour = detourAround(viewer, from, to);
+  return detour ? { position: detour.position, detoured: true } : undefined;
 }
 
-/** Widen the search around a segment already known to be blocked. */
-function detourAround(viewer: Cesium.Viewer, from: Cesium.Cartesian3, to: Cesium.Cartesian3): Cesium.Cartesian3 | undefined {
+// Deflections are tried in pairs, nearest first, so the drone gives up as
+// little of its requested heading as it can. The widest pair lets it turn back
+// along a wall it has already reached instead of reporting no route at all.
+const DETOUR_DEGREES = [35, 60, 90, 130];
+
+type Detour = { position: Cesium.Cartesian3; sign: number };
+
+/**
+ * Widen the search around a segment already known to be blocked. `prefer` is
+ * the side an earlier detour succeeded on; trying that side first keeps the
+ * drone committed to one way around an obstacle instead of alternating between
+ * two equally valid ones and stalling in front of it.
+ */
+function detourAround(viewer: Cesium.Viewer, from: Cesium.Cartesian3, to: Cesium.Cartesian3, prefer = 0): Detour | undefined {
   const frame = Cesium.Transforms.eastNorthUpToFixedFrame(from);
   const inverse = Cesium.Matrix4.inverseTransformation(frame, new Cesium.Matrix4());
   const worldDelta = Cesium.Cartesian3.subtract(to, from, new Cesium.Cartesian3());
@@ -34,22 +46,31 @@ function detourAround(viewer: Cesium.Viewer, from: Cesium.Cartesian3, to: Cesium
   const horizontal = Math.hypot(local.x, local.y);
   if (horizontal < 0.00001) return undefined;
 
-  const candidates: Cesium.Cartesian3[] = [];
-  for (const degrees of [35, -35, 60, -60, 90, -90]) {
-    const angle = Cesium.Math.toRadians(degrees);
-    candidates.push(new Cesium.Cartesian3(
-      local.x * Math.cos(angle) - local.y * Math.sin(angle),
-      local.x * Math.sin(angle) + local.y * Math.cos(angle),
-      local.z,
-    ));
+  const candidates: Detour[] = [];
+  const near = prefer < 0 ? -1 : 1;
+  for (const degrees of DETOUR_DEGREES) {
+    for (const side of [near, -near]) {
+      const angle = Cesium.Math.toRadians(degrees * side);
+      candidates.push({
+        position: new Cesium.Cartesian3(
+          local.x * Math.cos(angle) - local.y * Math.sin(angle),
+          local.x * Math.sin(angle) + local.y * Math.cos(angle),
+          local.z,
+        ),
+        sign: side,
+      });
+    }
   }
   if (local.z >= -0.00001) {
-    candidates.push(new Cesium.Cartesian3(local.x, local.y, Math.max(local.z, horizontal * 0.75, DRONE_CLEARANCE * 4)));
+    candidates.push({
+      position: new Cesium.Cartesian3(local.x, local.y, Math.max(local.z, horizontal * 0.75, DRONE_CLEARANCE * 4)),
+      sign: 0,
+    });
   }
 
   for (const candidate of candidates) {
-    const position = Cesium.Matrix4.multiplyByPoint(frame, candidate, new Cesium.Cartesian3());
-    if (!movementBlocked(viewer, from, position)) return position;
+    const position = Cesium.Matrix4.multiplyByPoint(frame, candidate.position, new Cesium.Cartesian3());
+    if (!movementBlocked(viewer, from, position)) return { position, sign: candidate.sign };
   }
   return undefined;
 }
@@ -59,16 +80,26 @@ function detourAround(viewer: Cesium.Viewer, from: Cesium.Cartesian3, to: Cesium
 // per drone is what makes flight look jagged while a parked drone looks smooth.
 const MIN_LOOKAHEAD_METERS = 4;
 const MAX_LOOKAHEAD_METERS = 30;
-const LOOKAHEAD_SECONDS = 0.25;
+// The whole corridor is swept by the ray, so a longer one costs no accuracy;
+// it only commits the drone further ahead of the last look at the map. Four
+// tenths of a second is still well inside the half-second corridor lifetime,
+// and it noticeably thins out the queries while skirting a long wall.
+const LOOKAHEAD_SECONDS = 0.4;
 const CORRIDOR_MAX_SECONDS = 0.5;
 // Roughly 1.8 degrees, so drift across a full corridor stays inside the ray sweep.
 const SAME_HEADING_DOT = 0.9995;
+// A search that found no route is repeated only after the drone has actually
+// moved, turned, or waited this long. Without it a drone pinned against a wall
+// spends nine building queries every single frame and drags the whole scene
+// down exactly when the view is already struggling.
+const FAILED_ROUTE_SECONDS = 1;
+const FAILED_ROUTE_METERS = 0.05;
 
 /**
  * Clears a straight corridor ahead of a drone once, then flies inside it for
  * free. A corridor is re-probed only when it is used up, when it ages out, or
- * when the requested heading changes, which cuts building queries from one per
- * frame to a handful per second without shortening the safety margin.
+ * when the requested heading leaves it, which cuts building queries from one
+ * per frame to a handful per second without shortening the safety margin.
  */
 export class MotionGuard {
   private requested?: Cesium.Cartesian3;
@@ -76,9 +107,22 @@ export class MotionGuard {
   private remaining = 0;
   private age = 0;
   private detoured = false;
+  private turnSign = 0;
+  private failedFrom?: Cesium.Cartesian3;
+  private failedHeading?: Cesium.Cartesian3;
+  private failedAge = 0;
 
   /** Drop the corridor whenever the flight mode, route, or position changes. */
   clear(): void {
+    this.dropCorridor();
+    this.turnSign = 0;
+    this.failedFrom = undefined;
+    this.failedHeading = undefined;
+    this.failedAge = 0;
+  }
+
+  /** Retire the cleared corridor but keep what was learned about the obstacle. */
+  private dropCorridor(): void {
     this.requested = undefined;
     this.travel = undefined;
     this.remaining = 0;
@@ -91,14 +135,34 @@ export class MotionGuard {
     const step = Cesium.Cartesian3.magnitude(delta);
     if (step < 0.00001) return { position: Cesium.Cartesian3.clone(to), detoured: false };
     const heading = Cesium.Cartesian3.divideByScalar(delta, step, new Cesium.Cartesian3());
-    this.age += Math.max(0, seconds);
-    if (this.travel && this.requested && this.remaining >= step && this.age <= CORRIDOR_MAX_SECONDS
-      && Cesium.Cartesian3.dot(this.requested, heading) >= SAME_HEADING_DOT) {
-      this.remaining -= step;
-      return { position: this.detoured ? advance(from, this.travel, step) : Cesium.Cartesian3.clone(to), detoured: this.detoured };
+    const elapsed = Math.max(0, seconds);
+    this.age += elapsed;
+
+    if (this.travel && this.requested && this.age <= CORRIDOR_MAX_SECONDS) {
+      const alignment = Cesium.Cartesian3.dot(this.requested, heading);
+      // Drift off the cleared axis is still covered while it stays inside the
+      // swept corridor, so a gradual turn shortens the corridor rather than
+      // spending another building query on every frame of the turn.
+      if (alignment < SAME_HEADING_DOT && alignment > 0) {
+        const drift = Math.sqrt(Math.max(0, 1 - alignment * alignment));
+        this.remaining = Math.min(this.remaining, DRONE_CLEARANCE / Math.max(drift, 0.000001));
+      }
+      if (alignment > 0 && this.remaining >= step) {
+        this.remaining -= step;
+        return { position: this.detoured ? advance(from, this.travel, step) : Cesium.Cartesian3.clone(to), detoured: this.detoured };
+      }
     }
 
-    this.clear();
+    this.dropCorridor();
+    if (this.failedFrom && this.failedHeading) {
+      this.failedAge += elapsed;
+      if (this.failedAge <= FAILED_ROUTE_SECONDS
+        && Cesium.Cartesian3.distance(from, this.failedFrom) <= FAILED_ROUTE_METERS
+        && Cesium.Cartesian3.dot(this.failedHeading, heading) >= SAME_HEADING_DOT) return undefined;
+      this.failedFrom = this.failedHeading = undefined;
+      this.failedAge = 0;
+    }
+
     const speed = seconds > 0 ? step / seconds : 0;
     const lookahead = Math.min(MAX_LOOKAHEAD_METERS, Math.max(step, MIN_LOOKAHEAD_METERS, speed * LOOKAHEAD_SECONDS));
     const probe = advance(from, heading, lookahead);
@@ -110,11 +174,17 @@ export class MotionGuard {
 
     // Steer around the obstacle at probe range and hold that heading, rather
     // than picking a fresh deflection angle on every single frame.
-    const detour = detourAround(viewer, from, probe);
-    if (!detour) return undefined;
-    const reach = Cesium.Cartesian3.distance(from, detour);
+    const detour = detourAround(viewer, from, probe, this.turnSign);
+    if (!detour) {
+      this.failedFrom = Cesium.Cartesian3.clone(from);
+      this.failedHeading = Cesium.Cartesian3.clone(heading);
+      this.failedAge = 0;
+      return undefined;
+    }
+    if (detour.sign !== 0) this.turnSign = detour.sign;
+    const reach = Cesium.Cartesian3.distance(from, detour.position);
     this.requested = heading;
-    this.travel = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(detour, from, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+    this.travel = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(detour.position, from, new Cesium.Cartesian3()), new Cesium.Cartesian3());
     this.remaining = Math.max(0, reach - step);
     this.detoured = true;
     return { position: advance(from, this.travel, Math.min(step, reach)), detoured: true };

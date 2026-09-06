@@ -76,6 +76,13 @@
           <div><dt>State</dt><dd id="hud-state">Idle</dd></div>
           <div><dt>Fleet</dt><dd id="hud-fleet">0</dd></div>
         </dl>
+        <nav id="input-switch" class="input-switch local-only" aria-label="Gesture input source">
+          <span class="input-switch-label">Gesture input</span>
+          <div class="input-switch-options">
+            <a id="input-phone" href="?mode=local" title="iPhone front camera over the UWB group map. Reloads the page.">iPhone</a>
+            <a id="input-camera" href="?mode=local&amp;input=camera" title="This computer's webcam, recognized in the browser. Reloads the page.">Mac cam</a>
+          </div>
+        </nav>
         <div class="dock-row" hidden>
           <button id="deploy-drone" type="button">+ Deploy</button>
           <select id="selected-drone" aria-label="Selected drone" disabled><option>No drones deployed</option></select>

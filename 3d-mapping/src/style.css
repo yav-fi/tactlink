@@ -102,7 +102,7 @@ body:not(.runtime-mode) .mission-panel > #world-status,
 body:not(.runtime-mode) .mission-panel > .mode-switch,
 body:not(.runtime-mode) .mission-panel > section,
 body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !important; }
-#local-command-dock { position: relative; display: grid; grid-template-columns: minmax(460px, 1fr) auto; gap: 16px; align-items: center; }
+#local-command-dock { position: relative; display: grid; grid-template-columns: minmax(460px, 1fr) auto auto; gap: 16px; align-items: center; }
 .dock-command-stack { min-width: 0; }
 .command-form { display: grid; grid-template-columns: auto 1fr; height: 32px; align-items: center; }
 .command-prompt { padding-left: 10px; color: #6cdcff; font: 700 1.25rem/1 ui-monospace, monospace; }
@@ -116,6 +116,13 @@ body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !imp
 .flight-hud dt { margin-bottom: 2px; color: #7793aa; font-size: .58rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .flight-hud dd { overflow: hidden; max-width: 126px; color: #edf6ff; font: 650 .72rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .flight-hud > div:first-child dd, .flight-hud > div:nth-child(6) dd { text-transform: uppercase; }
+/* Switching the gesture source is a page reload, so it uses links like .mode-switch. */
+.input-switch { display: grid; align-content: center; gap: 4px; padding: 2px 12px; border-left: 1px solid rgba(183, 226, 255, .18); }
+.input-switch-label { color: #7793aa; font-size: .58rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.input-switch-options { display: flex; gap: 4px; }
+.input-switch a { padding: 3px 8px; border: 1px solid #31516d; border-radius: 6px; color: #bfefff; text-decoration: none; font: 650 .68rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.input-switch a:hover { background: rgba(82, 216, 255, .14); }
+.input-switch a[aria-current="page"] { border-color: #52d8ff; background: #173b50; color: #eaf9ff; }
 .command-suggestions {
   position: absolute; left: 0; right: 0; bottom: 39px; padding: 5px;
   border: 1px solid rgba(122, 215, 255, .3); border-radius: 11px;
@@ -181,6 +188,7 @@ body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !imp
   #local-command-dock { grid-template-columns: 1fr; gap: 3px; }
   .flight-hud { overflow-x: auto; }
   .flight-hud > div { min-width: 72px; padding-inline: 9px; }
+  .input-switch { border-left: 0; padding-inline: 9px; }
   .dock-row { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
   .dock-row > button { padding-inline: 9px; }
   .dock-status { font-size: .7rem; }
@@ -199,6 +207,7 @@ body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !imp
 #phone-stop { width: 100%; margin-top: 12px; }
 .phone-mode .gesture-hud { pointer-events: none; }
 .phone-mode #command-form, .phone-mode #command-drawer, .phone-mode .dock-row, .phone-mode #command-suggestions { display: none !important; }
+.phone-mode #local-command-dock { grid-template-columns: minmax(0, 1fr) auto auto; }
 
 .phone-view-controls { display: flex; gap: 6px; }
 .phone-view-controls button { padding: 7px 12px; }
@@ -215,7 +224,7 @@ body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !imp
 @media (max-width: 900px) { #phone-guide { top: auto; bottom: 90px; width: 260px; max-height: 30vh; } #phone-panel { width: 280px; } }
 
 /* Optional PC battery controls live alongside the bottom telemetry. */
-#local-command-dock.has-battery { grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; }
+#local-command-dock.has-battery { grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 10px; }
 #battery-panel { position: relative; align-self: stretch; display: flex; align-items: center; min-width: 95px; max-width: 180px; font-size: 12px; color: #edf6ff; border-left: 1px solid rgba(183,226,255,.18); }
 #battery-panel > summary { cursor: pointer; list-style: none; padding: 5px 12px; border-radius: 5px; }
 #battery-panel > summary::-webkit-details-marker { display: none; }
@@ -228,7 +237,7 @@ body:not(.runtime-mode) .mission-panel > .advanced-controls { display: none !imp
 #battery-panel p, #battery-readout { line-height: 1.5; color: #b6cadf; }
 #battery-panel button { margin-top: 10px; }
 @media (max-width: 1100px) {
-  #local-command-dock.has-battery { grid-template-columns: minmax(0, 1fr) auto; gap: 4px; }
+  #local-command-dock.has-battery { grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px; }
   .has-battery .dock-command-stack { grid-column: 1 / -1; }
   .has-battery .flight-hud { min-width: 0; overflow-x: auto; }
 }

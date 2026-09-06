@@ -488,6 +488,54 @@ test("cleared corridors are reused for a while, then re-probed", () => {
   assert(queries > 1 && queries < 20, `expected a handful of probes, got ${queries}`);
 });
 
+test("a drone with no safe route stops re-searching every frame", () => {
+  let queries = 0;
+  const viewer = { entities: new Cesium.EntityCollection(), scene: {
+    globe: { show: false },
+    pickFromRay: ray => { queries++; return { position: Cesium.Ray.getPoint(ray, 1) }; },
+  } };
+  const drone = new Fleet(viewer).deploy(home);
+  drone.setManualControl(true);
+  drone.moveManually(1, 0, 0, 1 / 60);
+  const search = queries;
+  assert.equal(drone.collisionBlocked, true);
+  assert(search > 1, "the first pinned frame probes ahead and then looks for a detour");
+  // Pinned in place against the same wall on the same heading: nothing has
+  // changed, so repeating the nine-query search would only stall the frame.
+  for (let frame = 0; frame < 30; frame++) drone.moveManually(1, 0, 0, 1 / 60);
+  assert.equal(drone.collisionBlocked, true);
+  assert.equal(queries, search, `expected no repeat searches, got ${queries - search}`);
+  // The world can change around a stationary drone, so a stale result expires.
+  for (let frame = 0; frame < 40; frame++) drone.moveManually(1, 0, 0, 1 / 60);
+  assert(queries > search, "a failed route is retried once it goes stale");
+});
+
+test("an obstacle detour commits to one side instead of alternating", () => {
+  let openNorth = false;
+  const viewer = { entities: new Cesium.EntityCollection(), scene: {
+    globe: { show: false },
+    pickFromRay(ray) {
+      const frame = Cesium.Transforms.eastNorthUpToFixedFrame(ray.origin);
+      const local = Cesium.Matrix4.multiplyByPointAsVector(
+        Cesium.Matrix4.inverseTransformation(frame, new Cesium.Matrix4()), ray.direction, new Cesium.Cartesian3());
+      const clear = local.y < -0.4 || (openNorth && local.y > 0.4);
+      return clear ? undefined : { position: Cesium.Ray.getPoint(ray, 1) };
+    },
+  } };
+  const drone = new Fleet(viewer).deploy(home);
+  drone.setManualControl(true);
+  for (let frame = 0; frame < 12; frame++) drone.moveManually(1, 0, 0, 1 / 60);
+  assert.equal(drone.avoidanceActive, true);
+  assert(drone.snapshot().latitude < home.latitude, "south is the only way past the wall");
+
+  // Once both sides open up, the drone must finish the way it started rather
+  // than snapping back across the obstacle it is already passing.
+  openNorth = true;
+  const committed = drone.snapshot().latitude;
+  for (let frame = 0; frame < 30; frame++) drone.moveManually(1, 0, 0, 1 / 60);
+  assert(drone.snapshot().latitude < committed, "the detour reversed instead of holding its side");
+});
+
 test("failed building queries do not freeze drones or leave the camera in an offscreen view", () => {
   const mainView = {};
   const viewer = { entities: new Cesium.EntityCollection(), scene: {

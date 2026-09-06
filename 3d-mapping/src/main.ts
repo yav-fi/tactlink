@@ -43,6 +43,7 @@ const runtimeApiBase = ((import.meta.env.VITE_RUNTIME_URL as string | undefined)
 const runtimeMode = new URLSearchParams(window.location.search).get("mode") === "runtime";
 const phoneMode = !runtimeMode && new URLSearchParams(window.location.search).get("input") !== "camera";
 document.body.classList.toggle("phone-mode", phoneMode);
+if (!runtimeMode) document.querySelector(`#input-${phoneMode ? "phone" : "camera"}`)!.setAttribute("aria-current", "page");
 if (phoneMode) hud.altitude.previousElementSibling!.textContent = "Height";
 document.body.classList.toggle("runtime-mode", runtimeMode);
 const gestureHud = {
@@ -1081,7 +1082,11 @@ function updateAutomaticCamera(deltaSeconds: number): void {
   const headingDrone = controllingDrone ? drone : movingId ? fleet.drones.get(movingId) : undefined;
   const flightHeading = controllingDrone ? headingDrone?.heading : headingDrone?.horizontalFlightHeading;
   if (flightHeading !== undefined && (controllingDrone || movement >= 0.04)) {
-    orbitCamera.heading = blendHeading(orbitCamera.heading, flightHeading, 1 - Math.exp(-4.5 * deltaSeconds));
+    // A detour swings the travel heading hard and briefly. Following that at
+    // full rate throws the view around the obstacle the drone is avoiding, so
+    // the camera lags well behind the aircraft until the route settles again.
+    const avoiding = headingDrone?.avoidanceActive || headingDrone?.collisionBlocked;
+    orbitCamera.heading = blendHeading(orbitCamera.heading, flightHeading, 1 - Math.exp((avoiding ? -1.1 : -4.5) * deltaSeconds));
   } else {
     orbitCamera.heading += deltaSeconds * idleCameraDriftRate(stillSeconds);
   }
@@ -1112,15 +1117,19 @@ let surveyUpdateIndex = 0;
 let previousCameraTime = performance.now();
 let pilotStatusTime = 0;
 let telemetryTime = 0;
+// A building query stalls the frame it runs on. Integrating that whole stall
+// would jump a cruising drone metres in one step, which reads as a lurch rather
+// than as flight, so a hitched frame advances the world in slow motion instead.
+const MAX_FRAME_SECONDS = 1 / 30;
 viewer.clock.onTick.addEventListener((clock) => {
-  const deltaSeconds = Math.max(0, Math.min(0.1, Cesium.JulianDate.secondsDifference(clock.currentTime, previousTime)));
+  const deltaSeconds = Math.max(0, Math.min(MAX_FRAME_SECONDS, Cesium.JulianDate.secondsDifference(clock.currentTime, previousTime)));
   previousTime = Cesium.JulianDate.clone(clock.currentTime, previousTime);
   if (!runtimeMode) for (const item of fleet.drones.values()) item.update(deltaSeconds);
   const cameraTime = performance.now();
   const wasPlaying = fleet.replay.running;
   fleet.updateReplay(cameraTime / 1000);
   if (wasPlaying && !fleet.replay.running) refreshFleet();
-  const cameraDelta = Math.min(0.1, Math.max(0, (cameraTime - previousCameraTime) / 1000));
+  const cameraDelta = Math.min(MAX_FRAME_SECONDS, Math.max(0, (cameraTime - previousCameraTime) / 1000));
   updateFreeCamera(cameraDelta);
   updateAutomaticCamera(cameraDelta);
   updateBattery?.(cameraDelta, fleet.paused || !clock.shouldAnimate);

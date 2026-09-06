@@ -38,6 +38,20 @@ function interpolate(a: Coordinates, b: Coordinates, fraction: number): Coordina
   };
 }
 
+// A step this long carries the drone's direction outright; shorter steps only
+// nudge it. Positions round-trip through degrees, so the direction read from a
+// millimetre of travel is mostly rounding noise, and feeding that straight to
+// the model yaw and the chase camera is what makes slow flight look jittery.
+// Weighting by distance rather than by frame count keeps the same flown path
+// looking identical at any frame rate.
+const TRAVEL_DIRECTION_METERS = 0.5;
+
+function blendDirection(current: Cesium.Cartesian3, instant: Cesium.Cartesian3, moved: number): Cesium.Cartesian3 {
+  const blended = Cesium.Cartesian3.lerp(current, instant, Math.min(1, moved / TRAVEL_DIRECTION_METERS), new Cesium.Cartesian3());
+  // A near-reversal cancels out; take the new direction instead of normalizing zero.
+  return Cesium.Cartesian3.magnitude(blended) < 0.001 ? instant : Cesium.Cartesian3.normalize(blended, blended);
+}
+
 export class DroneController {
   readonly battery = new Battery();
   collisionBlocked = false;
@@ -753,8 +767,10 @@ export class DroneController {
     this.renderVersion++;
     if (this.state === "MANUAL" || this.mission) this.recordCoverage();
     const current = Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude);
-    if (this.lastRenderedPosition && Cesium.Cartesian3.distance(current, this.lastRenderedPosition) > 0.001) {
-      this.travelDirection = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(current, this.lastRenderedPosition, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+    const moved = this.lastRenderedPosition ? Cesium.Cartesian3.distance(current, this.lastRenderedPosition) : 0;
+    if (this.lastRenderedPosition && moved > 0.001) {
+      const instant = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(current, this.lastRenderedPosition, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+      this.travelDirection = this.travelDirection ? blendDirection(this.travelDirection, instant, moved) : instant;
       this.smoothRenderedHeading(this.travelDirection, current);
     }
     this.lastRenderedPosition = Cesium.Cartesian3.clone(current);
