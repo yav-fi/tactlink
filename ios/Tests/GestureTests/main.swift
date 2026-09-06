@@ -26,21 +26,21 @@ func pose(_ fingers:(Bool,Bool,Bool,Bool,Bool), vector:(Double,Double)=(0,1))->P
 }
 
 for vector in [(0.0,1.0),(1.0,0.0),(0.0,-1.0),(-1.0,0.0)] {
-    check(pose((false,true,true,true,false),vector:vector).command(canned:"None",score:0).0=="Three_Finger_Orbit","orbit works in every hand orientation")
+    check(pose((false,true,true,true,false),vector:vector).command(canned:"None",score:0).0=="None","old three-finger gesture is disabled")
     check(pose((true,true,true,true,true),vector:vector).command(canned:"Open_Palm",score:0.9).0=="Open_Palm","open palm hovers in every hand orientation")
     check(pose((false,false,false,false,false),vector:vector).command(canned:"None",score:0).0=="Closed_Fist","curled landmarks recognize fist even when canned is None")
-    check(pose((false,true,false,false,false),vector:vector).command(canned:"None",score:0).0=="One_Finger_Up","one index finger climbs regardless of direction")
-    check(pose((false,true,true,false,false),vector:vector).command(canned:"Victory",score:0.9).0=="Two_Fingers_Down","index and middle descend regardless of direction")
+    check(pose((false,true,false,false,false),vector:vector).command(canned:"None",score:0).0=="Pointing_Up","one index finger requests orbit")
+    check(pose((false,true,true,false,false),vector:vector).command(canned:"Victory",score:0.9).0=="Victory","two fingers select another operator")
 }
-check(pose((true,false,false,false,false)).command(canned:"Thumb_Up",score:0.9).0=="Closed_Fist","thumb position does not interfere with curled four fingers")
+check(pose((true,false,false,false,false)).command(canned:"Thumb_Up",score:0.9).0=="Thumb_Up","thumbs up ascends rather than calling follow")
 check(pose((false,true,true,true,true)).command(canned:"Open_Palm",score:0.9).0=="None","four fingers with tucked thumb no longer hover")
-check(pose((false,true,true,true,false)).command(canned:"None",score:0).0=="Three_Finger_Orbit","three fingers orbit")
+check(pose((false,true,true,true,false)).command(canned:"None",score:0).0=="None","three fingers are disabled")
 check(pose((false,false,true,false,false)).command(canned:"None",score:0).0=="None","middle finger alone has no command")
 var depthPose=pose((false,true,false,false,false))
 // Rotate its index finger from the image plane into depth: 2D would collapse it.
 let jointKeys:[WritableKeyPath<PhoneHandPose,P>]=[\.indexMCP,\.indexPIP,\.indexTip]
 for key in jointKeys { let point=depthPose[keyPath:key]; depthPose[keyPath:key] = .init(x:point.x,y:0,z:point.y,confidence:1) }
-check(depthPose.command(canned:"None",score:0).0=="One_Finger_Up","3D extension survives foreshortening")
+check(depthPose.command(canned:"None",score:0).0=="Pointing_Up","3D extension survives foreshortening")
 var ambiguous=pose((false,true,false,false,false))
 ambiguous.indexTip=ambiguous.indexPIP
 check(ambiguous.command(canned:"None",score:0).0=="None","degenerate joint geometry is not a fist")
@@ -56,4 +56,6 @@ check(filter.update(label:"None",score:0,at:0.5).0=="None","lost hand clears com
 filter.reset()
 check(filter.update(label:"Thumb_Down",score:0.99,at:1).0=="None","reset discards previous votes")
 
-print("Five-gesture and temporal filter tests passed")
+check(pose((true,false,false,false,false)).command(canned:"Thumb_Down",score:0.9).0=="Thumb_Down","thumbs down descends rather than calling follow")
+check(pose((true,false,false,false,false)).command(canned:"None",score:0).0=="None","uncertain thumb direction cannot call follow")
+print("Six-gesture and temporal filter tests passed")

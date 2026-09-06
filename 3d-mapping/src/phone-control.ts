@@ -5,20 +5,21 @@ export type PhoneSample = {
   heading: number; compassValid: boolean; gesture: string; confidence: number;
   flat: boolean; twoPhone?: boolean; geometryAge: number; age: number; cycle: number; members: number;
 };
-export type PhoneAlignment = { anchor: string; rotation: number; mirror: boolean };
+export type PhoneAlignment = { anchor: string; rotation: number; mirror: boolean; spacingScale?: number };
 export const PHONE_TIMEOUT = 1.5;
 
-/** Preserve measured metre offsets; never fill missing geometry with a fabricated position. */
+/** Map measured offsets with an explicit display scale; missing geometry stays unresolved. */
 export function placePhones(phones: PhoneSample[], alignment: PhoneAlignment): RuntimeOperator[] {
   const anchor = phones.find(phone => phone.id === alignment.anchor && phone.pos && phone.age <= PHONE_TIMEOUT && phone.geometryAge <= 8);
   if (!anchor?.pos) return [];
   const rotation = alignment.rotation * Math.PI / 180;
+  const scale = alignment.spacingScale ?? 1;
   return phones.filter(phone => phone.room === anchor.room && phone.flat === anchor.flat && !!phone.twoPhone === !!anchor.twoPhone && phone.pos && phone.geometryAge <= 8).map(phone => {
-    const x = phone.pos![0] - anchor.pos![0];
-    const y = (phone.pos![1] - anchor.pos![1]) * (alignment.mirror ? -1 : 1);
+    const x = (phone.pos![0] - anchor.pos![0]) * scale;
+    const y = (phone.pos![1] - anchor.pos![1]) * scale * (alignment.mirror ? -1 : 1);
     return {
       operator_id: phone.id, name: phone.name,
-      position: { x: Math.cos(rotation) * x - Math.sin(rotation) * y, y: 5 + Math.sin(rotation) * x + Math.cos(rotation) * y, z: phone.flat ? 0 : phone.z - anchor.z },
+      position: { x: Math.cos(rotation) * x - Math.sin(rotation) * y, y: 5 + Math.sin(rotation) * x + Math.cos(rotation) * y, z: phone.flat ? 0 : (phone.z - anchor.z) * scale },
       heading: phone.compassValid ? phone.heading : (alignment.mirror ? -phone.heading : phone.heading) + rotation,
       // Match the on-device MediaPipe acceptance threshold after temporal filtering.
       gesture: phone.confidence >= 0.55 ? phone.gesture : "None", gesture_confidence: phone.confidence,
@@ -28,10 +29,10 @@ export function placePhones(phones: PhoneSample[], alignment: PhoneAlignment): R
   });
 }
 
-const CLAIMS = new Set(["Closed_Fist", "Three_Finger_Orbit", "Open_Palm"]);
+const CLAIMS = new Set(["Closed_Fist", "Pointing_Up", "Open_Palm", "Victory"]);
 const ACTIONS: Record<string, string> = {
-  Closed_Fist: "follow", One_Finger_Up: "takeoff", Two_Fingers_Down: "land",
-  Three_Finger_Orbit: "orbit", Open_Palm: "hover_overhead",
+  Closed_Fist: "follow", Thumb_Up: "takeoff", Thumb_Down: "land",
+  Pointing_Up: "orbit", Victory: "nearest_operator", Open_Palm: "hover_overhead",
 };
 
 /** One owner of one browser drone. Handoffs require a fresh deliberate hold. */
@@ -90,7 +91,7 @@ export class PhoneControl {
     }
     if (ready.length > 1) {
       this.reset(); this.conflicting = true;
-      return { progress: 0, stop: true, reason: "Conflicting control requests. Only one person should hold fist, three fingers or an open palm; then hold again." };
+      return { progress: 0, stop: true, reason: "Conflicting control requests. Only one person should hold fist, an index finger, two fingers or an open palm; then hold again." };
     }
     const claimant = ready.filter(p => CLAIMS.has(p.gesture))
       .sort((a, b) => this.claims.get(b.operator_id)!.since - this.claims.get(a.operator_id)!.since || a.operator_id.localeCompare(b.operator_id))[0];
@@ -132,9 +133,27 @@ export class PhoneControl {
     }
     const action = gesture === "Closed_Fist" ? undefined : ACTIONS[gesture];
     const progress = action ? Math.min(1, (now - this.since) / 400) : 0;
-    const continuous = ["takeoff", "land", "orbit", "hover_overhead"].includes(action ?? "");
+    const continuous = ["takeoff", "land", "orbit", "hover_overhead", "nearest_operator"].includes(action ?? "");
     const emit = action && progress >= 1 && (!this.fired || continuous);
     if (emit) this.fired = true;
     return { operator, action: emit ? action : undefined, progress, stop: changedOwner || changedGesture || !operator };
+  }
+}
+
+/** Pick relative to the caller once per hold; never jump targets mid-flight. */
+export class NearestOperatorTarget {
+  private id = "";
+  private caller = "";
+  reset(): void { this.id = ""; this.caller = ""; }
+  resolve(owner: RuntimeOperator, people: RuntimeOperator[]): RuntimeOperator | undefined {
+    const live = people.filter(p => p.operator_id !== owner.operator_id && p.age <= PHONE_TIMEOUT
+      && [p.position.x, p.position.y, p.position.z].every(Number.isFinite));
+    if (this.caller !== owner.operator_id) this.reset();
+    if (!this.caller) {
+      this.caller = owner.operator_id;
+      const distance = (p: RuntimeOperator) => Math.hypot(p.position.x - owner.position.x, p.position.y - owner.position.y, p.position.z - owner.position.z);
+      this.id = [...live].sort((a, b) => distance(a) - distance(b) || a.operator_id.localeCompare(b.operator_id))[0]?.operator_id ?? "";
+    }
+    return live.find(p => p.operator_id === this.id);
   }
 }

@@ -32,12 +32,12 @@ export function applyPhoneAction(target: DroneController, action: string, owner:
     target.startGestureMotion(Math.cos(angle), Math.sin(angle), 0, 2);
   } else if (action === "orbit") {
     const dx = actual.x - owner.position.x, dy = actual.y - owner.position.y;
-    const distance = Math.hypot(dx, dy), radial = (2 - distance) * 0.8;
+    const distance = Math.hypot(dx, dy), radial = (5 - distance) * 2;
     const angle = distance > 0.01 ? Math.atan2(dy, dx) : 0;
     const height = Math.max(band.floor, Math.min(band.ceiling, owner.position.z + 3.5));
-    const east = radial * Math.cos(angle) - Math.sin(angle), north = radial * Math.sin(angle) + Math.cos(angle);
+    const east = radial * Math.cos(angle) - 3 * Math.sin(angle), north = radial * Math.sin(angle) + 3 * Math.cos(angle);
     const up = (height - actual.z) * 0.8;
-    target.startGestureMotion(east, north, up, Math.min(2, Math.hypot(east, north, up)), true);
+    target.startGestureMotion(east, north, up, Math.min(3.5, Math.hypot(east, north, up)), true);
   } else if (action === "return_home") target.run({ drone_id: target.id, mission: [
     { action: "goto", ...home, altitude: home.altitude + Math.max(band.floor, Math.min(band.ceiling, actual.z)), speed_mps: 2 },
   ] });

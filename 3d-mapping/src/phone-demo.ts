@@ -5,14 +5,15 @@ import { startPhoneScene } from "./phone-scene";
 import { applyPhoneAction, phoneFlightBand } from "./phone-flight";
 import { GeoFrame } from "./runtime/frame";
 import { OperatorLayer } from "./runtime/layers/operators";
-import { PhoneControl, placePhones, PHONE_TIMEOUT, type PhoneSample } from "./phone-control";
+import { PhoneControl, NearestOperatorTarget, placePhones, PHONE_TIMEOUT, type PhoneSample } from "./phone-control";
 
 /** Phone input for the existing flight controller. The browser owns the only demo drone. */
 export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, home: Coordinates, api: string): () => void {
   const frame = new GeoFrame();
   frame.update(home.latitude, home.longitude, home.altitude);
   const controller = new PhoneControl();
-  const alignment = { anchor: "", rotation: 0, mirror: false };
+  const receiver = new NearestOperatorTarget();
+  const alignment = { anchor: "", rotation: 0, mirror: false, spacingScale: 10 };
   let room = "", closed = false, busy = false, lastMode = 0;
   const panel = document.createElement("section");
   panel.id = "phone-panel";
@@ -21,7 +22,8 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
     <p id="phone-feed-warning" class="phone-help"></p>
     <label>Live room <select id="phone-room"></select></label>
     <div class="phone-view-controls"><button id="phone-closer" title="Zoom in">＋</button><button id="phone-wider" title="Zoom out">−</button><button id="phone-frame">Frame group</button></div>
-    <p class="phone-scale">1 square = 1 m · people 1.75 m · drone 0.8 m rotor envelope</p>
+    <p class="phone-scale">1 square = 1 simulated m · people 1.75 m · drone 0.8 m rotor envelope</p>
+    <p class="phone-help">* Operator spacing is displayed at 10× measured UWB distance (1 real m = 10 simulated m). Raw phone measurements are unchanged.</p>
     <p id="phone-height"></p>
     <p id="phone-action-status" class="phone-help" role="status"></p>
     <p id="phone-owner">Waiting for the group</p><div id="phone-members"></div>
@@ -30,22 +32,23 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       <label>Stationary anchor <select id="phone-anchor"></select></label>
       <label>Rotate group <input id="phone-rotation" type="range" min="-180" max="180" value="0" step="1"></label>
       <label><input id="phone-mirror" type="checkbox"> Mirror group</label>
-      <p>Metres are measured by UWB. The anchor stays 5 m north of the drone’s starting point. Keep it still and align the group to the map. Two-phone mode assumes a vertical map line, X = Z = 0, using real UWB distance. Three-phone mode sets Z = 0.<!-- Legacy: Five-phone mode preserves relative XYZ; its third axis is not gravity height. --></p>
+      <p>Operator offsets come from UWB and are enlarged 10× for this demo. The anchor stays 5 m north of the drone’s starting point. Keep it still and align the group to the map. Two-phone mode assumes a vertical map line, X = Z = 0, using real UWB distance. Three-phone mode sets Z = 0.<!-- Legacy: Five-phone mode preserves relative XYZ; its third axis is not gravity height. --></p>
     </details>
-    <p class="phone-help">The gold person controls the drone. Anyone can hold a fist to follow, three fingers to orbit, or an open palm to hover above themselves. Drag the map to look around; Frame group restores the close view.</p>`;
+    <p class="phone-help">The gold person controls the drone. Anyone can hold a fist to follow, an index finger to orbit, or an open palm to hover above themselves. Drag the map to look around; Frame group restores the close view.</p>`;
   document.body.append(panel);
   const guide = document.createElement("section");
   guide.id = "phone-guide";
   guide.innerHTML = `<strong>GESTURES → DRONE</strong>
     <p>Use the phone’s <b>front camera</b>. Keep the whole hand in the selfie preview. Hold steady for <b>about one second</b> for recognition and the command hold.</p>
     <dl>
-      <div data-gesture="One_Finger_Up"><dt>☝️ One finger</dt><dd>Index extended, other fingers curled. Any direction. Climb at 2 m/s while held. Lower your hand to stop.</dd></div>
-      <div data-gesture="Two_Fingers_Down"><dt>✌️ Two fingers</dt><dd>Index + middle extended, ring + pinky curled. Any direction. Descend at 1 m/s to the hover floor while held. Lower your hand to stop.</dd></div>
-      <div data-gesture="Three_Finger_Orbit"><dt>Three fingers · orbit</dt><dd>Index + middle + ring extended, pinky curled. Orbit your mapped position at a 2 m radius, 3.5 m above your base, while held. Release to stop.</dd></div>
-      <div data-gesture="Open_Palm"><dt>✋ Open palm · hover above you</dt><dd>Open your hand with all fingers and thumb extended. Fly to 3.5 m above your mapped base and hover while held. Release to stop.</dd></div>
-      <div data-gesture="Closed_Fist"><dt>✊ Closed fist</dt><dd>Four fingers curled; thumb position is ignored. Fly above you, then follow your mapped position at up to 2 m/s, about 3.5 m above your base. You can lower your hand. Another person’s held fist switches follow to them. Use Stop drone to cancel follow.</dd></div>
+      <div data-gesture="Thumb_Up"><dt>👍 Thumbs up</dt><dd>Climb at 2 m/s while held. Release to stop.</dd></div>
+      <div data-gesture="Thumb_Down"><dt>👎 Thumbs down</dt><dd>Descend directly at 1 m/s while held, stopping at the hover floor.</dd></div>
+      <div data-gesture="Pointing_Up"><dt>☝️ Index finger · orbit</dt><dd>Index extended, other fingers curled. Orbit you at a 5 m radius and about 3 m/s, 3.5 m above your mapped base. Release to stop.</dd></div>
+      <div data-gesture="Open_Palm"><dt>✋ Open palm · hover</dt><dd>Fingers and thumb extended. Fly above you and hover at 3.5 m above your mapped base while held.</dd></div>
+      <div data-gesture="Closed_Fist"><dt>✊ Closed fist · come to you</dt><dd>Fingers and thumb curled. Fly above you, then follow your mapped position. Lowering your hand keeps follow active; Stop drone cancels it.</dd></div>
+      <div data-gesture="Victory"><dt>✌️ Two fingers · nearest other operator</dt><dd>Index and middle extended. Fly above the operator closest to you, excluding yourself. Hold to continue, release to stop. The destination stays selected until release; stale positioning stops movement.</dd></div>
     </dl>
-    <p><b>Release to stop vertical movement; fist-follow stays on.</b> One/two fingers leave follow and adjust altitude; three fingers/open palm switch to orbit/hover; release to hover at that height. The fist caller keeps control until another fist/three-finger/open-palm claim, Stop drone, or signal loss. Before a fist claim, the closest person controls. Stop drone pauses movement and releases control. Follow uses the mapped UWB position, so keep the stationary anchor still.</p>`;
+    <p>Hold one gesture for about one second. Thumbs control height for the current operator. Fist, index, palm and two fingers can claim control. Release stops motion except fist-follow. Keep the UWB anchor still. Stop drone pauses all phone commands.</p>`;
   document.body.append(guide);
   const text = (id: string, value: string) => { panel.querySelector<HTMLElement>(`#${id}`)!.textContent = value; };
   const roomSelect = panel.querySelector<HTMLSelectElement>("#phone-room")!;
@@ -58,7 +61,7 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
   panel.querySelector<HTMLButtonElement>("#phone-wider")!.onclick = () => scene.zoom(1.25);
   panel.querySelector<HTMLButtonElement>("#phone-frame")!.onclick = () => scene.focus();
   const halt = () => { target.stopCommand(); };
-  const reset = () => { halt(); controller.reset(); };
+  const reset = () => { halt(); controller.reset(); receiver.reset(); };
   let paused = false;
   const stopButton = panel.querySelector<HTMLButtonElement>("#phone-stop")!;
   stopButton.onclick = () => { paused = !paused; reset(); stopButton.textContent = paused ? "Resume phone control" : "Stop drone"; };
@@ -117,7 +120,7 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
         const row = document.createElement("div");
         const health = phone.age > PHONE_TIMEOUT ? "signal lost" : !phone.pos ? "waiting for UWB" : phone.geometryAge > 8 ? "position expired" : phone.confidence < 0.55 && phone.gesture !== "None" ? "pose confidence too low; show the full hand"
           : !tracked.some(p => p.operator_id === phone.id) ? "check anchor and room mode"
-          : owner && owner.operator_id !== phone.id && phone.gesture !== "None" ? `${owner.name} owns control; fist, three fingers or open palm can request it`
+          : owner && owner.operator_id !== phone.id && phone.gesture !== "None" ? `${owner.name} owns control; fist, index, two fingers or open palm can request it`
           : `${phone.geometryAge.toFixed(1)} s position age`;
         const claim = controller.claimProgress(phone.id);
         const gesture = phone.gesture.replaceAll("_", " ");
@@ -139,9 +142,12 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       document.querySelector<HTMLElement>("#gesture-confidence")!.textContent = owner ? `${owner.name} · ${owner.gesture === "None" ? "no stable pose" : "stable hand pose"}` : "Join one room and wait for its UWB map";
       document.querySelector<HTMLElement>("#gesture-progress-fill")!.style.width = `${control.progress * 100}%`;
       const action = control.action;
+      if (action !== "nearest_operator") receiver.reset();
+      const destination = action === "nearest_operator" && owner ? receiver.resolve(owner, tracked) : undefined;
       const hold = Math.max(control.progress, ...tracked.map(p => controller.claimProgress(p.operator_id)));
-      const atOverhead = owner && Math.hypot(owner.position.x - actual.x, owner.position.y - actual.y,
-        Math.max(band.floor, Math.min(band.ceiling, owner.position.z + 3.5)) - actual.z) < 0.15;
+      const overheadTarget = destination ?? owner;
+      const atOverhead = overheadTarget && Math.hypot(overheadTarget.position.x - actual.x, overheadTarget.position.y - actual.y,
+        Math.max(band.floor, Math.min(band.ceiling, overheadTarget.position.z + 3.5)) - actual.z) < 0.15;
       const reason = paused ? "Movement paused — press Resume phone control."
         : document.hidden ? "Movement paused while this browser tab is hidden."
         : mode === 5 && phones.length ? "This demo supports two or three phones. Create a new room on the updated iOS app."
@@ -149,7 +155,9 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
         : !tracked.length ? "No fresh mapped position — keep the anchor still and wait for a complete UWB range cycle."
         : control.reason ? control.reason
         : !owner ? "No controller — hold one gesture steadily."
+        : action === "nearest_operator" && !destination ? "No fresh destination operator. Check the other phone’s UWB/feed, then release and hold two fingers again."
         : target.collisionBlocked ? "Movement blocked by an obstacle. Change direction or climb if clear."
+        : action === "nearest_operator" && destination ? `${atOverhead ? "Holding above" : "Flying toward"} ${destination.name} · selected nearest to ${owner.name}`
         : action === "takeoff" && actual.z >= band.ceiling ? "Ceiling reached — descent is still available."
         : action === "land" && actual.z <= band.floor ? "Hover floor reached — the drone stays above people."
         : (action === "follow" || action === "hover_overhead") && atOverhead ? `Holding above ${owner.name}; already at the requested position.`
@@ -159,7 +167,10 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
         : "Waiting for a stable supported gesture; only the controlling operator can climb or descend.";
       text("phone-action-status", reason);
       if (!action || !owner || paused || document.hidden) return;
-      applyPhoneAction(target, action, owner, home, actual, band);
+      if (action === "nearest_operator") {
+        if (!destination) { halt(); return; }
+        applyPhoneAction(target, "hover_overhead", destination, home, actual, band);
+      } else applyPhoneAction(target, action, owner, home, actual, band);
       document.querySelector<HTMLElement>("#gesture-action")!.textContent = `${owner.name.toUpperCase()} · ${action.replaceAll("_", " ").toUpperCase()}`;
     } catch (error) {
       if (closed) return;

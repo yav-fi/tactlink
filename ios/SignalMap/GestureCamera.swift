@@ -36,12 +36,18 @@ struct PhoneHandPose {
         let f=fingerStates
         // Rule scores are acceptance flags for the existing command transport,
         // not class probabilities. The UI exposes the actual raw model score separately.
-        if f.allSatisfy({$0 == .curled}) {return ("Closed_Fist",1)}
-        if f == [.extended,.curled,.curled,.curled] {return ("One_Finger_Up",1)}
-        if f == [.extended,.extended,.curled,.curled] {return ("Two_Fingers_Down",1)}
-        if f == [.extended,.extended,.extended,.curled] {return ("Three_Finger_Orbit",1)}
-        if f.allSatisfy({$0 == .extended}), state(thumbCMC,thumbIP,thumbTip) == .extended {return ("Open_Palm",1)}
-        if !f.contains(.extended),canned=="Closed_Fist",score>=0.55 {return ("Closed_Fist",score)}
+        let thumb=state(thumbCMC,thumbIP,thumbTip)
+        if f.allSatisfy({$0 == .curled}) {
+            // Classify thumb direction before fist so thumbs never call the drone.
+            if thumb == .extended {
+                if score >= 0.55 && (canned == "Thumb_Up" || canned == "Thumb_Down") { return (canned,score) }
+                return ("None",0)
+            }
+            if thumb == .curled { return ("Closed_Fist",1) }
+        }
+        if f == [.extended,.curled,.curled,.curled] {return ("Pointing_Up",1)}
+        if f == [.extended,.extended,.curled,.curled] {return ("Victory",1)}
+        if f.allSatisfy({$0 == .extended}), thumb == .extended {return ("Open_Palm",1)}
         return ("None",0)
     }
 }
