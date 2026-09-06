@@ -35,3 +35,11 @@ The build statically exports to `dist/client`. Serve that directory with any sta
 Run `npx tsc --noEmit` and `npx oxlint app lib vite.config.ts next.config.ts` for authored code. The starter-wide `npm run lint` also checks its untouched generated component catalog, which currently contains upstream lint violations. No browser interaction or visual QA was performed; validation covers compilation, static output, local HTTP response, and diagram invariants.
 
 Primary implementation references and UWB / MediaPipe references are linked on the page. Sites registration is in `.openai/hosting.json`; generated dependencies and build output stay ignored.
+
+## Vercel
+
+Deploy `arulandu/dn` with the repository root (`.`) as the Vercel Root Directory. The root `vercel.json` explicitly selects **Other** (`framework: null`), installs with `npm --prefix pitch ci`, builds with `npm --prefix pitch run build`, and serves only `pitch/dist/client`. The root package manifest pins Node 22.x. These settings override the previously detected FastAPI preset.
+
+Do not add `server.main:app` as the entrypoint for this deployment: that launches the unrelated Python runtime instead of the pitch site. The pitch is a static export and requires no Python process, serverless functions, camera permissions, or application secrets.
+
+The canonical production URL is `https://dnhacks26.arulandu.com`. Assign that domain in the Vercel project's Domains settings and use the DNS record shown by Vercel. Push a new commit to trigger deployment; redeploying the old `61dfe13` commit will not include this configuration.
