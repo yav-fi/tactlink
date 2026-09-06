@@ -41,6 +41,7 @@ class PhoneReport:
     moving: bool = False
     heading_ready: bool = False
     gesture: str = "None"
+    gesture_source: str = "phone"
     cycle: int = 0
     recv_time: float = 0.0
 
@@ -79,6 +80,7 @@ def parse_datagram(data: bytes, now: float | None = None) -> PhoneReport | None:
         moving=bool(obj.get("moving", False)),
         heading_ready=bool(obj.get("headingReady", False)),
         gesture=(str(obj.get("gesture"))[:32] if obj.get("gesture") else "None"),
+        gesture_source=(str(obj.get("gestureSource"))[:16] if obj.get("gestureSource") else "phone"),
         cycle=int(cycle) if isinstance(cycle, (int, float)) and math.isfinite(cycle) else 0,
         recv_time=time.monotonic() if now is None else now,
     )

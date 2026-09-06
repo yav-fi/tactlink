@@ -26,6 +26,8 @@ class Operator:
         self.pos = np.array(pos, dtype=float)
         self.heading = float(heading)          # radians, world frame (0 = +x / east)
         self.op_id = ""                        # phone id when driven by a live feed
+        self.gesture = "None"                  # latest gesture this operator is making
+        self.gesture_source = "phone"          # "phone" / "canned" / "custom" / "none"
         self._goal = self.pos.copy()
         self._rng = np.random.default_rng(abs(hash(name)) % (2**32))
 
@@ -64,9 +66,10 @@ class OperatorPool:
         """Replace the operator list with live phone reports (see phone_feed).
 
         ``reports`` is any iterable of objects with ``op_id``, ``name``, ``pos``
-        (x, y) and ``heading`` (radians). ``rot`` rotates the phones' arbitrary
-        UWB frame into the sim frame (radians); ``recenter`` subtracts the group
-        centroid, fixed on the first non-empty sync so the geometry stays stable.
+        (x, y), ``heading`` (radians) and ``gesture``. ``rot`` rotates the phones'
+        arbitrary UWB frame into the sim frame (radians); ``recenter`` subtracts
+        the group centroid, fixed on the first non-empty sync so the geometry
+        stays stable.
         """
         reports = list(reports)
         if not reports:
@@ -96,6 +99,8 @@ class OperatorPool:
                 op.pos[:] = pts[r.op_id]
                 op.heading = float(r.heading) + rot
                 op.name = r.name or op.name
+            op.gesture = getattr(r, "gesture", "None") or "None"
+            op.gesture_source = getattr(r, "gesture_source", "phone")
             kept.append(op)
         self.operators = kept
         self.n = len(kept)

@@ -137,7 +137,9 @@ by default (real phone positions will drive them); `--wander` makes them walk.
 - **Handoff is emergent.** Dash the drone toward someone else; when it arrives it
   is nearest to them, so they take control. No dedicated handoff gesture.
 
-One webcam drives whoever currently has control.
+Each operator has **its own gesture interpreter** (`src/operator_gestures.py`) -
+hold timing and combos are per-person - and only the controlling operator's
+commands reach the drone. One webcam fills in for whoever currently has control.
 
 **Live phones (`--phone-feed`).** With `python src/main.py --phone-feed 9870`, the
 operators are driven by real iPhones running SignalMap's visualizer bridge
@@ -145,10 +147,12 @@ operators are driven by real iPhones running SignalMap's visualizer bridge
 heading over UDP, and `src/phone_feed.py` turns that into operators that appear
 and move at their real spots. UWB coordinates have no north, so
 `--phone-frame-rot DEG` rotates them to line up with the scene; the group is
-recentered on its first fix. Gestures still come from the webcam for now (the
-phones send a reserved `gesture` field that is always `"None"`). No hardware
-needed to try it: `python scripts/mock_phone_feed.py --port 9870 --phones 3`
-fakes three phones walking a circle.
+recentered on its first fix. Each phone's own `gesture` field feeds its
+operator's interpreter (the phones send `"None"` until on-device recognition
+lands - piece 3); the webcam still covers the active operator, or use
+`--no-camera` for a pure ground station. No hardware needed to try it:
+`python scripts/mock_phone_feed.py --port 9870 --phones 3` fakes three phones
+walking a circle, and `--script` makes phone 1 run a gesture timeline.
 
 **Testing gestures safely.** `--check-gestures` is the safe way to rehearse hand
 poses and combos: it shows the recognized gesture, hold bar, partial-combo hint,
@@ -281,6 +285,7 @@ any pattern are unaffected. Delete the file or set `"sequences": []` to disable
 | `src/simulator.py` | Arcade quadcopter physics (world frame: x right, y forward, z up) |
 | `src/swarm.py` | Leader + ring-formation followers flown as one squad |
 | `src/operators.py` | People (position + facing) giving gestures — simulated or fed from phones; "forward" is operator-relative |
+| `src/operator_gestures.py` | One `GestureInterpreter` per operator; returns the controlling operator's state |
 | `src/phone_feed.py` | UDP listener for SignalMap `RoomBridge` datagrams → live operators |
 | `src/visualizer.py` | Look-at pinhole camera, multi-drone 3D render, control HUD |
 | `src/control_types.py` | Shared dataclasses and the `FlightMode` enum |
