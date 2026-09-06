@@ -7,8 +7,6 @@ Signal forward, and it moves that way. Call it back, and it arrives overhead —
 above *you*, the person who asked. Show an open palm, and it stops. No sticks,
 no tablet, no eyes off what is in front of you.
 
-**Gesture → intent → action.**
-
 **Mission:** Give American teams a faster, safer way to run reconnaissance and
 protect the people beside them. When there is no time to fly a drone stick by
 stick, TactLink reads the hand signals a squad already uses and turns them into
