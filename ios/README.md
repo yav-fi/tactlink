@@ -65,6 +65,13 @@ Source: `RoomTransport.swift` handles data links, `RoomSession.swift` coordinate
 
 Two headings are sent. `heading` is `RelativeMotionHeading` — derived from how the group centroid-relative position changes, so it is only meaningful while walking. `compass` (`HeadingSource.swift`) is an absolute **magnetic** bearing in degrees clockwise from north, from Core Motion's `.xMagneticNorthZVertical` device-motion fusion — no location permission, no GPS. The simulator prefers `compass` when `compassValid`, else falls back to `heading`. Magnetic (not true) north is fine: every phone in one place shares the reference, and declination plus any mount-angle offset is one constant on the sim side (`--phone-frame-rot`). It assumes the phone is worn upright, screen facing forward; a near-flat phone reports `compassValid: false`.
 
+The same datagram now also feeds the **mission runtime** (`server/main.py`),
+which listens on `udp://<host>:9870` and draws each phone as a person standing on
+the ground in the Cesium console, with the nearest operator commanding each drone.
+Point **Visualizer host** at the machine running the runtime; nothing on the phone
+changes. See the repository README, "Phones on the ground". The feed is
+unauthenticated, so the runtime binds loopback unless `PHONE_FEED_HOST` is set.
+
 Set the target as **Visualizer host** in the lobby (`192.168.1.50:9870`, port defaults to 9870), or pass `--sim-bridge host:port` as a launch argument. The value is remembered. Blank turns it off. Positions only exist once a full range cycle has resolved, so nothing is sent before the group map appears.
 
 ## Fast automatic deployment

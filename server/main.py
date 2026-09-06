@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -18,19 +19,27 @@ from simulation.models import (
     InterferenceConfig,
     MissionCommand,
     MissionTask,
+    OperatorFrame,
+    OperatorState,
     ScenarioEvent,
     SimulationEvent,
     SimulationSnapshot,
 )
+from simulation.operators import report_from_payload
 from simulation.scenarios import ScenarioPreset
 from simulation.simulation import SimulationEngine
 from simulation.world import WorldDefinition
 
 from .mission_intel import install as install_mission_intel
+from .phone_listener import DEFAULT_PORT, start_phone_listener
 from .websocket import WebSocketHub
 
 # How often, in simulated seconds, a registered mission plan is re-evaluated.
 PLAN_EVALUATION_SECONDS = 1.0
+
+# The phone feed carries unauthenticated datagrams, so it stays on loopback
+# until an operator deliberately opens it to the LAN the phones are on.
+PHONE_FEED_HOST = os.environ.get("PHONE_FEED_HOST", "127.0.0.1")
 
 
 def _default_engine() -> SimulationEngine:
@@ -49,9 +58,12 @@ def create_app(
     engine: SimulationEngine | None = None,
     start_runner: bool = True,
     mission_backend: str = "local-llm",
+    phone_feed_port: int | None = None,
 ) -> FastAPI:
     runtime = engine or _default_engine()
     hub = WebSocketHub()
+    if phone_feed_port is None:
+        phone_feed_port = int(os.environ.get("PHONE_FEED_PORT", DEFAULT_PORT))
 
     async def simulation_loop() -> None:
         interval = runtime.config.tick_seconds
@@ -74,9 +86,25 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         task = asyncio.create_task(simulation_loop()) if start_runner else None
+        phones = None
+        if start_runner and phone_feed_port > 0:
+            try:
+                phones = await start_phone_listener(
+                    runtime.operators, PHONE_FEED_HOST, phone_feed_port
+                )
+            except OSError as exc:
+                # A busy port must not take the whole runtime down: HTTP ingest
+                # via POST /api/operators still works without the UDP feed.
+                logging.getLogger(__name__).warning(
+                    "phone feed disabled, could not bind %s:%s (%s)",
+                    PHONE_FEED_HOST, phone_feed_port, exc,
+                )
+        app.state.phone_feed = phones
         try:
             yield
         finally:
+            if phones is not None:
+                phones.close()
             if task:
                 task.cancel()
                 try:
@@ -135,6 +163,38 @@ def create_app(
             return runtime.submit_mission(command)
         except RuntimeError as exc:
             raise HTTPException(503, str(exc)) from exc
+
+    @app.get("/api/operators", response_model=list[OperatorState])
+    async def operators() -> list[OperatorState]:
+        """The people currently on the ground, placed in scene metres."""
+        return runtime.operators.states()
+
+    @app.post("/api/operators", status_code=202)
+    async def publish_operator(sample: dict) -> dict[str, object]:
+        """Accept one phone sample over HTTP.
+
+        The body is the same JSON object `RoomBridge` puts in its datagrams, so
+        a phone, a bridge script, or curl can all publish through one shape.
+        """
+        report = report_from_payload(sample)
+        if report is None:
+            raise HTTPException(422, "expected at least a string id and a finite pos [x, y]")
+        runtime.operators.ingest(report)
+        return {"operator_id": report.operator_id, "connected": runtime.operators.connected}
+
+    @app.get("/api/operators/frame", response_model=OperatorFrame)
+    async def operator_frame() -> OperatorFrame:
+        return runtime.operators.frame
+
+    @app.post("/api/operators/frame", response_model=OperatorFrame)
+    async def set_operator_frame(frame: OperatorFrame) -> OperatorFrame:
+        """Pin the phone group onto the ground.
+
+        UWB ranging fixes the group's shape but never its absolute position or
+        north, so which phone stands where is a declared convention. This is
+        where that convention is set.
+        """
+        return runtime.operators.set_frame(frame)
 
     @app.post("/api/simulation/pause")
     async def pause() -> dict[str, bool]:

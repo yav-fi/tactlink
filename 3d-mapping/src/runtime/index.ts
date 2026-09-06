@@ -8,6 +8,7 @@ import { CommTerrainLayer } from "./layers/comms";
 import { CoverageLayer, type CoverageMode } from "./layers/coverage";
 import { DroneLayer } from "./layers/drones";
 import { NetworkLayer } from "./layers/network";
+import { OperatorLayer } from "./layers/operators";
 import { ObjectiveLayer } from "./layers/objectives";
 import { WorldLayer } from "./layers/world";
 import { DisturbancePanel } from "./panels/disturbance";
@@ -49,6 +50,7 @@ const isSnapshot = (value: unknown): value is RuntimeSnapshot => {
     && candidate.drones.every((drone) => finiteVector(drone.truth.position))
     && Array.isArray(candidate.missions)
     && Array.isArray(candidate.links)
+    && (candidate.operators === undefined || Array.isArray(candidate.operators))
     && Boolean(candidate.adaptive);
 };
 
@@ -68,6 +70,9 @@ export function startRuntimeMode(viewer: Cesium.Viewer): void {
   const coverage = new CoverageLayer(viewer, frame);
   const comms = new CommTerrainLayer(viewer, frame);
   const world = new WorldLayer(viewer, frame);
+  // People on the ground. It draws a line to the drones each one
+  // commands, so it needs the drone layer to place them first.
+  const operators = new OperatorLayer(viewer, frame, (id) => drones.positionOf(id));
   let snapshot: RuntimeSnapshot | undefined;
   let pendingWorld: WorldDefinition | undefined;
   let taskById = new Map<string, RuntimeTask>();
@@ -433,6 +438,7 @@ export function startRuntimeMode(viewer: Cesium.Viewer): void {
   const animate = (now: number): void => {
     if (!stopped && snapshot) {
       drones.update(snapshot, buffer.sample(now), taskById);
+      operators.update(snapshot);
       network.update(snapshot);
     }
     if (!stopped) requestAnimationFrame(animate);

@@ -30,6 +30,9 @@ TactLink brings together six hackathon workstreams:
   motion planning with obstacle routing, deconfliction, and energy checks (`planning/`).
 - **[Cesium 3D mapping](#cesium-3d-mapping)** — browser-based fleet deployment,
   piloting, and deterministic local missions (`3d-mapping/`).
+- **[Phones as live operators](#phones-on-the-ground--live-operators-in-the-runtime)** —
+  iPhones appear as people on the map and the nearest one commands each drone
+  (`simulation/operators.py`, `server/phone_listener.py`).
 
 ## One-command demo
 
@@ -398,6 +401,100 @@ nodes include a relay-capable specialist; override the bounded demo fleet with
 
 See [`3d-mapping/README.md`](3d-mapping/README.md) for Cesium token setup,
 controls, and its local mission format.
+
+---
+
+# Phones on the ground → live operators in the runtime
+
+The same iPhones that range each other over UWB also show up as **people** in
+the Cesium console, standing on the lawn beside the drones, and the drone obeys
+whichever person is **nearest to it**.
+
+Nothing new is needed on the phone. `RoomBridge` already streams each phone's own
+position, compass facing, and locally recognized gesture as a small JSON datagram
+(~10 Hz). The runtime now listens for exactly that datagram, so a phone already
+in the field only needs its **Visualizer host** pointed at the runtime machine.
+
+```sh
+# Terminal 1: runtime. It also opens the phone feed on udp://127.0.0.1:9870.
+SIMULATION_DRONE_COUNT=3 .venv/bin/uvicorn server.main:app --host 127.0.0.1 --port 8000
+
+# Terminal 2: Cesium console -> http://127.0.0.1:5173/?mode=runtime
+VITE_RUNTIME_URL=http://127.0.0.1:8000 npm --prefix 3d-mapping run dev
+
+# No phones handy? Three fake ones walking a scripted gesture timeline:
+.venv/bin/python scripts/mock_phone_feed.py --phones 3 --still --script
+```
+
+To take real phones, bind the feed to the Wi-Fi the phones are on and set that
+host in each app's lobby. The datagrams are **unauthenticated**, so do this only
+on a trusted network:
+
+```sh
+PHONE_FEED_HOST=0.0.0.0 SIMULATION_DRONE_COUNT=3 \
+  .venv/bin/uvicorn server.main:app --host 0.0.0.0 --port 8000
+```
+
+`PHONE_FEED_PORT` moves the port; `0` disables the UDP feed entirely, leaving the
+HTTP route below. Anything that can speak HTTP can publish the same object:
+
+```sh
+curl -X POST http://127.0.0.1:8000/api/operators \
+  -H 'content-type: application/json' \
+  -d '{"id":"ian","name":"Ian","pos":[0,0],"compass":0,"compassValid":true,
+       "gesture":"Thumb_Up","gestureConfidence":0.9}'
+```
+
+## Putting the group on the lawn
+
+UWB ranging fixes the group's **shape** but can never observe its absolute
+position or north. So one phone is nominated as the **anchor**: it stands at a
+chosen point, and everyone else keeps the offset UWB actually measured, rotated
+to line up with north.
+
+```sh
+curl -X POST http://127.0.0.1:8000/api/operators/frame \
+  -H 'content-type: application/json' \
+  -d '{"anchor_id":"ian","anchor_east":0,"anchor_north":-45,"rotation_deg":0}'
+```
+
+`anchor_east` / `anchor_north` are metres from the scene origin, which is already
+the Washington Monument (38.8895, -77.0353). The default puts the anchor 45 m
+south of it, on the open ground in front of the drone staging line.
+`rotation_deg` absorbs magnetic declination and any phone mount-angle offset in
+one constant — the runtime equivalent of `--phone-frame-rot`. `GET
+/api/operators` shows where everyone landed; `GET /api/state` carries them to the
+frontend as `operators`.
+
+## Who is flying what
+
+Control is decided **per drone**: each drone listens to the operator nearest to
+it, with hysteresis so control does not flicker as a drone passes between two
+people. In the console, a person commanding a drone turns amber, gains a control
+ring, and draws a dashed line to each drone listening to them; the anchor is
+labelled. A phone that goes quiet dims and then disappears, so lost tracking
+never leaves a stale commander on the map.
+
+A gesture must be **held ~0.4 s** to fire, fires once, and cannot repeat until the
+hand changes — timed per person, so one operator's hold never affects another's.
+Only the controlling operator's gestures reach a drone; everyone else's are
+recognized, shown, and dropped.
+
+| Gesture | Runtime command |
+| --- | --- |
+| 👍 Thumb up | `GOTO` above that operator, 25 m |
+| 👎 Thumb down | `GOTO` the drone's own x/y at 2 m |
+| ✋ Open palm | `HOLD` where it is |
+| ☝️ Pointing up | `WATCH` aimed at that operator |
+| 🤟 ILoveYou | `GOTO` where that person is standing, 15 m |
+| Three fingers / two-finger dashes | `GOTO` 25 m along that operator's facing (±90°) |
+
+Dashes resolve against the operator's **own compass facing**, so "forward" means
+forward for the person who signalled it. Gesture missions carry
+`metadata.source = "operator-gesture"` with the operator, gesture, and the drone
+addressed. They are submitted to the ordinary auction rather than pinned to that
+drone: the addressed drone almost always wins, because bids are distance-based
+and the target sits next to it, but a better-placed peer may take it.
 
 ---
 

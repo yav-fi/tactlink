@@ -533,6 +533,46 @@ class SimulationEvent(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+# Where the anchor phone stands when nobody has configured a frame: on the open
+# ground just south of the drone staging line, in front of the monument.
+DEFAULT_ANCHOR_EAST = 0.0
+DEFAULT_ANCHOR_NORTH = -45.0
+
+
+class OperatorFrame(BaseModel):
+    """How the arbitrary UWB group frame is pinned onto the scene.
+
+    ``anchor_id`` names the phone that stands at (``anchor_east``,
+    ``anchor_north``) metres from the scene origin; everyone else keeps their
+    measured offset from it, rotated by ``rotation_deg`` degrees counter-
+    clockwise. With no anchor named, the first phone by id is used, so a group
+    still lands somewhere sensible before anyone configures anything.
+    """
+
+    anchor_id: str | None = None
+    anchor_east: float = DEFAULT_ANCHOR_EAST
+    anchor_north: float = DEFAULT_ANCHOR_NORTH
+    rotation_deg: float = 0.0
+    ground_z: float = 0.0
+
+
+class OperatorState(BaseModel):
+    """One person as the frontend sees them: placed, facing, and commanding."""
+
+    operator_id: str
+    name: str
+    position: Vector3
+    heading: float = 0.0                # radians, 0 = +east (scene frame)
+    gesture: str = "None"
+    gesture_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    gesture_source: str = "phone"
+    action: str | None = None           # what that gesture means, if anything
+    is_anchor: bool = False
+    controls: list[str] = Field(default_factory=list)   # drones listening to them
+    nearest_distance: float | None = None
+    age: float = 0.0                    # seconds since this phone last reported
+
+
 class SimulationSnapshot(BaseModel):
     type: str = "state"
     simulation_time: float
@@ -548,6 +588,7 @@ class SimulationSnapshot(BaseModel):
     network: NetworkMetrics = Field(default_factory=NetworkMetrics)
     control_available: bool = True
     adaptive: AdaptiveRuntimeState = Field(default_factory=AdaptiveRuntimeState)
+    operators: list[OperatorState] = Field(default_factory=list)
     origin_lat: float = 38.8895
     origin_lon: float = -77.0353
     origin_alt: float = 20.0

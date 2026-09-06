@@ -236,3 +236,52 @@ export function objectiveIcon(kind: "search" | "watch" | "relay" | "point", colo
   cache.set(key, canvas);
   return canvas;
 }
+
+/**
+ * A person standing on the ground, seen from above and slightly in front.
+ *
+ * Operators need to read as *people*, not as another aircraft class, at the
+ * same zoom where drone chevrons are 20 pixels wide - so this is a head and
+ * shoulders rather than a silhouette, with a ring under it when that person is
+ * currently commanding a drone.
+ */
+export function operatorIcon(color: string, commanding: boolean): HTMLCanvasElement {
+  const key = `operator:${color}:${commanding}`;
+  const cached = cache.get(key);
+  if (cached) return cached;
+  const canvas = document.createElement("canvas");
+  canvas.width = SIZE;
+  canvas.height = SIZE;
+  const context = canvas.getContext("2d")!;
+  context.translate(SIZE / 2, SIZE / 2);
+
+  if (commanding) {
+    // The control ring is what makes "this person is flying that drone"
+    // legible without reading the label.
+    arc(context, 26, 0, Math.PI * 2, color, 3);
+    context.fillStyle = `${color}22`;
+    context.beginPath();
+    context.arc(0, 0, 26, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  context.fillStyle = color;
+  context.strokeStyle = "rgba(4,8,12,0.85)";
+  context.lineWidth = 2.2;
+
+  context.beginPath();                       // head
+  context.arc(0, -9, 7.5, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+
+  context.beginPath();                       // shoulders
+  context.moveTo(-12, 14);
+  context.quadraticCurveTo(-12, -1, 0, -1);
+  context.quadraticCurveTo(12, -1, 12, 14);
+  context.closePath();
+  context.fill();
+  context.stroke();
+
+  cache.set(key, canvas);
+  return canvas;
+}
