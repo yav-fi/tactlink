@@ -31,15 +31,13 @@ Escape quits.
 | Open palm | ~0.4 s | Halt — cancel the current move and hover in place |
 | Point up (index finger) | ~0.4 s | Orbit the controlling operator; point up again to stop |
 | I-love-you sign | ~0.4 s | Fly back to the controlling operator and hover |
-| **Point at an operator** | **~1.4 s** | **Hand off** to *that* operator (orange ring fills as you hold) |
-| **Victory sign** | **~2 s** | **Hand off** to a *random* other operator |
+| **Victory sign** | **~2 s** | **Hand off** — send the drone to a random other operator |
 | **Two-finger wiper** | — | **Dash** the drone left/right |
 
-**Hand-off, two ways.** Point your finger toward an operator (relative to the
-drone) and hold — an orange ring fills, and when it completes the drone flies to
-that one. Or hold a Victory sign ~2 s to send it to a random operator. Only
-operator 1 has a camera; a hand-off just moves which operator the drone orbits,
-returns to, and hovers above (`CTRL -> OPn`, gold).
+**Hand-off.** Hold a Victory sign ~2 s — the bar at the bottom of the scene
+fills — and the drone flies to a random other operator (`CTRL -> OPn`, gold).
+Only operator 1 has a camera; a hand-off just moves which operator the drone
+orbits, returns to, and hovers above.
 
 **Wiper dash.** Hold index + middle out and swing them vertical → horizontal →
 vertical → horizontal within a few seconds. On the last swing the drone dashes
@@ -67,9 +65,9 @@ pass `--threshold 0.4`.
 | --- | --- |
 | `gesture_demo.py` | entry point: webcam loop, MediaPipe recognizer, compositing, `--demo` |
 | `gestures.py` | `GestureGate` (dropout-tolerant hold), `FingerSwingDetector` (wiper), landmark helpers |
-| `flight.py` | `Quad` physics, `Operators` (random scatter, targeted + random hand-off, aim), `Autopilot` |
+| `flight.py` | `Quad` physics, `Operators` (random scatter), `Autopilot` |
 | `scene.py` | pinhole-camera 3D render of the grid, operators, drone + HUD |
-| `test_gesture_demo.py` | `python -m unittest` from this folder — 14 tests |
+| `test_gesture_demo.py` | `python -m unittest` from this folder — 13 tests |
 
 The 3D view is a hand-rolled pinhole projection (no game engine); the model reads
 static hand poses, not motion. The scene is a visualization, not a calibrated

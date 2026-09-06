@@ -10,10 +10,9 @@ Gestures (hold ~0.4 s): thumbs up = take off / climb, thumbs down = land,
 open palm = halt, point up = orbit the controlling operator, I-love-you =
 return to them.
 
-Hand-off: point at an operator and hold ~1.4 s (goes to that operator), OR hold
-a Victory sign ~2 s (goes to a random operator). Two-finger "wiper" - swing
-index+middle vertical<->horizontal<->vertical<->horizontal - dashes the drone
-left or right the way the fingers point.
+Hold a Victory sign ~2 s to hand the drone to a random other operator. Two-finger
+"wiper" - swing index+middle vertical<->horizontal<->vertical<->horizontal -
+dashes the drone left or right the way the fingers point.
 
 Runs on the repo's deps (mediapipe / opencv / numpy); imports nothing from src/.
 Recognition is local; webcam frames are neither recorded nor uploaded.
@@ -73,7 +72,7 @@ class Sim:
         self.gate = GestureGate()
         self.swing = FingerSwingDetector()
         self.hud = {'mode': 'idle', 'gesture': 'None', 'progress': 0.0,
-                    'note': '', 'aim': 0.0, 'swing': ''}
+                    'note': '', 'swing': ''}
         self._note_until = 0.0
 
     def _note(self, text, now):
@@ -81,7 +80,7 @@ class Sim:
             self.hud['note'] = text
             self._note_until = now + 2.5
 
-    def advance(self, raw_label, hand, dt, now, force_aim=None):
+    def advance(self, raw_label, hand, dt, now):
         # Two-finger wiper -> dash. While a swing is in progress, don't let a
         # transient Victory read (2 fingers up) start the hand-off timer.
         dash = self.swing.update(hand, now)
@@ -92,17 +91,6 @@ class Sim:
         if command:
             self._note(self.pilot.command(command, self.quad, now), now)
 
-        # Targeted hand-off: point steadily at an operator (not mid-swing, not
-        # while another gesture is held).
-        if force_aim is not None:
-            self.ops.aim(force_aim, now)
-        elif hand is not None and hand.present and held in ('None', '') and not self.swing.active:
-            self.ops.aim(self.ops.aim_from_point(hand.point_dir, self.quad.pos[:2]), now)
-        else:
-            self.ops.aim(None, now)
-        if self.ops.aim_progress(now) >= 1.0:
-            self._note(self.pilot.command('handoff_aim', self.quad, now), now)
-
         self.pilot.update(self.quad, dt, now)
 
         if now > self._note_until:
@@ -110,7 +98,6 @@ class Sim:
         self.hud['mode'] = self.pilot.mode
         self.hud['gesture'] = FRIENDLY.get(held, held if held != 'None' else 'None')
         self.hud['progress'] = progress
-        self.hud['aim'] = self.ops.aim_progress(now)
         self.hud['swing'] = self.swing.progress if self.swing.active else ''
 
     def render_scene(self, scene):
@@ -119,8 +106,8 @@ class Sim:
 
 # --- scripted demo input -------------------------------------------------
 
-# (start, end) seconds -> (gesture label, extra) where extra is None,
-# "dash:left" / "dash:right" (wiper), or "aim:<operator index>".
+# (start, end) seconds -> (gesture label, extra) where extra is None or
+# "dash:left" / "dash:right" (the wiper).
 _DEMO = [
     (1.5, 2.6, 'Thumb_Up', None),        # take off
     (4.0, 5.0, 'Thumb_Up', None),        # climb a step
@@ -128,10 +115,11 @@ _DEMO = [
     (9.5, 10.5, 'Open_Palm', None),      # halt / stop orbiting
     (12.5, 13.0, 'None', 'dash:right'),  # wiper -> dash right
     (16.0, 16.5, 'None', 'dash:left'),   # wiper -> dash left
-    (19.0, 22.0, 'None', 'aim:2'),       # point at OP3, hold -> targeted hand off
-    (25.0, 26.5, 'Pointing_Up', None),   # orbit OP3
-    (29.0, 33.0, 'Victory', None),       # hold ~2 s -> hand off to a random operator
-    (36.0, 37.2, 'Thumb_Down', None),    # land
+    (19.0, 23.0, 'Victory', None),       # hold ~2 s -> hand off to a random operator
+    (26.0, 27.5, 'Pointing_Up', None),   # orbit the new operator
+    (30.0, 31.0, 'ILoveYou', None),      # return to them
+    (33.0, 37.0, 'Victory', None),       # hold ~2 s -> hand off again
+    (40.0, 41.2, 'Thumb_Down', None),    # land
 ]
 
 
@@ -143,16 +131,13 @@ def _demo_input(t):
 
 
 def _demo_step(sim, t, prev_extra):
-    """Translate a demo timeline entry into (label, force_aim), firing one-shot
-    dash commands on segment entry."""
+    """Translate a demo timeline entry into a label, firing one-shot dash
+    commands on segment entry."""
     label, extra = _demo_input(t)
-    force_aim = None
-    if extra and extra.startswith('aim:'):
-        force_aim = int(extra.split(':')[1])
-    elif extra and extra.startswith('dash:') and extra != prev_extra:
+    if extra and extra.startswith('dash:') and extra != prev_extra:
         sim.pilot.command('dash_west' if extra.endswith('left') else 'dash_east',
                           sim.quad, t)
-    return label, force_aim, extra
+    return label, extra
 
 
 # --- panels + compositing ---------------------------------------------------
@@ -205,8 +190,8 @@ def run_demo(args):
         dt, vt, raw_label, extra = 1 / 60, 0.0, 'None', None
         while vt < args.seconds:
             vt += dt
-            raw_label, force_aim, extra = _demo_step(sim, vt, extra)
-            sim.advance(raw_label, None, dt, vt, force_aim=force_aim)
+            raw_label, extra = _demo_step(sim, vt, extra)
+            sim.advance(raw_label, None, dt, vt)
         composite = np.hstack([_demo_panel(cv2, np, raw_label), sim.render_scene(scene)])
         if args.out:
             cv2.imwrite(args.out, composite)
@@ -223,8 +208,8 @@ def run_demo(args):
         t = now - start
         dt = min(0.05, now - prev)
         prev = now
-        raw_label, force_aim, extra = _demo_step(sim, t, extra)
-        sim.advance(raw_label, None, dt if dt > 0 else 1 / 60, now, force_aim=force_aim)
+        raw_label, extra = _demo_step(sim, t, extra)
+        sim.advance(raw_label, None, dt if dt > 0 else 1 / 60, now)
         composite = np.hstack([_demo_panel(cv2, np, raw_label), sim.render_scene(scene)])
         cv2.imshow(window, composite)
         if cv2.waitKey(16) & 0xFF in (27, ord('q')):

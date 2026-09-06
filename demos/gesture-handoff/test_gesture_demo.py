@@ -103,27 +103,18 @@ class DashTests(unittest.TestCase):
         self.assertEqual(pilot.mode, 'halt')      # holds, does not spring back
 
 
-class AimHandoffTests(unittest.TestCase):
-    def test_point_selects_the_operator_that_way_and_holds_to_send(self):
-        ops = _row(-4.5, -1.5, 1.5, 4.5)
-        drone = np.array([0.0, 4.0])
-        ops.anchor = 1
-        self.assertEqual(ops.aim_from_point((1.0, 0.0), drone), 3)     # point right
-        self.assertEqual(ops.aim_from_point((-1.0, 0.0), drone), 0)    # point left
-        self.assertIsNone(ops.aim_from_point((0.1, 0.0), drone))       # limp hand
-
-        for k in range(60):
-            ops.aim(3, k * 0.05)
-        self.assertGreaterEqual(ops.aim_progress(59 * 0.05), 1.0)
-        self.assertEqual(ops.commit_aim(), 3)
-        self.assertEqual(ops.anchor, 3)
-
-    def test_random_handoff_never_picks_the_holder(self):
+class RandomHandoffTests(unittest.TestCase):
+    def test_never_picks_the_current_holder_and_is_random(self):
         ops = _row(-4.5, -1.5, 1.5, 4.5)
         ops.rng = np.random.default_rng(1)
+        seen = set()
         for _ in range(40):
             before = ops.anchor
-            self.assertNotEqual(before, ops.random_handoff())
+            new = ops.random_handoff()
+            self.assertEqual(new, ops.anchor)
+            self.assertNotEqual(before, new)
+            seen.add(new)
+        self.assertGreater(len(seen), 1)
 
 
 class NoseTrackingTests(unittest.TestCase):
