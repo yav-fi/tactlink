@@ -137,8 +137,18 @@ by default (real phone positions will drive them); `--wander` makes them walk.
 - **Handoff is emergent.** Dash the drone toward someone else; when it arrives it
   is nearest to them, so they take control. No dedicated handoff gesture.
 
-One webcam drives whoever currently has control. Next: real phones streaming
-their own gesture + position data into the sim.
+One webcam drives whoever currently has control.
+
+**Live phones (`--phone-feed`).** With `python src/main.py --phone-feed 9870`, the
+operators are driven by real iPhones running SignalMap's visualizer bridge
+(`ios/SignalMap/RoomBridge.swift`): each phone streams its own UWB position and
+heading over UDP, and `src/phone_feed.py` turns that into operators that appear
+and move at their real spots. UWB coordinates have no north, so
+`--phone-frame-rot DEG` rotates them to line up with the scene; the group is
+recentered on its first fix. Gestures still come from the webcam for now (the
+phones send a reserved `gesture` field that is always `"None"`). No hardware
+needed to try it: `python scripts/mock_phone_feed.py --port 9870 --phones 3`
+fakes three phones walking a circle.
 
 **Testing gestures safely.** `--check-gestures` is the safe way to rehearse hand
 poses and combos: it shows the recognized gesture, hold bar, partial-combo hint,
@@ -270,10 +280,12 @@ any pattern are unaffected. Delete the file or set `"sequences": []` to disable
 | `src/controls.py` | Hand pose + gesture state → `ControlInput`; runs autopilot routines |
 | `src/simulator.py` | Arcade quadcopter physics (world frame: x right, y forward, z up) |
 | `src/swarm.py` | Leader + ring-formation followers flown as one squad |
-| `src/operators.py` | Simulated people (position + facing) giving gestures; "forward" is operator-relative |
+| `src/operators.py` | People (position + facing) giving gestures — simulated or fed from phones; "forward" is operator-relative |
+| `src/phone_feed.py` | UDP listener for SignalMap `RoomBridge` datagrams → live operators |
 | `src/visualizer.py` | Look-at pinhole camera, multi-drone 3D render, control HUD |
 | `src/control_types.py` | Shared dataclasses and the `FlightMode` enum |
 | `scripts/collect_gestures.py` · `scripts/train_gestures.py` | Record samples · fit the custom model |
+| `scripts/mock_phone_feed.py` | Fake N phones walking a circle, for testing `--phone-feed` without hardware |
 | `config/gesture_actions.json` · `config/gesture_sequences.json` | Single-gesture → action map · ordered combos |
 
 The simulator takes a normalized `ControlInput` (throttle, yaw_rate, roll,

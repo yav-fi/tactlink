@@ -11,7 +11,16 @@ final class RoomSession: ObservableObject {
     let transport: RoomTransport
     let ranging: RoomRanging
     let log: BenchLog
+    let bridge = RoomBridge()
     @Published var displayName: String
+    /// Optional "host:port" of an external visualizer / drone simulator on the
+    /// same Wi-Fi. Empty disables the outbound telemetry stream. Persisted.
+    @Published var simBridge: String = UserDefaults.standard.string(forKey: "room.simBridge") ?? "" {
+        didSet {
+            UserDefaults.standard.set(simBridge, forKey: "room.simBridge")
+            bridge.configure(simBridge)
+        }
+    }
     @Published private(set) var code = ""
     @Published private(set) var joined = false
     @Published private(set) var status = "Create a room or enter your group’s room code."
@@ -112,6 +121,11 @@ final class RoomSession: ObservableObject {
         ranging.onUpdate = { [weak self] count, distance in self?.liveSamples=count; self?.liveDistance=distance }
         log.onError = { [weak self] error in self?.logError=error }
         log.event("launch", "build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "?") · camera disabled")
+        let launchArgs = ProcessInfo.processInfo.arguments
+        if let i = launchArgs.firstIndex(of: "--sim-bridge"), launchArgs.indices.contains(i + 1) {
+            simBridge = launchArgs[i + 1]
+        }
+        bridge.configure(simBridge)
         writeSnapshot()
     }
 
@@ -147,6 +161,7 @@ final class RoomSession: ObservableObject {
         topology=""; controlLeader=""; receivedControlRevision = -1
         status="Waiting for \(targetCount) phones. Share this room code with the group."
         transport.start(code: clean)
+        bridge.configure(simBridge)
         UIApplication.shared.isIdleTimerDisabled = true
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.tick() }
         log.event("room-joined", transport.room)
@@ -158,6 +173,7 @@ final class RoomSession: ObservableObject {
         gate.release(); preparedCache=nil
         timer?.invalidate(); timer=nil
         transport.stop()
+        bridge.stop()
         joined=false; running=false; members=[]; known=[:]; clocks=[:]
         jobs=[:]; offered=[:]; pending=[]; cycleStarted=nil
         geometry=nil; geometryUpdated=nil; liveDistance=nil; liveSamples=0
@@ -453,6 +469,10 @@ final class RoomSession: ObservableObject {
             if geometryAge>8 { geometry=nil; geometryStatus="Position estimate expired. Waiting for a fresh complete cycle." }
         }
         if now-lastSnapshot>=1 { updateGeometry(now); writeSnapshot(); lastSnapshot=now }
+        if let mine=geometry?.positions[localID] {
+            bridge.send(id:localID,name:displayName,room:transport.room,cycle:cycle,
+                        position:mine,heading:motionHeading,flat:threePhoneMode)
+        }
     }
 
     private func coordinate(_ now: Double) {

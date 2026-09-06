@@ -8,6 +8,7 @@ the simulator, and shows the camera feed beside a 3D view of the drone.
     python src/main.py --camera 1      # pick another camera
     python src/main.py --demo          # no camera: scripted flight for testing
     python src/main.py --demo --headless --out flight.png   # render a sample
+    python src/main.py --phone-feed 9870   # operators driven by live SignalMap phones
 
 Gestures: Thumb_Up take off / step altitude · Thumb_Down land · Pointing_Up
 orbit · ILoveYou return home · two-finger wiper directional dash · three-finger
@@ -165,8 +166,18 @@ def run(args: argparse.Namespace) -> int:
     runtime_mode = bool(args.mission_url) and not check_mode
     swarm = None if (runtime_mode or check_mode) else Swarm(args.drones)
     viz = None if (runtime_mode or check_mode) else Visualizer()
+
+    phone_feed = None
+    if args.phone_feed:
+        from phone_feed import PhoneFeed
+
+        phone_feed = PhoneFeed.from_arg(args.phone_feed)
+        phone_feed.start()
+        print(f"phone feed: listening on udp/{phone_feed.port} "
+              f"(operators come from SignalMap; frame rotated {args.phone_frame_rot:g} deg)")
+
     operators = OperatorPool(max(args.operators, 4) if args.demo else args.operators)
-    operators.wander_enabled = args.wander and not args.demo
+    operators.wander_enabled = args.wander and not args.demo and phone_feed is None
     if args.demo:                        # deterministic: a line of people facing north
         for i, op in enumerate(operators.operators):
             op.pos[:] = [i * 12.0 - (operators.n - 1) * 6.0, 0.0]
@@ -234,8 +245,11 @@ def run(args: argparse.Namespace) -> int:
             if kbd_event:
                 gstate.events.append(kbd_event)
                 kbd_event = None
+            if phone_feed is not None:
+                operators.sync_from_reports(phone_feed.latest(),
+                                            rot=math.radians(args.phone_frame_rot))
             operators.step(dt if dt > 0 else 1 / 60)
-            if swarm is not None:
+            if swarm is not None and operators.operators:
                 # Control goes to whoever the drone is nearest; idle drone trails them.
                 operators.set_active_by_proximity(swarm.drones[0].state.pos[:2])
                 gstate.follow_pos = tuple(float(v) for v in operators.active_op.pos)
@@ -306,6 +320,8 @@ def run(args: argparse.Namespace) -> int:
             if swarm is not None and ord("1") <= key <= ord("9"):
                 swarm.selected = min(key - ord("1"), swarm.n - 1)
     finally:
+        if phone_feed is not None:
+            phone_feed.stop()
         if cap is not None:
             cap.release()
         if tracker is not None:
@@ -325,6 +341,12 @@ def main() -> int:
                    help="simulated people giving gestures (built for 5)")
     p.add_argument("--wander", action="store_true",
                    help="let the simulated operators walk around (default: they stand still)")
+    p.add_argument("--phone-feed", default="", metavar="[HOST:]PORT",
+                   help="listen for SignalMap RoomBridge datagrams on this UDP port and "
+                        "drive the operators from live phone positions + headings")
+    p.add_argument("--phone-frame-rot", type=float, default=0.0, metavar="DEG",
+                   help="rotate incoming phone coordinates by this many degrees to align "
+                        "the arbitrary UWB frame with the sim's north (+y)")
     p.add_argument("--demo", action="store_true",
                    help="run without a camera using a scripted hand path")
     p.add_argument("--headless", action="store_true",

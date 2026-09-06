@@ -1,6 +1,6 @@
 # Signal Map
 
-A native SwiftUI app that coordinates nearby iPhones, rotates UWB ranging pairs, and shares a relative group map. No camera, GPS, server, or internet connection is used. Network.framework carries encrypted coordination and measurements; Nearby Interaction supplies UWB distances.
+A native SwiftUI app that coordinates nearby iPhones, rotates UWB ranging pairs, and shares a relative group map. No camera, GPS, or internet connection is used. Network.framework carries encrypted coordination and measurements; Nearby Interaction supplies UWB distances. One optional, off-by-default feature (**Visualizer bridge**, below) sends this phone's own position over the local network to an external simulator.
 
 ## Three-phone test
 
@@ -56,7 +56,13 @@ DEVELOPER_DIR='/Applications/Xcode 26.3.app/Contents/Developer' sh scripts/test-
 
 The first checks scheduling, watchdogs, replay handling, timing, geometry, mirror continuity, and heading thresholds. The second runs production Network.framework transports and coordinator logic across five local nodes, injects packet loss and missing ranging callbacks, exercises leader loss/rejoin and pause/resume, then checks three-phone mode and shared coordinates. Its radio measurements are synthetic. Neither test measures hardware switching latency or proves router-free radio operation. Real three- and five-phone benchmarks must be collected from physical phones.
 
-Source: `RoomTransport.swift` handles data links, `RoomSession.swift` coordinates the group, `RoomRanging.swift` owns NI sessions, `RangeGeometry.swift` reconstructs distances, `RoomTypes.swift` holds protocol and motion math, and `RoomView.swift` presents the map and profiler. Earlier BLE/camera experiments are archived under `docs/legacy/` and excluded from the app target.
+Source: `RoomTransport.swift` handles data links, `RoomSession.swift` coordinates the group, `RoomRanging.swift` owns NI sessions, `RangeGeometry.swift` reconstructs distances, `RoomTypes.swift` holds protocol and motion math, `RoomBridge.swift` is the optional visualizer stream, and `RoomView.swift` presents the map and profiler. Earlier BLE/camera experiments are archived under `docs/legacy/` and excluded from the app target.
+
+## Visualizer bridge
+
+`RoomBridge.swift` streams this phone's own group-frame position and relative-motion heading over **UDP to a host on the same Wi-Fi**, about ten times a second, for an external drone simulator (`../src/phone_feed.py`). It is one-way (never receives), off unless a host is set, and carries no room code, NI tokens, or other phones' data. The datagram is small JSON: `id`, `name`, `room` fingerprint, `pos` `[x, y]`, `z`, `heading`, `moving`, `speed`, `cycle`, and a reserved `gesture` field (always `"None"` — the app does not classify hand poses).
+
+Set the target as **Visualizer host** in the lobby (`192.168.1.50:9870`, port defaults to 9870), or pass `--sim-bridge host:port` as a launch argument. The value is remembered. Blank turns it off. Positions only exist once a full range cycle has resolved, so nothing is sent before the group map appears.
 
 ## Fast automatic deployment
 

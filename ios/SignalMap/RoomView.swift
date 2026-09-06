@@ -56,6 +56,16 @@ struct RoomView: View {
                     .textContentType(.nickname).submitLabel(.done)
                     .padding(14).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
             }
+            VStack(alignment: .leading, spacing: 9) {
+                eyebrow("VISUALIZER HOST (OPTIONAL)")
+                TextField("192.168.1.50:9870", text: $room.simBridge)
+                    .font(.system(size: 15, design: .monospaced))
+                    .keyboardType(.numbersAndPunctuation).autocorrectionDisabled()
+                    .textInputAutocapitalization(.never).submitLabel(.done)
+                    .padding(14).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                Text("Streams only your own position and heading to a drone simulator on the same Wi-Fi. Leave blank to keep it off.")
+                    .font(.caption2).foregroundStyle(roomMuted).lineSpacing(2)
+            }
             testModeToggle
             Button { room.create() } label: {
                 HStack { Text("Create a room"); Spacer(); Image(systemName: "arrow.up.right") }
