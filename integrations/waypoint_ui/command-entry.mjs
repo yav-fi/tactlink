@@ -5,6 +5,6 @@ export async function prepareAddition(lines, text, position, post) {
   const index = position === 'end' ? lines.length : Number(position);
   if (!Number.isInteger(index) || index < 0 || index > lines.length) throw new Error('Choose a valid insertion position.');
   const candidate = [...lines.slice(0,index), ...parsed.lines, ...lines.slice(index)];
-  await post('/api/preview', {text:candidate.join(', ')});
+  await post('/api/preview', {text:candidate.join(', '),publish:false});
   return {lines:candidate, count:parsed.lines.length, index};
 }

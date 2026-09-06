@@ -9,6 +9,7 @@ import { blendHeading, fleetCameraFrame, screenRelativeMovement } from "./cinema
 import { parseMission, sampleMission, type MissionStep } from "./mission";
 import { startRuntimeMode } from "./runtime/index";
 import { previewCoordinate } from "./flight-preview";
+import { startPlannerLink } from './planner-link';
 import { COMMANDS, parseCommandSequence, type CommandIntent } from "./command-console";
 import { compileMissionSequence, isFlightSequenceIntent } from "./mission-sequence";
 
@@ -105,6 +106,7 @@ const placeGeocoder = token ? new Cesium.IonGeocoderService({
   geocodeProviderType: Cesium.IonGeocodeProviderType.GOOGLE,
 }) : undefined;
 if (runtimeMode) startRuntimeMode(viewer);
+if (!runtimeMode) startPlannerLink(viewer);
 
 viewer.scene.globe.enableLighting = false;
 viewer.scene.globe.maximumScreenSpaceError = 3;

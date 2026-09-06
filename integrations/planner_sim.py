@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 import sys
 import time
+import threading
 
 import httpx
 import numpy as np
@@ -87,6 +88,7 @@ def main():
     parser.add_argument('--url', default='http://127.0.0.1:8766')
     parser.add_argument('--demo', action='store_true')
     parser.add_argument('--headless', action='store_true')
+    parser.add_argument('--camera', type=int, default=0)
     args = parser.parse_args()
     demo = 'take off to 3 m, fly north 5 m, orbit home at radius 5 m clockwise once, hover for 2 seconds, return home, land'
     try:
@@ -105,27 +107,81 @@ def main():
     from visualizer import Visualizer
     visualizer = Visualizer(960,720)
     paused = True
-    status = 'Loaded. SPACE play/pause | R restart | L load latest | Q quit'
+    gesture_camera = None
+    def close_gestures():
+        nonlocal gesture_camera
+        if gesture_camera:
+            gesture_camera.close()
+            gesture_camera = None
+    publish_stop = threading.Event()
+    # Network waits run off the rendering thread. Snapshot updates never drive flight.
+    def publish():
+        with httpx.Client(timeout=1) as client:
+            while not publish_stop.wait(.25):
+                active = follower
+                point = active.sim.state.pos.copy()
+                try:
+                    client.post(args.url.rstrip('/')+'/api/simulation', json={
+                        'mission_id': active.preview['mission_id'],
+                        'x':float(point[0]),'y':float(point[1]),'z':float(point[2]),
+                        'paused':paused,'complete':active.done and gesture_camera is None})
+                except httpx.HTTPError:
+                    pass
+    if not args.demo:
+        threading.Thread(target=publish,daemon=True).start()
+    status = 'SPACE play/pause | G gestures | M mission (paused) | R restart | L load | Q quit'
     window = 'Planner mission - simulation only'
+    previous_frame = time.perf_counter()
     try:
         while True:
             start = time.perf_counter()
-            if not paused:
-                follower.step()
+            dt = min(.1, max(.001,start-previous_frame))
+            previous_frame = start
+            camera_frame = None
+            if gesture_camera and not paused:
+                try:
+                    follower.cmd, camera_frame = gesture_camera.read(follower.sim.state)
+                    follower.sim.step(follower.cmd,dt)
+                except Exception as error:
+                    paused = True
+                    close_gestures()
+                    status = f'Gesture mode stopped: {error}'[:110]
+            elif not paused:
+                follower.step(dt)
             image = visualizer.render(follower.sim.state, follower.cmd, trails=[follower.sim.trail])
             index = min(follower.index, len(follower.targets)-1)
-            label = f'{"Complete" if follower.done else "Paused" if paused else "Playing"} | Command {follower.targets[index][2]+1}'
+            label = f'{"Paused" if paused else "Gestures" if gesture_camera else "Complete" if follower.done else "Playing"} | Mission command {follower.targets[index][2]+1}'
             cv2.putText(image,label,(20,640),cv2.FONT_HERSHEY_SIMPLEX,.6,(0,220,255),1)
             cv2.putText(image,status,(20,680),cv2.FONT_HERSHEY_SIMPLEX,.45,(220,220,220),1)
+            if gesture_camera:
+                cv2.putText(image,gesture_camera.takeover.feedback,(20,610),cv2.FONT_HERSHEY_SIMPLEX,.5,(80,240,140),1)
+            cv2.putText(image,f'{1/dt:.0f} FPS',(840,610),cv2.FONT_HERSHEY_SIMPLEX,.5,(80,240,140),1)
+            if camera_frame is not None:
+                image = np.hstack((cv2.resize(camera_frame,(640,720)),image))
             cv2.imshow(window,image)
             key = cv2.waitKey(max(1,int(1000*(1/60-(time.perf_counter()-start))))) & 255
             if key == ord('q') or cv2.getWindowProperty(window,cv2.WND_PROP_VISIBLE)<1:
                 break
             if key == ord(' '):
                 paused = not paused
+            if key == ord('g'):
+                paused = True
+                close_gestures()
+                try:
+                    from integrations.gesture_preview import GestureCamera
+                    gesture_camera = GestureCamera(follower.sim.state,args.camera)
+                    paused = False
+                    status = 'GESTURES active | SPACE freeze | M mission paused | G reconnect | Q quit'
+                except Exception as error:
+                    status = f'Cannot start gestures: {error}'[:110]
+            if key == ord('m'):
+                close_gestures(); paused = True; follower.hold = 0
+                status = 'MISSION paused: SPACE resumes toward next pending waypoint | G gestures'
             if key == ord('r'):
+                close_gestures()
                 follower = MissionFollower(preview); paused = True
             if key == ord('l'):
+                close_gestures()
                 paused = True
                 try:
                     replacement = load_preview(args.url)
@@ -134,6 +190,8 @@ def main():
                 except (ValueError, KeyError, httpx.HTTPError):
                     status = 'Load failed; previous mission kept and paused. Check planner server.'
     finally:
+        close_gestures()
+        publish_stop.set()
         cv2.destroyAllWindows()
 
 

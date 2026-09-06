@@ -90,7 +90,7 @@ function changed() {
     try {
       const h=home();
       if (!validLocation(h)) throw new Error('Enter a valid latitude and longitude for the map.');
-      const result=await post('/api/preview', {text:lines.join(', '), origin:Number.isFinite(h.altitude_msl_m)?h:null});
+      const result=await post('/api/preview', {text:lines.join(', '), origin:Number.isFinite(h.altitude_msl_m)?h:null,map_origin:{latitude_deg:h.latitude_deg,longitude_deg:h.longitude_deg}});
       if (current!==revision) return;
       preview=result; draw(); exportState();
       const end=result.end_state;
@@ -100,7 +100,7 @@ function changed() {
       message(error.message,true); $('summary').textContent='Export is unavailable until the draft is valid.';
       const index=Number(error.message.match(/Command (\d+):/i)?.[1])-1;
       if(index>0)try {
-        const result=await post('/api/preview',{text:lines.slice(0,index).join(', ')});
+        const result=await post('/api/preview',{text:lines.slice(0,index).join(', '),publish:false});
         if(current!==revision)return;
         partialPreview=result;draw();
         message(`${error.message} Showing only the valid first ${index} commands. Fix the sequence or start fresh with a backup.`,true);
