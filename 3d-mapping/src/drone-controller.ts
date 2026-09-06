@@ -1,6 +1,7 @@
 import * as Cesium from "cesium";
 import type { Coordinates, MissionCommand, MissionStep } from "./mission";
 import { avoidanceMove } from "./collision";
+import { plannedFlightStep } from "./flight-motion";
 import { MOTION_TRACE_LIFETIME_MS, motionTraceAlpha } from "./motion-trace";
 import { sampleSurvey, surfaceHit, SURVEY_RAYS, SURVEY_DISTANCE_BANDS, surveyStrength, surveyBand } from "./survey-surface";
 
@@ -49,6 +50,9 @@ export class DroneController {
   private stepIndex = 0;
   private stepElapsed = 0;
   private orbitCenter: Coordinates | null = null;
+  private orbitStartAngle = 0;
+  private missionSpeedMps = 0;
+  private headingTurn: { from: number; delta: number; elapsed: number; duration: number } | null = null;
   private state = "IDLE";
   private manualHeading = 0;
   private manualVelocity = new Cesium.Cartesian3();
@@ -148,11 +152,11 @@ export class DroneController {
       orientation: new Cesium.CallbackProperty(() => this.visualOrientation(), false),
       model: {
         uri: MODEL_URI,
-        scale: 1.5,
-        minimumPixelSize: 54,
-        maximumScale: 48,
+        scale: 1.2,
+        minimumPixelSize: 42,
+        maximumScale: 30,
         silhouetteColor: this.color,
-        silhouetteSize: 1.2,
+        silhouetteSize: 0.65,
         shadows: Cesium.ShadowMode.DISABLED,
       },
       label: { text: this.id.replace("_", " ").toUpperCase(), font: "700 12px ui-monospace, monospace", fillColor: this.color, showBackground: true, backgroundColor: Cesium.Color.fromAlpha(Cesium.Color.BLACK, 0.76), pixelOffset: new Cesium.Cartesian2(0, -38) },
@@ -175,20 +179,17 @@ export class DroneController {
         clampToGround: false,
       },
     });
-    for (let index = 0; index < 18; index++) {
+    for (let index = 0; index < 28; index++) {
       this.motionTrace.push(viewer.entities.add({
         id: `${this.id}_trace_${index}`,
-        polyline: {
+        position: new Cesium.CallbackPositionProperty((_time, result) => Cesium.Cartesian3.clone(this.tracePoint(index), result), false),
+        point: {
           show: new Cesium.CallbackProperty(() => this.traceAlpha(index) > 0.01, false),
-          positions: new Cesium.CallbackProperty(() => this.traceSegment(index), false),
-          width: 4,
-          material: new Cesium.PolylineGlowMaterialProperty({
-            color: new Cesium.CallbackProperty(() => TRAIL_COLOR.withAlpha(this.traceAlpha(index)), false),
-            glowPower: 0.42,
-            taperPower: 0.8,
-          }),
-          arcType: Cesium.ArcType.NONE,
-          clampToGround: false,
+          pixelSize: new Cesium.CallbackProperty(() => 3 + 7 * this.traceAlpha(index), false),
+          color: new Cesium.CallbackProperty(() => TRAIL_COLOR.withAlpha(this.traceAlpha(index)), false),
+          outlineColor: new Cesium.CallbackProperty(() => TRAIL_COLOR.withAlpha(this.traceAlpha(index) * 0.45), false),
+          outlineWidth: 2,
+          disableDepthTestDistance: Infinity,
         },
       }));
     }
@@ -263,6 +264,9 @@ export class DroneController {
     this.stepIndex = 0;
     this.stepElapsed = 0;
     this.orbitCenter = null;
+    this.orbitStartAngle = 0;
+    this.missionSpeedMps = 0;
+    this.headingTurn = null;
     this.state = "TAKING_OFF";
     if (this.trailPoints.length === 0) {
       const origin = Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude);
@@ -270,7 +274,7 @@ export class DroneController {
       this.originEntity.show = true;
       this.trailPoints = [origin, Cesium.Cartesian3.clone(origin)];
     }
-    this.trailEntity.show = true;
+    this.trailEntity.show = false;
   }
 
   setManualControl(enabled: boolean): void {
@@ -290,13 +294,16 @@ export class DroneController {
       this.originEntity.orientation = new Cesium.ConstantProperty(this.orientationAt(this.position));
       this.originEntity.show = true;
       this.trailPoints = [origin, Cesium.Cartesian3.clone(origin)];
-      this.trailEntity.show = true;
+      this.trailEntity.show = false;
     }
     this.stopManualMotion();
     this.mission = null;
     this.stepIndex = 0;
     this.stepElapsed = 0;
     this.orbitCenter = null;
+    this.orbitStartAngle = 0;
+    this.missionSpeedMps = 0;
+    this.headingTurn = null;
     this.state = enabled ? "MANUAL" : "HOVERING";
   }
 
@@ -305,12 +312,33 @@ export class DroneController {
   }
 
   get heading(): number { return this.manualHeading; }
+  rotateHeading(degrees = 90): void {
+    if (!Number.isFinite(degrees) || degrees === 0) return;
+    this.hideReplay();
+    this.stopManualMotion();
+    this.mission = null;
+    this.stepIndex = 0;
+    this.stepElapsed = 0;
+    this.orbitCenter = null;
+    this.missionSpeedMps = 0;
+    this.travelDirection = undefined;
+    this.headingTurn = {
+      from: this.manualHeading,
+      delta: Cesium.Math.toRadians(degrees),
+      elapsed: 0,
+      duration: Math.max(0.45, Math.min(1.4, Math.abs(degrees) / 115)),
+    };
+    this.state = "TURNING";
+  }
   stopCommand(): void {
     this.stopManualMotion();
     this.mission = null;
     this.stepIndex = 0;
     this.stepElapsed = 0;
     this.orbitCenter = null;
+    this.missionSpeedMps = 0;
+    this.headingTurn = null;
+    this.travelDirection = undefined;
     this.state = "HOVERING";
   }
   get colorHex(): string { return this.color.toCssHexString(); }
@@ -345,7 +373,7 @@ export class DroneController {
     for (const marker of this.releases) this.viewer.entities.remove(marker);
     this.releases.length = 0;
     this.trailPoints = [origin, Cesium.Cartesian3.fromDegrees(destination.longitude, destination.latitude, destination.altitude)];
-    this.trailEntity.show = true;
+    this.trailEntity.show = false;
   }
   get homeCoordinates(): Coordinates { return { ...this.home }; }
   get speedMph(): number { return this.configuredSpeedMph; }
@@ -430,11 +458,27 @@ export class DroneController {
     this.stepIndex = 0;
     this.stepElapsed = 0;
     this.orbitCenter = null;
+    this.orbitStartAngle = 0;
+    this.missionSpeedMps = 0;
+    this.headingTurn = null;
     this.state = "IDLE";
     this.syncEntity();
   }
 
   update(deltaSeconds: number): void {
+    if (this.headingTurn) {
+      this.headingTurn.elapsed += Math.min(deltaSeconds, 0.1);
+      const linear = Math.min(1, this.headingTurn.elapsed / this.headingTurn.duration);
+      const eased = linear * linear * (3 - 2 * linear);
+      this.manualHeading = this.headingTurn.from + this.headingTurn.delta * eased;
+      this.renderVersion++;
+      if (linear >= 1) {
+        this.manualHeading = Cesium.Math.negativePiToPi(this.manualHeading);
+        this.headingTurn = null;
+        this.state = "HOVERING";
+      }
+      return;
+    }
     if (!this.mission || this.stepIndex >= this.mission.mission.length) return;
     const step = this.mission.mission[this.stepIndex];
     this.updateStep(step, Math.min(deltaSeconds, 0.1));
@@ -469,11 +513,11 @@ export class DroneController {
       orientation: new Cesium.CallbackProperty(() => this.visualOrientation(), false),
       model: {
         uri: MODEL_URI,
-        scale: 1.5,
-        minimumPixelSize: 54,
-        maximumScale: 48,
+        scale: 1.2,
+        minimumPixelSize: 42,
+        maximumScale: 30,
         silhouetteColor: this.color,
-        silhouetteSize: 1.2,
+        silhouetteSize: 0.65,
         shadows: Cesium.ShadowMode.DISABLED,
       },
       label: { text: this.id.replace("_", " ").toUpperCase(), font: "600 13px system-ui", fillColor: this.color, showBackground: true, pixelOffset: new Cesium.Cartesian2(0, -28) },
@@ -543,7 +587,9 @@ export class DroneController {
       const target = step.action === "goto" ? step : this.home;
       const speed = step.speed_mps ?? this.configuredSpeedMph * METERS_PER_SECOND_PER_MPH;
       const distance = distanceMeters(this.position, target);
-      const fraction = distance === 0 ? 1 : Math.min(1, (speed * deltaSeconds) / distance);
+      const motion = plannedFlightStep(this.missionSpeedMps, speed, distance, deltaSeconds);
+      this.missionSpeedMps = motion.speed;
+      const fraction = distance === 0 ? 1 : Math.min(1, motion.distance / distance);
       requested = interpolate(this.position, target, fraction);
       this.state = step.action === "goto" ? "NAVIGATING" : "RETURNING_HOME";
       completeStep = fraction === 1;
@@ -553,11 +599,26 @@ export class DroneController {
       if (this.stepElapsed >= step.duration_s) this.advance();
     } else {
       this.state = "ORBITING";
-      this.orbitCenter ??= step.center ? { ...step.center } : { ...this.position };
+      if (!this.orbitCenter) {
+        this.orbitCenter = step.center ? { ...step.center } : { ...this.position };
+        const center = Cesium.Cartesian3.fromDegrees(this.orbitCenter.longitude, this.orbitCenter.latitude, this.orbitCenter.altitude);
+        const local = Cesium.Matrix4.multiplyByPoint(
+          Cesium.Matrix4.inverseTransformation(Cesium.Transforms.eastNorthUpToFixedFrame(center), new Cesium.Matrix4()),
+          Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude),
+          new Cesium.Cartesian3(),
+        );
+        this.orbitStartAngle = Math.hypot(local.x, local.y) > 1 ? Math.atan2(local.y, local.x) : 0;
+      }
       this.stepElapsed += deltaSeconds;
       const direction = step.clockwise === false ? -1 : 1;
-      const angle = direction * ((this.stepElapsed / step.duration_s) * Cesium.Math.TWO_PI);
-      requested = destinationPoint(this.orbitCenter, Math.cos(angle) * step.radius_m, Math.sin(angle) * step.radius_m);
+      const cruise = Math.max(16, this.configuredSpeedMph * METERS_PER_SECOND_PER_MPH);
+      const angularSpeed = Math.min(0.8, Math.max(0.12, cruise / step.radius_m));
+      const angle = this.orbitStartAngle + direction * this.stepElapsed * angularSpeed;
+      const ideal = destinationPoint(this.orbitCenter, Math.cos(angle) * step.radius_m, Math.sin(angle) * step.radius_m);
+      const distance = distanceMeters(this.position, ideal);
+      const motion = plannedFlightStep(this.missionSpeedMps, cruise, distance, deltaSeconds);
+      this.missionSpeedMps = motion.speed;
+      requested = interpolate(this.position, ideal, distance === 0 ? 1 : Math.min(1, motion.distance / distance));
       completeStep = this.stepElapsed >= step.duration_s;
     }
     if (step.action === "hover") { this.syncEntity(); return; }
@@ -586,6 +647,8 @@ export class DroneController {
     this.stepIndex += 1;
     this.stepElapsed = 0;
     this.orbitCenter = null;
+    this.orbitStartAngle = 0;
+    this.missionSpeedMps = 0;
     if (this.mission && this.stepIndex >= this.mission.mission.length) this.state = "IDLE";
   }
 
@@ -623,21 +686,17 @@ export class DroneController {
     const previous = this.traceSamples.at(-1)!;
     if (now - previous.time < 55 && Cesium.Cartesian3.distance(previous.position, to) < 2) return;
     this.traceSamples.push({ position: Cesium.Cartesian3.clone(to), time: now });
-    if (this.traceSamples.length > 19) this.traceSamples.shift();
+    if (this.traceSamples.length > 28) this.traceSamples.shift();
   }
 
-  private traceSegment(index: number): Cesium.Cartesian3[] {
+  private tracePoint(index: number): Cesium.Cartesian3 {
     const end = this.traceSamples.length - 1 - index;
-    if (end < 1 || this.traceAlpha(index) <= 0.01) {
-      const position = this.visualPosition();
-      return [position, position];
-    }
-    return [this.traceSamples[end - 1].position, this.traceSamples[end].position];
+    return end < 0 ? this.visualPosition() : this.traceSamples[end].position;
   }
 
   private traceAlpha(index: number): number {
     const end = this.traceSamples.length - 1 - index;
-    if (end < 1) return 0;
+    if (end < 0) return 0;
     return motionTraceAlpha(performance.now() - this.traceSamples[end].time);
   }
 

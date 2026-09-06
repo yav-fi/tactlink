@@ -69,6 +69,43 @@ function box(min, max) {
   pushQuad([x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z0], [0, 0, -1]);
 }
 
+/** Rounded shell with smooth vertex normals. */
+function ellipsoid(center, radii, latitudeSegments = 10, longitudeSegments = 20) {
+  const [cx, cy, cz] = center;
+  const [rx, ry, rz] = radii;
+  for (let latitude = 0; latitude < latitudeSegments; latitude += 1) {
+    const v0 = -Math.PI / 2 + latitude / latitudeSegments * Math.PI;
+    const v1 = -Math.PI / 2 + (latitude + 1) / latitudeSegments * Math.PI;
+    for (let longitude = 0; longitude < longitudeSegments; longitude += 1) {
+      const u0 = longitude / longitudeSegments * Math.PI * 2;
+      const u1 = (longitude + 1) / longitudeSegments * Math.PI * 2;
+      const vertex = (v, u) => {
+        const local = [rx * Math.cos(v) * Math.cos(u), ry * Math.sin(v), rz * Math.cos(v) * Math.sin(u)];
+        const rawNormal = [local[0] / (rx * rx), local[1] / (ry * ry), local[2] / (rz * rz)];
+        const length = Math.hypot(...rawNormal) || 1;
+        return pushVertex([cx + local[0], cy + local[1], cz + local[2]], rawNormal.map(value => value / length));
+      };
+      const a = vertex(v0, u0), b = vertex(v0, u1), c = vertex(v1, u1), d = vertex(v1, u0);
+      indices.push(a, c, b, a, d, c);
+    }
+  }
+}
+
+/** Box rotated about the vertical authoring axis. */
+function rotatedBox(center, halfSize, angle) {
+  const [cx, cy, cz] = center;
+  const [hx, hy, hz] = halfSize;
+  const rotate = ([x, y, z]) => [cx + x * Math.cos(angle) - z * Math.sin(angle), cy + y, cz + x * Math.sin(angle) + z * Math.cos(angle)];
+  const normal = ([x, y, z]) => [x * Math.cos(angle) - z * Math.sin(angle), y, x * Math.sin(angle) + z * Math.cos(angle)];
+  const p = (x, y, z) => rotate([x, y, z]);
+  pushQuad(p(hx, -hy, -hz), p(hx, -hy, hz), p(hx, hy, hz), p(hx, hy, -hz), normal([1, 0, 0]));
+  pushQuad(p(-hx, -hy, hz), p(-hx, -hy, -hz), p(-hx, hy, -hz), p(-hx, hy, hz), normal([-1, 0, 0]));
+  pushQuad(p(-hx, hy, -hz), p(hx, hy, -hz), p(hx, hy, hz), p(-hx, hy, hz), [0, 1, 0]);
+  pushQuad(p(-hx, -hy, hz), p(hx, -hy, hz), p(hx, -hy, -hz), p(-hx, -hy, -hz), [0, -1, 0]);
+  pushQuad(p(-hx, -hy, hz), p(-hx, hy, hz), p(hx, hy, hz), p(hx, -hy, hz), normal([0, 0, 1]));
+  pushQuad(p(hx, -hy, -hz), p(hx, hy, -hz), p(-hx, hy, -hz), p(-hx, -hy, -hz), normal([0, 0, -1]));
+}
+
 /** Convex quad/triangle fan patch used for the nose and fin wedges. */
 function triangle(a, b, c) {
   const ux = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
@@ -80,21 +117,6 @@ function triangle(a, b, c) {
   const ib = pushVertex(b, normal);
   const ic = pushVertex(c, normal);
   indices.push(ia, ib, ic);
-}
-
-/** Vertical-axis disc (rotor) centred on `center`, normal +Y, drawn both faces. */
-function disc(center, radius, segments = 24) {
-  const [cx, cy, cz] = center;
-  for (const [normal, order] of [[[0, 1, 0], 1], [[0, -1, 0], -1]]) {
-    const hub = pushVertex([cx, cy, cz], normal);
-    let previous = null;
-    for (let step = 0; step <= segments; step += 1) {
-      const angle = (step / segments) * Math.PI * 2 * order;
-      const index = pushVertex([cx + Math.cos(angle) * radius, cy, cz + Math.sin(angle) * radius], normal);
-      if (previous !== null) indices.push(hub, previous, index);
-      previous = index;
-    }
-  }
 }
 
 /** Short vertical cylinder used for rotor hubs and motor pods. */
@@ -123,53 +145,42 @@ const MATERIAL_DARK = 3;
 const MATERIAL_PANEL = 4;
 
 // --- Airframe ---------------------------------------------------------------
-// Nose points +X. Span is ~2.6 m so entity scale reads directly in metres.
+// Nose points +X. The proportions follow a compact modern camera quadcopter:
+// a low aerodynamic center body, exposed carbon arms and actual slim blades.
 beginPrimitive(MATERIAL_SHELL);
-box([-0.85, -0.16, -0.30], [0.62, 0.20, 0.30]); // fuselage
-box([-1.02, -0.10, -0.16], [-0.80, 0.12, 0.16]); // tail boom root
-for (const [ax, az] of [[0.72, 0.72], [0.72, -0.72], [-0.72, 0.72], [-0.72, -0.72]]) {
-  const x0 = Math.min(0, ax), x1 = Math.max(0, ax);
-  const z0 = Math.min(0, az), z1 = Math.max(0, az);
-  box([x0 - 0.07, -0.05, z0 - 0.07], [x1 + 0.07, 0.05, z1 + 0.07]); // arm
-}
+ellipsoid([-0.03, 0.01, 0], [0.78, 0.25, 0.38], 12, 24);
 endPrimitive();
 
-// Wedge nose: three faces converging on the tip so heading is readable head-on.
-beginPrimitive(MATERIAL_ACCENT);
-const tip = [1.05, 0.02, 0.0];
-triangle(tip, [0.62, 0.20, 0.30], [0.62, 0.20, -0.30]);
-triangle(tip, [0.62, -0.16, -0.30], [0.62, -0.16, 0.30]);
-triangle(tip, [0.62, 0.20, -0.30], [0.62, -0.16, -0.30]);
-triangle(tip, [0.62, -0.16, 0.30], [0.62, 0.20, 0.30]);
-box([-1.30, -0.04, -0.04], [-1.00, 0.46, 0.04]); // vertical fin, breaks nose/tail symmetry
-endPrimitive();
-
-// Raised stealth canopy and centerline racing stripe make the body read as a
-// designed aircraft rather than one solid block, even at Cesium's minimum size.
 beginPrimitive(MATERIAL_PANEL);
-box([-0.46, 0.20, -0.22], [0.38, 0.31, 0.22]); // black upper canopy
-box([-0.70, -0.17, -0.25], [0.45, -0.145, -0.18]); // black lower side panel
-box([-0.70, -0.17, 0.18], [0.45, -0.145, 0.25]);
+ellipsoid([0.18, 0.20, 0], [0.46, 0.14, 0.27], 10, 22); // smoked upper canopy
+ellipsoid([0.57, -0.17, 0], [0.17, 0.13, 0.16], 8, 16); // stabilized camera pod
 endPrimitive();
 
 beginPrimitive(MATERIAL_ACCENT);
-box([-0.40, 0.312, -0.035], [0.46, 0.335, 0.035]); // red canopy streak
-box([-0.62, 0.19, -0.305], [0.40, 0.23, -0.285]); // red side streak
-box([-0.62, 0.19, 0.285], [0.40, 0.23, 0.305]);
+rotatedBox([0.05, 0.335, 0], [0.47, 0.018, 0.032], 0); // thin red center streak
+ellipsoid([0.69, 0.015, 0], [0.16, 0.11, 0.20], 7, 16); // readable red nose cap
 endPrimitive();
 
 beginPrimitive(MATERIAL_DARK);
-for (const [ax, az] of [[0.72, 0.72], [0.72, -0.72], [-0.72, 0.72], [-0.72, -0.72]]) {
-  cylinder([ax, 0.10, az], 0.14, 0.22); // motor pod
+for (const [ax, az] of [[0.78, 0.72], [0.78, -0.72], [-0.70, 0.72], [-0.70, -0.72]]) {
+  const length = Math.hypot(ax, az);
+  rotatedBox([ax * 0.53, 0.03, az * 0.53], [length * 0.53, 0.045, 0.045], Math.atan2(az, ax));
+  cylinder([ax, 0.12, az], 0.13, 0.24, 18);
 }
-box([-0.55, -0.42, -0.42], [0.35, -0.34, -0.34]); // port skid
-box([-0.55, -0.42, 0.34], [0.35, -0.34, 0.42]); // starboard skid
-box([-0.10, -0.34, -0.40], [0.02, -0.16, 0.40]); // skid brace
+rotatedBox([-0.05, -0.42, -0.30], [0.47, 0.035, 0.035], 0); // landing rails
+rotatedBox([-0.05, -0.42, 0.30], [0.47, 0.035, 0.035], 0);
+box([-0.33, -0.39, -0.33], [-0.27, -0.16, -0.27]);
+box([0.25, -0.39, -0.33], [0.31, -0.16, -0.27]);
+box([-0.33, -0.39, 0.27], [-0.27, -0.16, 0.33]);
+box([0.25, -0.39, 0.27], [0.31, -0.16, 0.33]);
 endPrimitive();
 
 beginPrimitive(MATERIAL_ROTOR);
-for (const [ax, az] of [[0.72, 0.72], [0.72, -0.72], [-0.72, 0.72], [-0.72, -0.72]]) {
-  disc([ax, 0.24, az], 0.62);
+let rotorIndex = 0;
+for (const [ax, az] of [[0.78, 0.72], [0.78, -0.72], [-0.70, 0.72], [-0.70, -0.72]]) {
+  const angle = rotorIndex++ % 2 ? Math.PI / 4 : -Math.PI / 4;
+  rotatedBox([ax, 0.265, az], [0.52, 0.012, 0.035], angle);
+  rotatedBox([ax, 0.267, az], [0.52, 0.012, 0.035], angle + Math.PI / 2);
 }
 endPrimitive();
 
@@ -222,7 +233,7 @@ const gltf = {
   materials: [
     { name: "shell", pbrMetallicRoughness: { baseColorFactor: [0.075, 0.082, 0.095, 1], metallicFactor: 0.38, roughnessFactor: 0.48 } },
     { name: "accent", pbrMetallicRoughness: { baseColorFactor: [0.95, 0.012, 0.035, 1], metallicFactor: 0.3, roughnessFactor: 0.18 }, emissiveFactor: [0.8, 0.008, 0.018], doubleSided: true },
-    { name: "rotor", pbrMetallicRoughness: { baseColorFactor: [0.16, 0.17, 0.2, 0.38], metallicFactor: 0.32, roughnessFactor: 0.5 }, alphaMode: "BLEND", doubleSided: true },
+    { name: "rotor", pbrMetallicRoughness: { baseColorFactor: [0.045, 0.05, 0.06, 1], metallicFactor: 0.5, roughnessFactor: 0.38 }, doubleSided: true },
     { name: "dark", pbrMetallicRoughness: { baseColorFactor: [0.035, 0.04, 0.05, 1], metallicFactor: 0.82, roughnessFactor: 0.2 } },
     { name: "blackPanel", pbrMetallicRoughness: { baseColorFactor: [0.006, 0.008, 0.012, 1], metallicFactor: 0.62, roughnessFactor: 0.3 } },
   ],

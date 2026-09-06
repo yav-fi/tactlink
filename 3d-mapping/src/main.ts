@@ -5,11 +5,10 @@ import { DroneController } from "./drone-controller";
 import { Fleet, DRONE_COLORS } from "./fleet";
 import { formationSlots } from "./formation";
 import { collisionWarning } from "./collision";
-import { blendHeading, fleetCameraFrame, idleOrbitRate, screenRelativeMovement } from "./cinematic-camera";
+import { blendHeading, fleetCameraFrame, idleCameraDriftRate, screenRelativeMovement } from "./cinematic-camera";
 import { parseMission, sampleMission, type MissionStep } from "./mission";
 import { startRuntimeMode } from "./runtime/index";
 import { previewCoordinate } from "./flight-preview";
-import { startPlannerLink } from './planner-link';
 import { COMMANDS, parseCommandSequence, type CommandIntent } from "./command-console";
 import { compileMissionSequence, isFlightSequenceIntent } from "./mission-sequence";
 import { startGestureCamera, type BrowserGestureState } from "./gesture-camera";
@@ -107,7 +106,6 @@ const placeGeocoder = token ? new Cesium.IonGeocoderService({
   geocodeProviderType: Cesium.IonGeocodeProviderType.GOOGLE,
 }) : undefined;
 if (runtimeMode) startRuntimeMode(viewer);
-if (!runtimeMode) startPlannerLink(viewer);
 
 viewer.scene.globe.enableLighting = false;
 viewer.scene.globe.maximumScreenSpaceError = 3;
@@ -645,7 +643,7 @@ function executeGestureAction(action: string): void {
   const offset = gestureOffset(action);
   if (offset) {
     const destination = localOffset(target, offset.east, offset.north);
-    runLocalMission(target, { drone_id: target.id, mission: [{ action: "goto", ...destination, speed_mps: target.speedMph * 0.44704 }] }, "gesture flight");
+    runLocalMission(target, { drone_id: target.id, mission: [{ action: "goto", ...destination, speed_mps: Math.max(38, target.speedMph * 0.44704) }] }, "gesture flight");
   } else if (action === "takeoff") {
     const altitude = position.state === "IDLE" ? Math.max(position.altitude + 35, 115) : position.altitude + 20;
     runLocalMission(target, { drone_id: target.id, mission: [{ action: "goto", latitude: position.latitude, longitude: position.longitude, altitude, speed_mps: 12 }] }, "gesture climb");
@@ -656,6 +654,11 @@ function executeGestureAction(action: string): void {
   } else if (action === "halt" || action === "estop") {
     if (controllingDrone) flyToFreeCameraOverview();
     target.stopCommand();
+    refreshFleet();
+  } else if (action === "rotate_heading") {
+    if (controllingDrone) flyToFreeCameraOverview();
+    fleet.checkpoint("gesture heading turn");
+    target.rotateHeading(90);
     refreshFleet();
   } else if (action.startsWith("speed:")) {
     const speed = action.endsWith("slow") ? 25 : action.endsWith("sport") ? 90 : 60;
@@ -848,6 +851,15 @@ async function executeCommand(intent: CommandIntent): Promise<void> {
     setCommandMessage(`${target.id.replace("_", " ")} moving ${intent.direction} ${intent.meters} m.`);
     return;
   }
+  if (intent.type === "turn") {
+    const target = requireDrone();
+    if (controllingDrone) flyToFreeCameraOverview();
+    fleet.checkpoint("heading turn");
+    target.rotateHeading(intent.direction === "right" ? intent.degrees : -intent.degrees);
+    refreshFleet();
+    setCommandMessage(`${target.id.replace("_", " ")} rotating ${intent.direction} ${intent.degrees}°.`);
+    return;
+  }
   if (intent.type === "hover") {
     const target = requireDrone();
     runLocalMission(target, { drone_id: target.id, mission: [{ action: "hover", duration_s: intent.seconds }] }, "hover command");
@@ -860,8 +872,8 @@ async function executeCommand(intent: CommandIntent): Promise<void> {
     setCommandMessage(`${target.id.replace("_", " ")} orbiting at ${intent.radius} m for ${intent.seconds} seconds.`);
     return;
   }
-  if (intent.type === "landmark" || intent.type === "place" || intent.type === "turn") {
-    await executeCommandSequence([intent], intent.type === "turn" ? `turn ${intent.direction}` : `go to ${intent.type === "landmark" ? intent.name : intent.query}`);
+  if (intent.type === "landmark" || intent.type === "place") {
+    await executeCommandSequence([intent], `go to ${intent.type === "landmark" ? intent.name : intent.query}`);
     return;
   }
   await executeAiInstruction(intent.instruction);
@@ -1025,7 +1037,7 @@ function updateAutomaticCamera(deltaSeconds: number): void {
   if (flightHeading !== undefined && (controllingDrone || movement >= 0.04)) {
     orbitCamera.heading = blendHeading(orbitCamera.heading, flightHeading, 1 - Math.exp(-4.5 * deltaSeconds));
   } else {
-    orbitCamera.heading += deltaSeconds * idleOrbitRate(stillSeconds);
+    orbitCamera.heading += deltaSeconds * idleCameraDriftRate(stillSeconds);
   }
 
   const frame = fleetCameraFrame(subjects.map(subject => subject.position))!;

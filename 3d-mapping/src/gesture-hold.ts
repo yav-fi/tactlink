@@ -8,6 +8,7 @@ const ACTIONS: Readonly<Record<string, string>> = {
   Pointing_Up: "orbit",
   ILoveYou: "return_home",
   Open_Palm: "halt",
+  Closed_Fist: "rotate_heading",
 };
 
 export type GestureHoldState = {

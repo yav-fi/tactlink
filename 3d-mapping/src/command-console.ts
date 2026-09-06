@@ -82,7 +82,7 @@ export function parseCommandInput(raw: string): CommandIntent {
     if (landmark) return { type: "landmark", name: landmark.name, latitude: landmark.latitude, longitude: landmark.longitude };
     return { type: "place", query: landmarkMatch[1].trim() };
   }
-  const turn = body.match(/^turn\s+(left|right)(?:\s+(\d+(?:\.\d+)?)\s*(?:degrees?)?)?/);
+  const turn = body.match(/^(?:turn|rotate)\s+(left|right)(?:\s+(\d+(?:\.\d+)?)\s*(?:degrees?)?)?/);
   if (turn) return { type: "turn", direction: turn[1] as "left" | "right", degrees: Number(turn[2] ?? 90) };
   const hover = body.match(/^(?:hover|wait)(?:\s+(?:for\s+)?)?(\d+(?:\.\d+)?)?/);
   if (hover) return { type: "hover", seconds: Number(hover[1] ?? 10) };
@@ -94,6 +94,6 @@ export function parseCommandInput(raw: string): CommandIntent {
 }
 
 export function parseCommandSequence(raw: string): CommandIntent[] {
-  const parts = raw.trim().split(/\s+(?:and\s+)?then\s+|\s+and\s+(?=(?:wait|hover|go|goto|fly|move|return|orbit|turn)\b)|,\s*(?=(?:wait|hover|go|goto|fly|move|return|orbit|turn)\b)/i).filter(Boolean);
+  const parts = raw.trim().split(/\s+(?:and\s+)?then\s+|\s+and\s+(?=(?:wait|hover|go|goto|fly|move|return|orbit|turn|rotate)\b)|,\s*(?=(?:wait|hover|go|goto|fly|move|return|orbit|turn|rotate)\b)/i).filter(Boolean);
   return parts.map(part => parseCommandInput(part));
 }
