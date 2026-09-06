@@ -28,42 +28,52 @@ export function placePhones(phones: PhoneSample[], alignment: PhoneAlignment): R
   });
 }
 
+const CLAIMS = new Set(["Closed_Fist", "Three_Finger_Orbit", "Four_Finger_Hover"]);
 const ACTIONS: Record<string, string> = {
   Closed_Fist: "follow", One_Finger_Up: "takeoff", Two_Fingers_Down: "land",
+  Three_Finger_Orbit: "orbit", Four_Finger_Hover: "hover_overhead",
 };
 
 /** One owner of one browser drone. Handoffs require a fresh deliberate hold. */
 export class PhoneControl {
+  private conflicting = false;
   owner = "";
   private held = "None";
   private since = 0;
   private fired = false;
   following = "";
   private claimedOwner = "";
-  private claims = new Map<string, { since: number; lastSeen: number; missingSince?: number; fired: boolean }>();
+  private claims = new Map<string, { since: number; lastSeen: number; missingSince?: number; fired: boolean; gesture: string }>();
   claimProgress(id: string): number {
     const claim = this.claims.get(id);
     return claim && !claim.fired ? Math.min(1, (claim.lastSeen - claim.since) / 400) : 0;
   }
-  reset(): void { this.owner = ""; this.following = ""; this.claimedOwner = ""; this.held = "None"; this.fired = false; this.claims.clear(); }
+  reset(): void { this.conflicting = false; this.owner = ""; this.following = ""; this.claimedOwner = ""; this.held = "None"; this.fired = false; this.claims.clear(); }
 
   update(operators: RuntimeOperator[], drone: { x: number; y: number }, now: number): {
-    operator?: RuntimeOperator; action?: string; progress: number; stop: boolean; following?: boolean;
+    operator?: RuntimeOperator; action?: string; progress: number; stop: boolean; following?: boolean; reason?: string;
   } {
     const live = operators.filter(operator => operator.age <= PHONE_TIMEOUT);
+    if (this.conflicting) {
+      if (live.filter(p => CLAIMS.has(p.gesture)).length > 1) return {
+        progress: 0, stop: true, reason: "Conflicting control requests. Lower all but one hand, then hold again.",
+      };
+      this.conflicting = false;
+    }
     // Any phone can deliberately claim follow; distance must not prevent a handoff.
     for (const key of this.claims.keys()) if (!live.some(p => key === p.operator_id)) this.claims.delete(key);
     const ready: RuntimeOperator[] = [];
     for (const person of live) {
       const key = person.operator_id;
       let claim = this.claims.get(key);
-      if (person.gesture !== "Closed_Fist") {
+      if (!CLAIMS.has(person.gesture)) {
         if (claim) {
           claim.missingSince ??= now;
           if (now - claim.missingSince >= 250) this.claims.delete(key);
         }
         continue;
       }
+      if (claim && claim.gesture !== person.gesture) claim = undefined;
       if (claim?.missingSince !== undefined) {
         if (now - claim.missingSince >= 250) claim = undefined;
         else {
@@ -73,18 +83,23 @@ export class PhoneControl {
         }
       }
       if (!claim) {
-        claim = { since: now, lastSeen: now, fired: false }; this.claims.set(key, claim);
+        claim = { since: now, lastSeen: now, fired: false, gesture: person.gesture }; this.claims.set(key, claim);
       }
       claim.lastSeen = now;
       if (!claim.fired && now - claim.since >= 400) { claim.fired = true; ready.push(person); }
     }
-    const claimant = ready.filter(p => p.gesture === "Closed_Fist")
+    if (ready.length > 1) {
+      this.reset(); this.conflicting = true;
+      return { progress: 0, stop: true, reason: "Conflicting control requests. Only one person should hold fist, three or four fingers; then hold again." };
+    }
+    const claimant = ready.filter(p => CLAIMS.has(p.gesture))
       .sort((a, b) => this.claims.get(b.operator_id)!.since - this.claims.get(a.operator_id)!.since || a.operator_id.localeCompare(b.operator_id))[0];
     if (claimant) {
       const changed = this.following !== claimant.operator_id;
-      this.following = claimant.operator_id; this.owner = claimant.operator_id; this.held = claimant.gesture;
+      this.following = claimant.gesture === "Closed_Fist" ? claimant.operator_id : ""; this.owner = claimant.operator_id; this.held = claimant.gesture;
       this.claimedOwner = claimant.operator_id;
-      return { operator: claimant, action: "follow", progress: 1, stop: changed, following: true };
+      this.since = now - 400; this.fired = true;
+      return { operator: claimant, action: ACTIONS[claimant.gesture], progress: 1, stop: changed, following: !!this.following };
     }
     if (this.following) {
       const followed = live.find(p => p.operator_id === this.following);
@@ -117,7 +132,7 @@ export class PhoneControl {
     }
     const action = gesture === "Closed_Fist" ? undefined : ACTIONS[gesture];
     const progress = action ? Math.min(1, (now - this.since) / 400) : 0;
-    const continuous = ["takeoff", "land"].includes(action ?? "");
+    const continuous = ["takeoff", "land", "orbit", "hover_overhead"].includes(action ?? "");
     const emit = action && progress >= 1 && (!this.fired || continuous);
     if (emit) this.fired = true;
     return { operator, action: emit ? action : undefined, progress, stop: changedOwner || changedGesture || !operator };

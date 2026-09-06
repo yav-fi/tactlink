@@ -18,7 +18,7 @@ export function constrainPhoneHeight(target: DroneController, home: Coordinates,
 
 export function applyPhoneAction(target: DroneController, action: string, owner: RuntimeOperator, home: Coordinates, actual: LocalVector, band: PhoneFlightBand = phoneFlightBand([])): void {
   if (action === "halt") target.stopCommand();
-  else if (action === "follow") {
+  else if (action === "follow" || action === "hover_overhead") {
     const height = Math.max(band.floor, Math.min(band.ceiling, owner.position.z + 3.5));
     const east = owner.position.x - actual.x, north = owner.position.y - actual.y, up = height - actual.z;
     const distance = Math.hypot(east, north, up);
@@ -34,7 +34,10 @@ export function applyPhoneAction(target: DroneController, action: string, owner:
     const dx = actual.x - owner.position.x, dy = actual.y - owner.position.y;
     const distance = Math.hypot(dx, dy), radial = (2 - distance) * 0.8;
     const angle = distance > 0.01 ? Math.atan2(dy, dx) : 0;
-    target.startGestureMotion(radial * Math.cos(angle) - Math.sin(angle), radial * Math.sin(angle) + Math.cos(angle), 0, 2);
+    const height = Math.max(band.floor, Math.min(band.ceiling, owner.position.z + 3.5));
+    const east = radial * Math.cos(angle) - Math.sin(angle), north = radial * Math.sin(angle) + Math.cos(angle);
+    const up = (height - actual.z) * 0.8;
+    target.startGestureMotion(east, north, up, Math.min(2, Math.hypot(east, north, up)), true);
   } else if (action === "return_home") target.run({ drone_id: target.id, mission: [
     { action: "goto", ...home, altitude: home.altitude + Math.max(band.floor, Math.min(band.ceiling, actual.z)), speed_mps: 2 },
   ] });

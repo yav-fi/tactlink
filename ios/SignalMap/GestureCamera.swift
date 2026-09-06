@@ -39,6 +39,8 @@ struct PhoneHandPose {
         if f.allSatisfy({$0 == .curled}) {return ("Closed_Fist",1)}
         if f == [.extended,.curled,.curled,.curled] {return ("One_Finger_Up",1)}
         if f == [.extended,.extended,.curled,.curled] {return ("Two_Fingers_Down",1)}
+        if f == [.extended,.extended,.extended,.curled] {return ("Three_Finger_Orbit",1)}
+        if f.allSatisfy({$0 == .extended}) {return ("Four_Finger_Hover",1)}
         if !f.contains(.extended),canned=="Closed_Fist",score>=0.55 {return ("Closed_Fist",score)}
         return ("None",0)
     }

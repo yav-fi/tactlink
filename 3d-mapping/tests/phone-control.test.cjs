@@ -354,3 +354,53 @@ test("legacy gestures cannot command the three-gesture demo", () => {
     assert.equal(control.update(people, { x: 0, y: 5 }, 1000).action, undefined, gesture);
   }
 });
+
+
+test("orbit and overhead hover claim the requesting phone, repeat while held and stop on release", () => {
+  for (const [gesture, action] of [["Three_Finger_Orbit", "orbit"], ["Four_Finger_Hover", "hover_overhead"]]) {
+    const control = new PhoneControl();
+    const people = placePhones([phone(0, { gesture: "None" }), phone(1, { gesture })], alignment);
+    const drone = { x: 0, y: 5 };
+    control.update(people, drone, 0);
+    const start = control.update(people, drone, 400);
+    assert.equal(start.operator.operator_id, "1"); assert.equal(start.action, action);
+    assert.equal(control.update(people, drone, 500).action, action);
+    people[1].gesture = "None";
+    const released = control.update(people, drone, 600);
+    assert(released.stop); assert.equal(released.action, undefined);
+  }
+});
+
+test("simultaneous fresh claims stop and explain the conflict", () => {
+  const control = new PhoneControl();
+  const people = placePhones([phone(0, { gesture: "Three_Finger_Orbit" }), phone(1, { gesture: "Four_Finger_Hover" })], alignment);
+  const drone = { x: 0, y: 5 };
+  control.update(people, drone, 0);
+  const result = control.update(people, drone, 400);
+  assert(result.stop); assert.equal(result.action, undefined); assert.match(result.reason, /Conflicting/);
+  people[1].gesture = "None";
+  control.update(people, drone, 500);
+  assert.equal(control.update(people, drone, 900).action, "orbit");
+});
+
+test("orbit converges to two metres radius and overhead height", () => {
+  const { GeoFrame } = loadSource("runtime/frame");
+  const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
+  const frame = new GeoFrame(); frame.update(home.latitude, home.longitude, home.altitude);
+  const drone = new Fleet({ entities: new Cesium.EntityCollection() }).deploy({ ...home, altitude: 86 });
+  const [owner] = placePhones([phone(0)], alignment);
+  let previousAngle, rotation = 0;
+  for (let i = 0; i < 2400; i++) {
+    const actual = frame.toLocal(drone.cameraPosition);
+    if (i % 6 === 0) applyPhoneAction(drone, "orbit", owner, home, actual);
+    if (i > 1200) {
+      const angle = Math.atan2(actual.y - owner.position.y, actual.x - owner.position.x);
+      if (previousAngle !== undefined) rotation += Math.atan2(Math.sin(angle - previousAngle), Math.cos(angle - previousAngle));
+      previousAngle = angle;
+    }
+    drone.update(1 / 60);
+  }
+  const actual = frame.toLocal(drone.cameraPosition);
+  assert(Math.abs(Math.hypot(actual.x - owner.position.x, actual.y - owner.position.y) - 2) < 0.15);
+  assert(Math.abs(actual.z - 3.5) < 0.15); assert(rotation > Math.PI * 2);
+});
