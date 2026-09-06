@@ -2,7 +2,6 @@ import * as Cesium from "cesium";
 import type { Coordinates, MissionCommand, MissionStep } from "./mission";
 import { MotionGuard } from "./collision";
 import { plannedFlightStep } from "./flight-motion";
-import { MOTION_TRACE_LIFETIME_MS, motionTraceAlpha } from "./motion-trace";
 import { sampleSurvey, surfaceHit, SURVEY_RAYS, SURVEY_DISTANCE_BANDS, surveyStrength, surveyBand } from "./survey-surface";
 
 export type DroneSnapshot = Coordinates & { state: string; currentStep: number; totalSteps: number };
@@ -63,9 +62,6 @@ export class DroneController {
   private readonly originEntity: Cesium.Entity;
   private readonly trailEntity: Cesium.Entity;
   private trailPoints: Cesium.Cartesian3[] = [];
-  private readonly motionTrace: Cesium.Entity[] = [];
-  private traceSamples: { position: Cesium.Cartesian3; time: number }[] = [];
-  private traceSequence = 0;
   private preserveTrailEndpoint = false;
   private readonly releases: Cesium.Entity[] = [];
   private lastRenderedPosition: Cesium.Cartesian3 | undefined;
@@ -190,24 +186,6 @@ export class DroneController {
         clampToGround: false,
       },
     });
-    for (let index = 0; index < 72; index++) {
-      // Reused per particle: allocating colours every frame churns the heap
-      // 144 objects deep per drone and shows up as stutter with a full fleet.
-      const fill = Cesium.Color.clone(TRAIL_COLOR);
-      const outline = Cesium.Color.clone(TRAIL_COLOR);
-      this.motionTrace.push(viewer.entities.add({
-        id: `${this.id}_trace_${index}`,
-        position: new Cesium.CallbackPositionProperty((_time, result) => Cesium.Cartesian3.clone(this.tracePoint(index), result), false),
-        point: {
-          show: new Cesium.CallbackProperty(() => this.traceAlpha(index) > 0.01, false),
-          pixelSize: new Cesium.CallbackProperty(() => 1.4 + 3.6 * this.traceAlpha(index), false),
-          color: new Cesium.CallbackProperty(() => Cesium.Color.fromAlpha(TRAIL_COLOR, this.traceAlpha(index), fill), false),
-          outlineColor: new Cesium.CallbackProperty(() => Cesium.Color.fromAlpha(TRAIL_COLOR, this.traceAlpha(index) * 0.45, outline), false),
-          outlineWidth: 1,
-          disableDepthTestDistance: Infinity,
-        },
-      }));
-    }
     this.lastRenderedPosition = Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, home.altitude);
     this.crashIndicator = viewer.entities.add({
       id: `${id}_crash`,
@@ -441,7 +419,6 @@ export class DroneController {
     this.viewer.entities.remove(this.entity);
     this.viewer.entities.remove(this.originEntity);
     this.viewer.entities.remove(this.trailEntity);
-    for (const trace of this.motionTrace) this.viewer.entities.remove(trace);
     this.viewer.entities.remove(this.crashIndicator);
     for (const side of this.surveySides) this.viewer.entities.remove(side);
   }
@@ -507,8 +484,6 @@ export class DroneController {
     for (const marker of this.releases) this.viewer.entities.remove(marker);
     this.releases.length = 0;
     this.trailPoints = [];
-    this.traceSamples = [];
-    this.traceSequence = 0;
     this.originEntity.show = false;
     this.trailEntity.show = false;
     this.position = { ...this.home };
@@ -650,7 +625,6 @@ export class DroneController {
     if (Cesium.Cartesian3.distance(this.replayPosition, previous) > 0.001) {
       this.travelDirection = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(previous, this.replayPosition, new Cesium.Cartesian3()), new Cesium.Cartesian3());
       this.smoothRenderedHeading(this.travelDirection, this.replayPosition);
-      this.recordMotionTrace(this.replayPosition, previous);
     }
     this.replayPosition = previous;
     this.renderVersion++;
@@ -772,7 +746,6 @@ export class DroneController {
     if (this.lastRenderedPosition && Cesium.Cartesian3.distance(current, this.lastRenderedPosition) > 0.001) {
       this.travelDirection = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(current, this.lastRenderedPosition, new Cesium.Cartesian3()), new Cesium.Cartesian3());
       this.smoothRenderedHeading(this.travelDirection, current);
-      this.recordMotionTrace(this.lastRenderedPosition, current);
     }
     this.lastRenderedPosition = Cesium.Cartesian3.clone(current);
     if (this.trailPoints.length >= 2) {
@@ -792,39 +765,6 @@ export class DroneController {
       }
     }
   }
-
-  private recordMotionTrace(from: Cesium.Cartesian3, to: Cesium.Cartesian3): void {
-    const now = performance.now();
-    this.traceSamples = this.traceSamples.filter(sample => now - sample.time < MOTION_TRACE_LIFETIME_MS);
-    if (!this.traceSamples.length) this.traceSamples.push({ position: this.sprayParticle(from), time: now - 45 });
-    const previous = this.traceSamples.at(-1)!;
-    if (now - previous.time < 38 && Cesium.Cartesian3.distance(previous.position, to) < 0.65) return;
-    this.traceSamples.push({ position: this.sprayParticle(to), time: now });
-    if (this.traceSamples.length > 72) this.traceSamples.shift();
-  }
-
-  private sprayParticle(position: Cesium.Cartesian3): Cesium.Cartesian3 {
-    const sequence = this.traceSequence++;
-    const spread = 0.34;
-    const local = new Cesium.Cartesian3(
-      Math.sin(sequence * 2.31) * spread,
-      Math.cos(sequence * 1.73) * spread,
-      Math.sin(sequence * 0.91) * spread * 0.55,
-    );
-    return Cesium.Matrix4.multiplyByPoint(Cesium.Transforms.eastNorthUpToFixedFrame(position), local, new Cesium.Cartesian3());
-  }
-
-  private tracePoint(index: number): Cesium.Cartesian3 {
-    const end = this.traceSamples.length - 1 - index;
-    return end < 0 ? this.visualPosition() : this.traceSamples[end].position;
-  }
-
-  private traceAlpha(index: number): number {
-    const end = this.traceSamples.length - 1 - index;
-    if (end < 0) return 0;
-    return motionTraceAlpha(performance.now() - this.traceSamples[end].time);
-  }
-
 
   private orientationAt(position: Coordinates): Cesium.Quaternion {
     const cartesian = Cesium.Cartesian3.fromDegrees(position.longitude, position.latitude, position.altitude);

@@ -22,7 +22,6 @@ const { blendHeading, fleetCameraFrame, idleCameraDriftRate, screenRelativeMovem
 const { parseCommandInput, parseCommandSequence } = loadSource("command-console");
 const { compileMissionSequence } = loadSource("mission-sequence");
 const { resolveLandmark } = loadSource("landmarks");
-const { MOTION_TRACE_LIFETIME_MS, motionTraceAlpha } = loadSource("motion-trace");
 const { plannedFlightStep } = loadSource("flight-motion");
 const { GestureHoldInterpreter } = loadSource("gesture-hold");
 const { GestureCommandRepeater } = loadSource("gesture-repeat");
@@ -208,12 +207,6 @@ test("cinematic heading takes the shortest turn behind a flying drone", () => {
   const almostRight = Cesium.Math.toRadians(-179);
   const blended = blendHeading(almostLeft, almostRight, 0.5);
   assert(Math.abs(Cesium.Math.toDegrees(blended) - 180) < 0.001);
-});
-
-test("motion trace particles fade to transparent within a few seconds", () => {
-  assert.equal(motionTraceAlpha(0), 0.9);
-  assert(motionTraceAlpha(MOTION_TRACE_LIFETIME_MS / 2) < 0.3);
-  assert.equal(motionTraceAlpha(MOTION_TRACE_LIFETIME_MS), 0);
 });
 
 test("planned flight accelerates smoothly and brakes for arrival", () => {
@@ -878,11 +871,8 @@ test("empty startup, unique drone IDs and eight-color wraparound", () => {
     assert.equal(entities.getById(`${drone.id}_trail`).show, false);
     assert.equal(leader.polyline, undefined);
     assert.equal(leader.model.minimumPixelSize.getValue(), 42);
-    const trace = entities.getById(`${drone.id}_trace_0`);
-    assert(trace.point);
-    assert.equal(trace.polyline, undefined);
-    assert.equal(entities.values.filter(entity => entity.id.startsWith(`${drone.id}_trace_`)).length, 72);
-    assert(trace.point.pixelSize.getValue() <= 5);
+    // Flight leaves no trailing particles: only the body, label and markers.
+    assert.equal(entities.values.filter(entity => entity.id.startsWith(`${drone.id}_trace`)).length, 0);
   }
   assert.equal(fleet.drones.size, 9);
 });
