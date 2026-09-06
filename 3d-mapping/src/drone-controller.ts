@@ -84,6 +84,7 @@ export class DroneController {
   get routeLength(): number {
     return this.trailPoints.slice(1).reduce((sum, p, i) => sum + Cesium.Cartesian3.distance(this.trailPoints[i], p), 0);
   }
+  get cameraPosition(): Cesium.Cartesian3 { return Cesium.Cartesian3.clone(this.visualPosition()); }
   get coverageCount(): number { return this.coverage.length; }
   capture() {
     return { id: this.id, home: this.homeCoordinates, type: this.droneType, position: { ...this.position }, heading: this.manualHeading, color: this.colorHex, speed: this.speedMph,

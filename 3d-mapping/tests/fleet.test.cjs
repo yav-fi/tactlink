@@ -18,7 +18,21 @@ function loadSource(name) {
   return module.exports;
 }
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
+const { fleetCameraFrame } = loadSource("cinematic-camera");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
+
+test("cinematic camera framing expands to keep the whole fleet visible", () => {
+  const center = Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, home.altitude);
+  const frame = Cesium.Transforms.eastNorthUpToFixedFrame(center);
+  const near = Cesium.Matrix4.multiplyByPoint(frame, new Cesium.Cartesian3(-50, 0, 0), new Cesium.Cartesian3());
+  const far = Cesium.Matrix4.multiplyByPoint(frame, new Cesium.Cartesian3(50, 0, 0), new Cesium.Cartesian3());
+  const single = fleetCameraFrame([center]);
+  const fleet = fleetCameraFrame([near, far]);
+  assert.equal(fleetCameraFrame([]), undefined);
+  assert.equal(single.range, 85);
+  assert(fleet.range > single.range);
+  assert(Cesium.Cartesian3.distance(fleet.center, center) < 0.01);
+});
 
 test("first manual-flight undo keeps hidden render geometry at valid geographic positions", () => {
   for (const type of ["normal", "survey"]) {
