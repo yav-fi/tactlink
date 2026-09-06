@@ -30,7 +30,7 @@ struct PhoneHandPose {
         state(ringMCP,ringPIP,ringTip),state(littleMCP,littlePIP,littleTip)
     ]}
     var fingerReadout:String {
-        zip(["index","middle","ring","pinky"],fingerStates).map{"\($0.0): \($0.1.rawValue)"}.joined(separator:" · ")
+        zip(["thumb","index","middle","ring","pinky"],[state(thumbCMC,thumbIP,thumbTip)] + fingerStates).map{"\($0.0): \($0.1.rawValue)"}.joined(separator:" · ")
     }
     func command(canned:String,score:Double)->(String,Double) {
         let f=fingerStates
@@ -40,7 +40,7 @@ struct PhoneHandPose {
         if f == [.extended,.curled,.curled,.curled] {return ("One_Finger_Up",1)}
         if f == [.extended,.extended,.curled,.curled] {return ("Two_Fingers_Down",1)}
         if f == [.extended,.extended,.extended,.curled] {return ("Three_Finger_Orbit",1)}
-        if f.allSatisfy({$0 == .extended}) {return ("Four_Finger_Hover",1)}
+        if f.allSatisfy({$0 == .extended}), state(thumbCMC,thumbIP,thumbTip) == .extended {return ("Open_Palm",1)}
         if !f.contains(.extended),canned=="Closed_Fist",score>=0.55 {return ("Closed_Fist",score)}
         return ("None",0)
     }

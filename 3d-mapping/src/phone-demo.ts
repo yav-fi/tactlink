@@ -32,7 +32,7 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       <label><input id="phone-mirror" type="checkbox"> Mirror group</label>
       <p>Metres are measured by UWB. The anchor stays 5 m north of the drone’s starting point. Keep it still and align the group to the map. Two-phone mode assumes a vertical map line, X = Z = 0, using real UWB distance. Three-phone mode sets Z = 0.<!-- Legacy: Five-phone mode preserves relative XYZ; its third axis is not gravity height. --></p>
     </details>
-    <p class="phone-help">The gold person controls the drone. Anyone can hold a fist to follow, three fingers to orbit, or four fingers to hover above themselves. Drag the map to look around; Frame group restores the close view.</p>`;
+    <p class="phone-help">The gold person controls the drone. Anyone can hold a fist to follow, three fingers to orbit, or an open palm to hover above themselves. Drag the map to look around; Frame group restores the close view.</p>`;
   document.body.append(panel);
   const guide = document.createElement("section");
   guide.id = "phone-guide";
@@ -42,10 +42,10 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       <div data-gesture="One_Finger_Up"><dt>☝️ One finger</dt><dd>Index extended, other fingers curled. Any direction. Climb at 2 m/s while held. Lower your hand to stop.</dd></div>
       <div data-gesture="Two_Fingers_Down"><dt>✌️ Two fingers</dt><dd>Index + middle extended, ring + pinky curled. Any direction. Descend at 1 m/s to the hover floor while held. Lower your hand to stop.</dd></div>
       <div data-gesture="Three_Finger_Orbit"><dt>Three fingers · orbit</dt><dd>Index + middle + ring extended, pinky curled. Orbit your mapped position at a 2 m radius, 3.5 m above your base, while held. Release to stop.</dd></div>
-      <div data-gesture="Four_Finger_Hover"><dt>Four fingers · hover above you</dt><dd>All four fingers extended; thumb position ignored. Fly to 3.5 m above your mapped base and hover while held. Release to stop.</dd></div>
+      <div data-gesture="Open_Palm"><dt>✋ Open palm · hover above you</dt><dd>Open your hand with all fingers and thumb extended. Fly to 3.5 m above your mapped base and hover while held. Release to stop.</dd></div>
       <div data-gesture="Closed_Fist"><dt>✊ Closed fist</dt><dd>Four fingers curled; thumb position is ignored. Fly above you, then follow your mapped position at up to 2 m/s, about 3.5 m above your base. You can lower your hand. Another person’s held fist switches follow to them. Use Stop drone to cancel follow.</dd></div>
     </dl>
-    <p><b>Release to stop vertical movement; fist-follow stays on.</b> One/two fingers leave follow and adjust altitude; three/four switch to orbit/hover; release to hover at that height. The fist caller keeps control until another fist/three/four-finger claim, Stop drone, or signal loss. Before a fist claim, the closest person controls. Stop drone pauses movement and releases control. Follow uses the mapped UWB position, so keep the stationary anchor still.</p>`;
+    <p><b>Release to stop vertical movement; fist-follow stays on.</b> One/two fingers leave follow and adjust altitude; three fingers/open palm switch to orbit/hover; release to hover at that height. The fist caller keeps control until another fist/three-finger/open-palm claim, Stop drone, or signal loss. Before a fist claim, the closest person controls. Stop drone pauses movement and releases control. Follow uses the mapped UWB position, so keep the stationary anchor still.</p>`;
   document.body.append(guide);
   const text = (id: string, value: string) => { panel.querySelector<HTMLElement>(`#${id}`)!.textContent = value; };
   const roomSelect = panel.querySelector<HTMLSelectElement>("#phone-room")!;
@@ -117,7 +117,7 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
         const row = document.createElement("div");
         const health = phone.age > PHONE_TIMEOUT ? "signal lost" : !phone.pos ? "waiting for UWB" : phone.geometryAge > 8 ? "position expired" : phone.confidence < 0.55 && phone.gesture !== "None" ? "pose confidence too low; show the full hand"
           : !tracked.some(p => p.operator_id === phone.id) ? "check anchor and room mode"
-          : owner && owner.operator_id !== phone.id && phone.gesture !== "None" ? `${owner.name} owns control; fist/three/four fingers can request it`
+          : owner && owner.operator_id !== phone.id && phone.gesture !== "None" ? `${owner.name} owns control; fist, three fingers or open palm can request it`
           : `${phone.geometryAge.toFixed(1)} s position age`;
         const claim = controller.claimProgress(phone.id);
         const gesture = phone.gesture.replaceAll("_", " ");

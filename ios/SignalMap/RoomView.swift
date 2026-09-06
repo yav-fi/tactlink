@@ -250,7 +250,7 @@ private struct GestureStatus: View {
                 .frame(height: 220).clipShape(RoundedRectangle(cornerRadius: 10))
             Text(readiness).font(.caption2).foregroundStyle(roomMint)
             Text(camera.rawStatus).font(.caption2.monospaced()).foregroundStyle(roomMint)
-            Text("Hold upright; show your whole hand. Fist: call and follow. One finger (index): climb. Two fingers (index + middle): descend. Three fingers (index + middle + ring): orbit at 2 m radius, 3.5 m above your mapped base. Four fingers: hover above you at 3.5 m. Thumb position and hand direction do not matter. Lower your hand to stop climb, descent, orbit or hover motion. Use Stop drone in the visualizer to cancel follow.")
+            Text("Hold upright; show your whole hand. Fist: call and follow. One finger (index): climb. Two fingers (index + middle): descend. Three fingers (index + middle + ring): orbit at 2 m radius, 3.5 m above your mapped base. Open palm (fingers and thumb extended): hover above you at 3.5 m. Hand direction does not matter. Lower your hand to stop climb, descent, orbit or hover motion. Use Stop drone in the visualizer to cancel follow.")
                 .font(.caption2).foregroundStyle(roomMuted)
         HStack(spacing: 10) {
             Image(systemName: camera.gesture == "None" ? "hand.raised.slash" : "hand.raised.fill")

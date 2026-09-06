@@ -347,7 +347,7 @@ test("drag rotates the close phone camera without changing range or jumping back
 });
 
 test("legacy gestures cannot command the three-gesture demo", () => {
-  for (const gesture of ["Thumb_Up", "Thumb_Down", "Open_Palm", "Three_Finger_Forward", "Dash_Left", "Dash_Right", "ILoveYou", "Victory"]) {
+  for (const gesture of ["Thumb_Up", "Thumb_Down", "Four_Finger_Hover", "Three_Finger_Forward", "Dash_Left", "Dash_Right", "ILoveYou", "Victory"]) {
     const control = new PhoneControl();
     const people = placePhones([phone(0, { gesture })], alignment);
     control.update(people, { x: 0, y: 5 }, 0);
@@ -357,7 +357,7 @@ test("legacy gestures cannot command the three-gesture demo", () => {
 
 
 test("orbit and overhead hover claim the requesting phone, repeat while held and stop on release", () => {
-  for (const [gesture, action] of [["Three_Finger_Orbit", "orbit"], ["Four_Finger_Hover", "hover_overhead"]]) {
+  for (const [gesture, action] of [["Three_Finger_Orbit", "orbit"], ["Open_Palm", "hover_overhead"]]) {
     const control = new PhoneControl();
     const people = placePhones([phone(0, { gesture: "None" }), phone(1, { gesture })], alignment);
     const drone = { x: 0, y: 5 };
@@ -373,7 +373,7 @@ test("orbit and overhead hover claim the requesting phone, repeat while held and
 
 test("simultaneous fresh claims stop and explain the conflict", () => {
   const control = new PhoneControl();
-  const people = placePhones([phone(0, { gesture: "Three_Finger_Orbit" }), phone(1, { gesture: "Four_Finger_Hover" })], alignment);
+  const people = placePhones([phone(0, { gesture: "Three_Finger_Orbit" }), phone(1, { gesture: "Open_Palm" })], alignment);
   const drone = { x: 0, y: 5 };
   control.update(people, drone, 0);
   const result = control.update(people, drone, 400);

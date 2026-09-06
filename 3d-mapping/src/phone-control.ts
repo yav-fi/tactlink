@@ -28,10 +28,10 @@ export function placePhones(phones: PhoneSample[], alignment: PhoneAlignment): R
   });
 }
 
-const CLAIMS = new Set(["Closed_Fist", "Three_Finger_Orbit", "Four_Finger_Hover"]);
+const CLAIMS = new Set(["Closed_Fist", "Three_Finger_Orbit", "Open_Palm"]);
 const ACTIONS: Record<string, string> = {
   Closed_Fist: "follow", One_Finger_Up: "takeoff", Two_Fingers_Down: "land",
-  Three_Finger_Orbit: "orbit", Four_Finger_Hover: "hover_overhead",
+  Three_Finger_Orbit: "orbit", Open_Palm: "hover_overhead",
 };
 
 /** One owner of one browser drone. Handoffs require a fresh deliberate hold. */
@@ -90,7 +90,7 @@ export class PhoneControl {
     }
     if (ready.length > 1) {
       this.reset(); this.conflicting = true;
-      return { progress: 0, stop: true, reason: "Conflicting control requests. Only one person should hold fist, three or four fingers; then hold again." };
+      return { progress: 0, stop: true, reason: "Conflicting control requests. Only one person should hold fist, three fingers or an open palm; then hold again." };
     }
     const claimant = ready.filter(p => CLAIMS.has(p.gesture))
       .sort((a, b) => this.claims.get(b.operator_id)!.since - this.claims.get(a.operator_id)!.since || a.operator_id.localeCompare(b.operator_id))[0];

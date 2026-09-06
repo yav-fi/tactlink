@@ -27,13 +27,13 @@ func pose(_ fingers:(Bool,Bool,Bool,Bool,Bool), vector:(Double,Double)=(0,1))->P
 
 for vector in [(0.0,1.0),(1.0,0.0),(0.0,-1.0),(-1.0,0.0)] {
     check(pose((false,true,true,true,false),vector:vector).command(canned:"None",score:0).0=="Three_Finger_Orbit","orbit works in every hand orientation")
-    check(pose((true,true,true,true,true),vector:vector).command(canned:"Open_Palm",score:0.9).0=="Four_Finger_Hover","hover ignores thumb and hand orientation")
+    check(pose((true,true,true,true,true),vector:vector).command(canned:"Open_Palm",score:0.9).0=="Open_Palm","open palm hovers in every hand orientation")
     check(pose((false,false,false,false,false),vector:vector).command(canned:"None",score:0).0=="Closed_Fist","curled landmarks recognize fist even when canned is None")
     check(pose((false,true,false,false,false),vector:vector).command(canned:"None",score:0).0=="One_Finger_Up","one index finger climbs regardless of direction")
     check(pose((false,true,true,false,false),vector:vector).command(canned:"Victory",score:0.9).0=="Two_Fingers_Down","index and middle descend regardless of direction")
 }
 check(pose((true,false,false,false,false)).command(canned:"Thumb_Up",score:0.9).0=="Closed_Fist","thumb position does not interfere with curled four fingers")
-check(pose((false,true,true,true,true)).command(canned:"Open_Palm",score:0.9).0=="Four_Finger_Hover","four fingers hover overhead")
+check(pose((false,true,true,true,true)).command(canned:"Open_Palm",score:0.9).0=="None","four fingers with tucked thumb no longer hover")
 check(pose((false,true,true,true,false)).command(canned:"None",score:0).0=="Three_Finger_Orbit","three fingers orbit")
 check(pose((false,false,true,false,false)).command(canned:"None",score:0).0=="None","middle finger alone has no command")
 var depthPose=pose((false,true,false,false,false))
