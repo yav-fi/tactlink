@@ -339,7 +339,7 @@ export class DroneController {
   }
 
   get heading(): number { return this.manualHeading; }
-  startGestureMotion(east: number, north: number, up: number, speedMps: number): void {
+  startGestureMotion(east: number, north: number, up: number, speedMps: number, smoothSteering = false): void {
     if (this.battery.depleted) return;
     const magnitude = Math.hypot(east, north, up);
     if (magnitude < 0.0001) return;
@@ -351,7 +351,11 @@ export class DroneController {
     this.headingTurn = null;
     this.missionSpeedMps = 0;
     this.missionWaypoint = null;
-    if (!sameDirection) { this.stopManualMotion(); this.guard.clear(); }
+    if (!sameDirection) {
+      // Continuous orbit steering must not restart acceleration on every heading update.
+      if (!smoothSteering || !this.gestureMotion) this.stopManualMotion();
+      this.guard.clear();
+    }
     this.gestureMotion = next;
     this.state = "GESTURE_CONTROL";
   }

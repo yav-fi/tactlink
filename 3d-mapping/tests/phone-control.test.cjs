@@ -16,7 +16,7 @@ const { applyPhoneAction } = loadSource("phone-flight");
 const { Fleet } = loadSource("fleet");
 const alignment = { anchor: "0", rotation: 0, mirror: false };
 const phone = (id, extra = {}) => ({ id: String(id), name: `Phone ${id}`, room: "room", pos: [id * 3, 0], z: id,
-  heading: 0, compassValid: true, gesture: "One_Finger_Up", confidence: 0.95, flat: false, geometryAge: 0, age: 0, ...extra });
+  heading: 0, compassValid: true, gesture: "Thumb_Up", confidence: 0.95, flat: false, geometryAge: 0, age: 0, ...extra });
 
 test("three-phone flat and five-phone XYZ placement preserve measured relative metres", () => {
   for (const count of [3, 5]) {
@@ -39,7 +39,7 @@ test("missing anchor, stale geometry and different rooms never invent a formatio
 
 test("only the nearest phone commands the actual drone after a deliberate hold", () => {
   const control = new PhoneControl();
-  const operators = placePhones([phone(0), phone(1, { gesture: "Two_Fingers_Down" }), phone(2)], alignment);
+  const operators = placePhones([phone(0), phone(1, { gesture: "Thumb_Down" }), phone(2)], alignment);
   const drone = { x: 3, y: 5 };
   assert.equal(control.update(operators, drone, 0).action, undefined);
   const command = control.update(operators, drone, 400);
@@ -67,7 +67,7 @@ test("phone camera labels move the production browser drone and stop it on relea
   const fleet = new Fleet({ entities: new Cesium.EntityCollection() });
   const drone = fleet.deploy(home);
   const control = new PhoneControl();
-  let operators = placePhones([phone(0, { gesture: "One_Finger_Up", heading: 0 }), phone(1), phone(2)], alignment);
+  let operators = placePhones([phone(0, { gesture: "Thumb_Up", heading: 0 }), phone(1), phone(2)], alignment);
   control.update(operators, { x: 0, y: 0 }, 0);
   const command = control.update(operators, { x: 0, y: 0 }, 400);
   applyPhoneAction(drone, command.action, command.operator, home, { x: 0, y: 0, z: 0 });
@@ -225,12 +225,12 @@ test("follow survives one wrong gesture but a deliberate different command still
   const people = placePhones([phone(0, { gesture: "None" }), phone(1, { gesture: "Closed_Fist" })], alignment);
   const drone = { x: 0, y: 5 };
   control.update(people, drone, 0); control.update(people, drone, 400);
-  people[1].gesture = "One_Finger_Up";
+  people[1].gesture = "Thumb_Up";
   let result = control.update(people, drone, 500);
   assert.equal(result.action, "follow"); assert.equal(result.operator.operator_id, "1");
   people[1].gesture = "None";
   assert.equal(control.update(people, drone, 600).action, "follow");
-  people[1].gesture = "One_Finger_Up";
+  people[1].gesture = "Thumb_Up";
   assert.equal(control.update(people, drone, 700).action, "follow");
   result = control.update(people, drone, 1100);
   assert.equal(result.action, "takeoff"); assert.equal(result.operator.operator_id, "1"); assert(result.stop);
@@ -243,7 +243,7 @@ test("a losing held fist cannot steal back after flicker; a released and repeate
   control.update(people, drone, 0); control.update(people, drone, 400);
   people[1].gesture = "Closed_Fist";
   control.update(people, drone, 500); control.update(people, drone, 900);
-  people[0].gesture = "One_Finger_Up";
+  people[0].gesture = "Thumb_Up";
   control.update(people, drone, 1000);
   people[0].gesture = "Closed_Fist";
   control.update(people, drone, 1100);
@@ -270,16 +270,16 @@ test("a long dropout discards an incomplete fist hold", () => {
 
 test("fist caller retains up/down control even while the other phone remains nearer", () => {
   const control = new PhoneControl();
-  const people = placePhones([phone(0, { gesture: "One_Finger_Up" }), phone(1, { gesture: "Closed_Fist" })], alignment);
+  const people = placePhones([phone(0, { gesture: "Thumb_Up" }), phone(1, { gesture: "Closed_Fist" })], alignment);
   const drone = { x: 0, y: 5 };
   control.update(people, drone, 0); control.update(people, drone, 400);
-  people[1].gesture = "One_Finger_Up";
+  people[1].gesture = "Thumb_Up";
   control.update(people, drone, 500);
   let result = control.update(people, drone, 900);
   assert.equal(result.action, "takeoff"); assert.equal(result.operator.operator_id, "1");
   result = control.update(people, drone, 1000);
   assert.equal(result.action, "takeoff"); assert.equal(result.operator.operator_id, "1");
-  people[1].gesture = "Two_Fingers_Down";
+  people[1].gesture = "Thumb_Down";
   control.update(people, drone, 1100);
   result = control.update(people, drone, 1500);
   assert.equal(result.action, "land"); assert.equal(result.operator.operator_id, "1");
@@ -347,10 +347,125 @@ test("drag rotates the close phone camera without changing range or jumping back
 });
 
 test("legacy gestures cannot command the three-gesture demo", () => {
-  for (const gesture of ["Thumb_Up", "Thumb_Down", "Open_Palm", "Three_Finger_Forward", "Dash_Left", "Dash_Right", "ILoveYou", "Victory"]) {
+  for (const gesture of ["One_Finger_Up", "Two_Fingers_Down", "Three_Finger_Orbit", "Four_Finger_Hover", "Three_Finger_Forward", "Dash_Left", "Dash_Right", "ILoveYou"]) {
     const control = new PhoneControl();
     const people = placePhones([phone(0, { gesture })], alignment);
     control.update(people, { x: 0, y: 5 }, 0);
     assert.equal(control.update(people, { x: 0, y: 5 }, 1000).action, undefined, gesture);
   }
+});
+
+
+test("orbit and overhead hover claim the requesting phone, repeat while held and stop on release", () => {
+  for (const [gesture, action] of [["Pointing_Up", "orbit"], ["Open_Palm", "hover_overhead"]]) {
+    const control = new PhoneControl();
+    const people = placePhones([phone(0, { gesture: "None" }), phone(1, { gesture })], alignment);
+    const drone = { x: 0, y: 5 };
+    control.update(people, drone, 0);
+    const start = control.update(people, drone, 400);
+    assert.equal(start.operator.operator_id, "1"); assert.equal(start.action, action);
+    assert.equal(control.update(people, drone, 500).action, action);
+    people[1].gesture = "None";
+    const released = control.update(people, drone, 600);
+    assert(released.stop); assert.equal(released.action, undefined);
+  }
+});
+
+test("simultaneous fresh claims stop and explain the conflict", () => {
+  const control = new PhoneControl();
+  const people = placePhones([phone(0, { gesture: "Pointing_Up" }), phone(1, { gesture: "Open_Palm" })], alignment);
+  const drone = { x: 0, y: 5 };
+  control.update(people, drone, 0);
+  const result = control.update(people, drone, 400);
+  assert(result.stop); assert.equal(result.action, undefined); assert.match(result.reason, /Conflicting/);
+  people[1].gesture = "None";
+  control.update(people, drone, 500);
+  assert.equal(control.update(people, drone, 900).action, "orbit");
+});
+
+test("orbit converges to five metres radius and overhead height", () => {
+  const { GeoFrame } = loadSource("runtime/frame");
+  const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
+  const frame = new GeoFrame(); frame.update(home.latitude, home.longitude, home.altitude);
+  const drone = new Fleet({ entities: new Cesium.EntityCollection() }).deploy({ ...home, altitude: 86 });
+  const [owner] = placePhones([phone(0)], alignment);
+  let previousAngle, rotation = 0;
+  for (let i = 0; i < 2400; i++) {
+    const actual = frame.toLocal(drone.cameraPosition);
+    if (i % 6 === 0) applyPhoneAction(drone, "orbit", owner, home, actual);
+    if (i > 1200) {
+      const angle = Math.atan2(actual.y - owner.position.y, actual.x - owner.position.x);
+      if (previousAngle !== undefined) rotation += Math.atan2(Math.sin(angle - previousAngle), Math.cos(angle - previousAngle));
+      previousAngle = angle;
+    }
+    drone.update(1 / 60);
+  }
+  const actual = frame.toLocal(drone.cameraPosition);
+  assert(Math.abs(Math.hypot(actual.x - owner.position.x, actual.y - owner.position.y) - 5) < 0.25);
+  assert(Math.abs(actual.z - 3.5) < 0.15); assert(rotation > Math.PI * 2);
+});
+
+
+test("two fingers command nearest other operator and release stops", () => {
+  const control = new PhoneControl();
+  const people = placePhones([phone(0, { gesture: "Victory" }), phone(1, { gesture: "None" })], alignment);
+  control.update(people, { x: 0, y: 5 }, 0);
+  assert.equal(control.update(people, { x: 0, y: 5 }, 400).action, "nearest_operator");
+  assert.equal(control.update(people, { x: 0, y: 5 }, 500).action, "nearest_operator");
+  people[0].gesture = "None";
+  const end = control.update(people, { x: 0, y: 5 }, 600);
+  assert(end.stop); assert.equal(end.action, undefined);
+});
+test("nearest destination excludes caller, locks target, rejects stale position and resets", () => {
+  const { NearestOperatorTarget } = loadSource("phone-control");
+  const selector = new NearestOperatorTarget();
+  const people = placePhones([phone(0), phone(1), phone(2)], alignment);
+  assert.equal(selector.resolve(people[0], people).operator_id, "1");
+  people[2].position.x = 0.1;
+  assert.equal(selector.resolve(people[0], people).operator_id, "1");
+  people[1].age = 2;
+  assert.equal(selector.resolve(people[0], people), undefined);
+  selector.reset();
+  assert.equal(selector.resolve(people[0], people).operator_id, "2");
+  selector.reset(); assert.equal(selector.resolve(people[0], [people[0]]), undefined);
+});
+
+
+test("demo spacing multiplies operator separation by ten without changing raw measurements", () => {
+  const phones = [phone(0, { flat: true }), phone(1, { flat: true, pos: [3, 4] })];
+  const before = JSON.stringify(phones);
+  const mapped = placePhones(phones, { ...alignment, spacingScale: 10, rotation: 90, mirror: true });
+  assert(Math.abs(Math.hypot(mapped[1].position.x - mapped[0].position.x, mapped[1].position.y - mapped[0].position.y) - 50) < 1e-8);
+  assert.equal(mapped[0].position.y, 5); assert.equal(mapped[1].position.z, 0);
+  assert.equal(JSON.stringify(phones), before);
+  assert.deepEqual(placePhones([phone(0, { pos: null })], { ...alignment, spacingScale: 10 }), []);
+});
+
+
+test("player teleport persists across UWB updates, leaves others/raw data alone and resets", () => {
+  const { OperatorRelocation } = loadSource("operator-relocation");
+  const reloc = new OperatorRelocation();
+  const raw = placePhones([phone(0), phone(1)], alignment);
+  const before = JSON.stringify(raw);
+  assert(reloc.move("1", { x: 100, y: 200, z: 2 }, reloc.apply(raw)));
+  let placed = reloc.apply(raw);
+  assert.deepEqual(placed[1].position, { x: 100, y: 200, z: 2 });
+  assert.deepEqual(placed[0].position, raw[0].position); assert.equal(JSON.stringify(raw), before);
+  raw[1].position.x += 4;
+  assert.equal(reloc.apply(raw)[1].position.x, 104);
+  assert(!reloc.move("missing", { x: 1, y: 2, z: 3 }, placed));
+  assert(!reloc.move("1", { x: NaN, y: 2, z: 3 }, placed));
+  reloc.reset(); assert.deepEqual(reloc.apply(raw), raw);
+});
+test("whole group teleport preserves spacing and individual offsets", () => {
+  const { OperatorRelocation } = loadSource("operator-relocation");
+  const reloc = new OperatorRelocation();
+  const raw = placePhones([phone(0), phone(1)], alignment);
+  reloc.move("1", { x: 20, y: 5, z: 0 }, reloc.apply(raw));
+  reloc.move("*", { x: 100, y: 100, z: 10 }, reloc.apply(raw));
+  const placed = reloc.apply(raw);
+  assert.equal((placed[0].position.x + placed[1].position.x) / 2, 100);
+  assert.equal(placed[1].position.x - placed[0].position.x, 20);
+  assert.equal(placed[0].position.z, 10);
+  assert.deepEqual(reloc.apply([]), []);
 });

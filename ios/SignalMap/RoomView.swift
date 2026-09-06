@@ -38,7 +38,8 @@ struct RoomView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("A shared sense\nof where you are.")
                     .font(.system(size: 34, weight: .medium, design: .rounded)).tracking(-1)
-                Text(room.twoPhoneMode ? "Test gestures with two phones. Distance is measured; map direction is assumed." : room.threePhoneMode ? "Join three phones. Rotate every pair. Test a flat map." : "Join five phones. Measure between pairs. See the group around you.")
+                // Legacy five-phone lobby: "Join five phones. Measure between pairs. See the group around you."
+                Text(room.twoPhoneMode ? "Test gestures with two phones. Distance is measured; map direction is assumed." : "Join three phones. Rotate every pair. Test a flat map.")
                     .font(.subheadline).foregroundStyle(roomMuted).lineSpacing(4)
             }.padding(.top, 12)
             HStack(spacing: 12) {
@@ -140,7 +141,7 @@ struct RoomView: View {
                 }
             }
             RoomMap(room: room)
-            GestureStatus(camera: room.gestureCamera)
+            GestureStatus(camera: room.gestureCamera, room: room)
             HStack(spacing: 12) {
                 stat("CYCLE", String(room.cycle))
                 stat("PAIR RANGES", "\(room.availableRanges.count)/\(max(1,room.participantCount*(room.participantCount-1)/2))")
@@ -185,6 +186,7 @@ struct RoomView: View {
     private func eyebrow(_ text: String) -> some View {
         Text(text).font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(1).foregroundStyle(roomMuted)
     }
+    /* Legacy selectors retained: turning both off enabled five-phone mode.
     private var testModeToggle: some View {
         VStack(alignment:.leading,spacing:7) {
             Toggle("2-phone gesture test",isOn:Binding(get:{room.twoPhoneMode},set:{room.setTwoPhoneMode($0)}))
@@ -194,6 +196,19 @@ struct RoomView: View {
             Text(room.twoPhoneMode ? "Starts at two. One real UWB distance places phones on a fixed vertical map line, X = Z = 0. Direction is assumed, not measured." : room.threePhoneMode ? "Starts at three. All phones share Z = 0; one mirror layout is chosen and kept consistent." : "Full mode starts at five and estimates a 3D group shape.")
                 .font(.caption2).foregroundStyle(roomMuted).lineSpacing(2)
         }.padding(14).background(.white.opacity(0.035),in:RoundedRectangle(cornerRadius:14))
+    }
+    */
+    private var testModeToggle: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Picker("Phone mode", selection: Binding(get: { room.twoPhoneMode ? 2 : 3 }, set: {
+                if $0 == 2 { room.setTwoPhoneMode(true) } else { room.setThreePhoneMode(true) }
+            })) {
+                Text("2-phone test").tag(2)
+                Text("3-phone flat test").tag(3)
+            }.pickerStyle(.segmented)
+            Text(room.twoPhoneMode ? "Starts at two. One real UWB distance places phones on a fixed vertical map line, X = Z = 0. Direction is assumed, not measured." : "Starts at three. All phones share Z = 0; one mirror layout is chosen and kept consistent.")
+                .font(.caption2).foregroundStyle(roomMuted).lineSpacing(2)
+        }.padding(14).background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
     }
     private func stat(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -205,6 +220,15 @@ struct RoomView: View {
 
 private struct GestureStatus: View {
     @ObservedObject var camera: GestureCamera
+    @ObservedObject var room: RoomSession
+    private var readiness: String {
+        if room.paused { return "Room paused. Resume ranging to refresh positions." }
+        if room.simBridge.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Visualizer host is empty. Set this Mac’s Wi-Fi IP:9870 to send gestures." }
+        if room.participantCount < room.targetCount { return "Waiting for \(room.targetCount - room.participantCount) more phone(s) in this room." }
+        if room.geometry == nil || room.geometryAge > 8 { return room.geometryStatus }
+        if camera.gesture == "None" { return "No stable pose. Show the whole hand and hold for about one second." }
+        return "Pose ready for transmission. The Mac shows control ownership, conflicts, obstacles and height limits; this phone cannot confirm delivery."
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("FRONT CAMERA · \(camera.processedFrames) frames processed")
@@ -224,8 +248,9 @@ private struct GestureStatus: View {
                     }.allowsHitTesting(false)
                 }
                 .frame(height: 220).clipShape(RoundedRectangle(cornerRadius: 10))
+            Text(readiness).font(.caption2).foregroundStyle(roomMint)
             Text(camera.rawStatus).font(.caption2.monospaced()).foregroundStyle(roomMint)
-            Text("Hold upright; show your whole hand. Fist: call and follow. One finger (index): climb. Two fingers (index + middle): descend. Direction does not matter. Lower your hand to stop vertical movement. Use Stop drone in the visualizer to cancel follow.")
+            Text("Show your whole hand and hold for about one second. Thumbs up: ascend. Thumbs down: descend directly. Index finger: orbit at 5 m radius, about 3 m/s. Open palm: hover above you. Closed fist: come to you and keep following. Two fingers (index + middle): go to the nearest other operator. Orbit and hover stay 3.5 m above the mapped base. Release to stop movement except fist-follow; use Stop drone to cancel follow.")
                 .font(.caption2).foregroundStyle(roomMuted)
         HStack(spacing: 10) {
             Image(systemName: camera.gesture == "None" ? "hand.raised.slash" : "hand.raised.fill")
