@@ -47,8 +47,8 @@ class _Camera:
 class Scene:
     def __init__(self, width=640, height=480):
         self.w, self.h = width, height
-        self.cam = _Camera((width, height), eye=(0.0, -15.5, 7.5),
-                           target=(0.0, 0.0, 1.4), fov_deg=62.0)
+        self.cam = _Camera((width, height), eye=(0.0, -18.0, 9.0),
+                           target=(0.0, 0.5, 1.2), fov_deg=66.0)
 
     def _line(self, img, a, b, color, thick=1):
         pa, pb = self.cam.project(a), self.cam.project(b)
@@ -81,7 +81,7 @@ class Scene:
         head = (float(ops.pos[i][0]), float(ops.pos[i][1]), 1.6)
         self._line(img, (quad.pos[0], quad.pos[1], quad.pos[2]), head, (66, 62, 56), 1)
 
-    def _grid(self, img, extent=9, step=1.5):
+    def _grid(self, img, extent=12, step=2.0):
         rng = np.arange(-extent, extent + step, step)
         for x in rng:
             self._line(img, (x, -extent, 0), (x, extent, 0),

@@ -34,7 +34,7 @@ def _ang_to(cur: float, target: float) -> float:
 class Operators:
     """N people scattered through the scene, plus which one holds the drone."""
 
-    def __init__(self, n: int = 4, radius: float = 4.6, min_sep: float = 2.4, seed=None):
+    def __init__(self, n: int = 4, radius: float = 7.0, min_sep: float = 4.0, seed=None):
         self.n = max(2, int(n))
         self.rng = np.random.default_rng(seed)
         self.pos = _scatter(self.n, radius, min_sep, self.rng)
@@ -247,20 +247,30 @@ class Autopilot:
         return self.ops.pos[i]
 
 
+_CAM_EYE_Y = -18.0     # the scene camera sits here (keep in sync with scene.Scene)
+_MIN_AZIMUTH = 0.11    # rad (~6 deg) of angular separation as the camera sees them
+
+
+def _azimuth(p) -> float:
+    return math.atan2(p[0], p[1] - _CAM_EYE_Y)
+
+
 def _scatter(n: int, radius: float, min_sep: float, rng) -> list:
-    """n points scattered anywhere in a disc of the given radius, no two closer
-    than min_sep, recentred so the group's centroid is the origin."""
+    """n points scattered through a disc of the given radius, no two closer than
+    min_sep and no two within _MIN_AZIMUTH as the camera sees them (so they never
+    stack on screen), recentred so the group's centroid is the origin."""
     pts: list[np.ndarray] = []
-    for _ in range(8000):
+    for _ in range(12000):
         if len(pts) == n:
             break
         r = radius * math.sqrt(rng.random())
         a = rng.random() * 2 * math.pi
         p = np.array([r * math.cos(a), r * math.sin(a)])
-        if all(np.linalg.norm(p - q) >= min_sep for q in pts):
+        if all(np.linalg.norm(p - q) >= min_sep
+               and abs(_azimuth(p) - _azimuth(q)) >= _MIN_AZIMUTH for q in pts):
             pts.append(p)
-    while len(pts) < n:                            # fall back to a jittered ring
-        a = 2 * math.pi * (len(pts) + rng.random()) / n
-        pts.append(np.array([radius * 0.8 * math.cos(a), radius * 0.8 * math.sin(a)]))
+    while len(pts) < n:                            # fall back to a wide jittered arc
+        a = math.pi * (0.12 + 0.76 * (len(pts) + 0.3 * rng.random()) / max(1, n - 1))
+        pts.append(np.array([radius * math.cos(a), radius * 0.55 * math.sin(a)]))
     centroid = np.mean(pts, axis=0)
     return [p - centroid for p in pts]
