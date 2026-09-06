@@ -2,64 +2,46 @@ import Foundation
 import Combine
 
 struct PhoneHandPose {
-    struct Point { var x: Double; var y: Double; var confidence: Double }
-    var wrist, thumbCMC, thumbIP, thumbTip: Point
-    var indexMCP, indexPIP, indexTip: Point
-    var middleMCP, middlePIP, middleTip: Point
-    var ringMCP, ringPIP, ringTip: Point
-    var littleMCP, littlePIP, littleTip: Point
+    struct Point { var x:Double; var y:Double; var z:Double=0; var confidence:Double }
+    enum FingerState:String { case extended="up", curled="curled", uncertain="?" }
+    var wrist, thumbCMC, thumbIP, thumbTip:Point
+    var indexMCP, indexPIP, indexTip:Point
+    var middleMCP, middlePIP, middleTip:Point
+    var ringMCP, ringPIP, ringTip:Point
+    var littleMCP, littlePIP, littleTip:Point
 
-    private func distance(_ a: Point, _ b: Point) -> Double { hypot(a.x-b.x, a.y-b.y) }
-    private func extended(_ tip: Point, _ pip: Point, _ mcp: Point) -> Bool {
-        let ax=pip.x-mcp.x, ay=pip.y-mcp.y, bx=tip.x-pip.x, by=tip.y-pip.y
-        let cosine=(ax*bx+ay*by)/(hypot(ax,ay)*hypot(bx,by)+1e-6)
-        return cosine>0.35 && distance(wrist,tip)>distance(wrist,pip)*1.02
+    private func state(_ mcp:Point,_ pip:Point,_ tip:Point)->FingerState {
+        let a=(pip.x-mcp.x,pip.y-mcp.y,pip.z-mcp.z)
+        let b=(tip.x-pip.x,tip.y-pip.y,tip.z-pip.z)
+        let proximal=sqrt(a.0*a.0+a.1*a.1+a.2*a.2)
+        let distal=sqrt(b.0*b.0+b.1*b.1+b.2*b.2)
+        guard proximal>1e-6,distal>1e-6 else{return .uncertain}
+        let cosine=(a.0*b.0+a.1*b.1+a.2*b.2)/(proximal*distal)
+        let dx=tip.x-mcp.x,dy=tip.y-mcp.y,dz=tip.z-mcp.z
+        let reach=sqrt(dx*dx+dy*dy+dz*dz)/proximal
+        // A gap between thresholds prevents a partly bent finger from becoming
+        // either a fist or an extended finger just because one comparison failed.
+        if cosine>0.5 && reach>1.35 {return .extended}
+        if cosine<0.1 || reach<1.15 {return .curled}
+        return .uncertain
     }
-    var fingers: (thumb:Bool,index:Bool,middle:Bool,ring:Bool,little:Bool) {
-        let thumb=distance(wrist,thumbTip)>distance(wrist,thumbIP)*1.12 && distance(thumbCMC,thumbTip)>distance(thumbCMC,thumbIP)*1.18
-        return (thumb,extended(indexTip,indexPIP,indexMCP),extended(middleTip,middlePIP,middleMCP),extended(ringTip,ringPIP,ringMCP),extended(littleTip,littlePIP,littleMCP))
+    var fingerStates:[FingerState] {[
+        state(indexMCP,indexPIP,indexTip),state(middleMCP,middlePIP,middleTip),
+        state(ringMCP,ringPIP,ringTip),state(littleMCP,littlePIP,littleTip)
+    ]}
+    var fingerReadout:String {
+        zip(["index","middle","ring","pinky"],fingerStates).map{"\($0.0): \($0.1.rawValue)"}.joined(separator:" · ")
     }
-    var pointVector:(x:Double,y:Double) { ((indexTip.x-indexMCP.x)+(middleTip.x-middleMCP.x),(indexTip.y-indexMCP.y)+(middleTip.y-middleMCP.y)) }
-    var confidence:Double { [wrist,thumbTip,indexTip,middleTip,ringTip,littleTip].map(\.confidence).min() ?? 0 }
-    // MediaPipe supplies the learned categories. Geometry only adds the PC's
-    // custom signs and separates vertical pointing, including upside-down hands.
-    func directionalLabel(canned:String,score:Double)->(String,Double) {
-        let f=fingers
-        if f.index && !f.middle && !f.ring && !f.little {
-            let dx=indexTip.x-indexMCP.x, dy=indexTip.y-indexMCP.y
-            if abs(dy)>abs(dx)*1.2 {
-                return (dy>0 ? "Pointing_Up":"Pointing_Down", canned=="Pointing_Up" ? max(score,0.8):0.8)
-            }
-            return ("None",0)
-        }
-        if f.index && f.middle && f.ring && !f.little { return ("Three_Finger_Forward",0.8) }
-        // Never call an arbitrary index-pointing direction "up".
-        if canned=="Pointing_Up" { return ("None",0) }
-        return score>=0.55 ? (canned,score):("None",0)
+    func command(canned:String,score:Double)->(String,Double) {
+        let f=fingerStates
+        // Rule scores are acceptance flags for the existing command transport,
+        // not class probabilities. The UI exposes the actual raw model score separately.
+        if f.allSatisfy({$0 == .curled}) {return ("Closed_Fist",1)}
+        if f == [.extended,.curled,.curled,.curled] {return ("One_Finger_Up",1)}
+        if f == [.extended,.extended,.curled,.curled] {return ("Two_Fingers_Down",1)}
+        if !f.contains(.extended),canned=="Closed_Fist",score>=0.55 {return ("Closed_Fist",score)}
+        return ("None",0)
     }
-}
-
-/// V-H-V-H detector equivalent to `src/finger_swing.py`. Points are from an
-/// upright mirrored selfie image, so negative x is left in the preview.
-struct PhoneFingerSwing {
-    private(set) var history:[(String,Double)]=[]
-    private var raw:String?; private var rawSince=0.0; private var confirmed:String?
-    private var lastSeen = -Double.infinity
-    mutating func update(pose:PhoneHandPose?,at now:Double)->String? {
-        guard let pose else { if now-lastSeen>0.6 { reset() }; return nil }
-        let f=pose.fingers
-        guard f.index && f.middle && !f.ring && !f.little else { if now-lastSeen>0.6 { reset() }; return nil }
-        lastSeen=now
-        let v=pose.pointVector, angle=abs(atan2(v.x,v.y) * 180 / Double.pi)
-        let orientation:String? = (angle<=35 || angle>=145) ? "V" : (angle>=55 && angle<=125 ? "H":nil)
-        guard let orientation else { return nil }
-        if raw != orientation { raw=orientation; rawSince=now }
-        guard confirmed != orientation, now-rawSince>=0.12 else { return nil }
-        confirmed=orientation; history.append((orientation,now)); history=history.filter { now-$0.1<=4 }
-        guard history.suffix(4).map(\.0)==["V","H","V","H"] else { return nil }
-        let label=v.x<0 ? "Dash_Left":"Dash_Right"; reset(); return label
-    }
-    mutating func reset(){ history.removeAll(); raw=nil; confirmed=nil }
 }
 
 /// Vote across recent frames; brief uncertain frames cannot flip a stable command.
@@ -92,12 +74,16 @@ final class GestureCamera:NSObject,ObservableObject,AVCaptureVideoDataOutputSamp
     @Published private(set) var confidence=0.0
     @Published private(set) var status="Camera off"
     @Published private(set) var processedFrames=0
+    @Published private(set) var rawStatus="Waiting for camera frames"
+    @Published private(set) var handLandmarks:[CGPoint]=[]
+    @Published private(set) var frameSize=CGSize(width:480,height:640)
     let session=AVCaptureSession()
     private let queue=DispatchQueue(label:"room.gesture-camera",qos:.userInitiated)
     private var recognizer:GestureRecognizer?
+    private var rotationCoordinator:AVCaptureDevice.RotationCoordinator?
+    private var rotationObservation:NSKeyValueObservation?
     private var configured=false, active=false, lastFrame=0.0, lastTimestamp=0
-    private var swing=PhoneFingerSwing(), filter=PhoneGestureFilter()
-    private var pulse:(label:String,until:Double)?
+    private var filter=PhoneGestureFilter()
 
     override init() {
         super.init()
@@ -107,7 +93,8 @@ final class GestureCamera:NSObject,ObservableObject,AVCaptureVideoDataOutputSamp
     }
     deinit { NotificationCenter.default.removeObserver(self) }
     @objc private func captureInterrupted(_ notification:Notification) { queue.async { [weak self] in
-        guard let self else{return};filter.reset();swing.reset();pulse=nil
+        guard let self else{return};filter.reset()
+        reportRaw("Camera interrupted",points:[],size:nil)
         publish("None",0,"Camera interrupted · waiting to resume")
     }}
 
@@ -144,7 +131,9 @@ final class GestureCamera:NSObject,ObservableObject,AVCaptureVideoDataOutputSamp
     private func configure() throws {
         guard let camera=AVCaptureDevice.default(.builtInWideAngleCamera,for:.video,position:.front) else { throw NSError(domain:"GestureCamera",code:1,userInfo:[NSLocalizedDescriptionKey:"Front camera not found"]) }
         let input=try AVCaptureDeviceInput(device:camera)
-        session.beginConfiguration(); defer{session.commitConfiguration()}; session.sessionPreset = .medium
+        session.beginConfiguration(); defer{session.commitConfiguration()}
+        guard session.canSetSessionPreset(.vga640x480) else { throw NSError(domain:"GestureCamera",code:5,userInfo:[NSLocalizedDescriptionKey:"640×480 camera capture unavailable"]) }
+        session.sessionPreset = .vga640x480
         // A failed setup can be retried without retaining half a capture graph.
         for old in session.inputs { session.removeInput(old) }; for old in session.outputs { session.removeOutput(old) }
         guard session.canAddInput(input) else{throw NSError(domain:"GestureCamera",code:2)}; session.addInput(input)
@@ -154,15 +143,28 @@ final class GestureCamera:NSObject,ObservableObject,AVCaptureVideoDataOutputSamp
         guard session.canAddOutput(output) else{throw NSError(domain:"GestureCamera",code:3)}; session.addOutput(output)
         if let connection=output.connection(with:.video) {
             if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false; connection.isVideoMirrored=true }
-            // Portrait-only app: rotate actual pixels once, then pass orientation .up.
-            if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle=90 }
+            // Sensor mounting differs between cameras. Ask AVFoundation for this
+            // camera's upright angle instead of assuming that every front camera is 90°.
+            let rotation=AVCaptureDevice.RotationCoordinator(device:camera,previewLayer:nil)
+            rotationCoordinator=rotation
+            func quarterTurn(_ angle:CGFloat)->CGFloat { (round(angle/90)*90).truncatingRemainder(dividingBy:360) }
+            let angle=quarterTurn(rotation.videoRotationAngleForHorizonLevelCapture)
+            if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle=angle }
+            rotationObservation=rotation.observe(\.videoRotationAngleForHorizonLevelCapture,options:[.new]) { [weak self] coordinator,_ in
+                let angle=quarterTurn(coordinator.videoRotationAngleForHorizonLevelCapture)
+                self?.queue.async { [weak self] in
+                    guard let self,connection.videoRotationAngle != angle,connection.isVideoRotationAngleSupported(angle) else{return}
+                    connection.videoRotationAngle=angle;filter.reset()
+                }
+            }
         }
         configured=true
     }
     func stop(){queue.async{[weak self] in
         guard let self else{return}; active=false
         if session.isRunning{session.stopRunning()}
-        swing.reset();filter.reset();pulse=nil;publish("None",0,"Camera off")
+        filter.reset();publish("None",0,"Camera off")
+        reportRaw("Camera off",points:[],size:nil)
     }}
     func captureOutput(_ output:AVCaptureOutput,didOutput sampleBuffer:CMSampleBuffer,from connection:AVCaptureConnection){
         let now=ProcessInfo.processInfo.systemUptime
@@ -172,34 +174,49 @@ final class GestureCamera:NSObject,ObservableObject,AVCaptureVideoDataOutputSamp
             let image=try MPImage(sampleBuffer:sampleBuffer,orientation:.up)
             lastTimestamp=max(lastTimestamp+1,Int(now*1000))
             let result=try recognizer.recognize(videoFrame:image,timestampInMilliseconds:lastTimestamp)
+            let buffer=CMSampleBufferGetImageBuffer(sampleBuffer)
+            let size=buffer.map{CGSize(width:CVPixelBufferGetWidth($0),height:CVPixelBufferGetHeight($0))} ?? .zero
+            let top=result.gestures.first?.first
+            let rawLabel=top?.categoryName ?? "None", rawScore=Double(top?.score ?? 0)
+            let points=(result.landmarks.first ?? []).map{CGPoint(x:CGFloat($0.x),y:CGFloat($0.y))}
+            let raw="Hands: \(result.landmarks.count) · raw: \(rawLabel) \(Int(rawScore*100))% · \(Int(size.width))×\(Int(size.height)) · rotation \(Int(connection.videoRotationAngle))°"
+            reportRaw(raw,points:points,size:size)
             guard let landmarks=result.landmarks.first, landmarks.count==21,
-                  let buffer=CMSampleBufferGetImageBuffer(sampleBuffer) else {
-                _=swing.update(pose:nil,at:now);pulse=nil
+                  let buffer else {
                 let stable=filter.update(label:"None",score:0,at:now)
-                publish(stable.0,stable.1,"MediaPipe · show your whole hand"); return
+                publish(stable.0,stable.1,"MediaPipe · no hand detected"); return
             }
-            // Pixel aspect ratio matters for finger angles. Internal y points up.
+            // Use MediaPipe's 3D hand geometry for bend angles. This avoids
+            // treating a finger aimed toward the camera as a curled 2D projection.
+            let world=result.worldLandmarks.first
             let aspect=Double(CVPixelBufferGetWidth(buffer))/Double(CVPixelBufferGetHeight(buffer))
-            func p(_ i:Int)->PhoneHandPose.Point{.init(x:Double(landmarks[i].x)*aspect,y:1-Double(landmarks[i].y),confidence:1)}
+            func p(_ i:Int)->PhoneHandPose.Point {
+                if let world,world.count==21 {return .init(x:Double(world[i].x),y:Double(world[i].y),z:Double(world[i].z),confidence:1)}
+                return .init(x:Double(landmarks[i].x)*aspect,y:Double(landmarks[i].y),z:Double(landmarks[i].z)*aspect,confidence:1)
+            }
             let pose=PhoneHandPose(wrist:p(0),thumbCMC:p(1),thumbIP:p(3),thumbTip:p(4),
                 indexMCP:p(5),indexPIP:p(6),indexTip:p(8),middleMCP:p(9),middlePIP:p(10),middleTip:p(12),
                 ringMCP:p(13),ringPIP:p(14),ringTip:p(16),littleMCP:p(17),littlePIP:p(18),littleTip:p(20))
-            let top=result.gestures.first?.first
-            var candidate=pose.directionalLabel(canned:top?.categoryName ?? "None",score:Double(top?.score ?? 0))
-            if let dash=swing.update(pose:pose,at:now){pulse=(dash,now+0.8)}
-            if let value=pulse { if now<=value.until { candidate=(value.label,0.8) } else {pulse=nil} }
+            reportRaw(raw+"\n"+pose.fingerReadout,points:points,size:size)
+            let candidate=pose.command(canned:rawLabel,score:rawScore)
             let stable=filter.update(label:candidate.0,score:candidate.1,at:now)
             publish(stable.0,stable.1,"MediaPipe · recognizing on this iPhone")
         }catch{
-            filter.reset();swing.reset();pulse=nil
+            filter.reset()
+            reportRaw("Inference failed",points:[],size:nil)
             publish("None",0,"MediaPipe error: \(error.localizedDescription)")
         }
     }
+    private func reportRaw(_ text:String,points:[CGPoint],size:CGSize?) { DispatchQueue.main.async { [weak self] in
+        guard let self else{return};rawStatus=text;handLandmarks=points
+        if let size, size.width>0, size.height>0 {frameSize=size}
+    }}
     private func publish(_ label:String,_ score:Double,_ message:String){DispatchQueue.main.async{[weak self] in self?.gesture=label;self?.confidence=label=="None" ? 0:score;self?.status=message}}
 }
 #else
 final class GestureCamera:ObservableObject {
     @Published private(set) var gesture="None";@Published private(set) var confidence=0.0;@Published private(set) var status="Camera unavailable in protocol test"
+    var rawStatus="Camera unavailable in protocol test"
     func start(){};func stop(){gesture="None";confidence=0}
 }
 #endif

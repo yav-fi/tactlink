@@ -25,14 +25,23 @@ func pose(_ fingers:(Bool,Bool,Bool,Bool,Bool), vector:(Double,Double)=(0,1))->P
     return result
 }
 
-check(pose((false,true,true,true,false)).directionalLabel(canned:"None",score:0).0=="Three_Finger_Forward","PC three-finger pose")
-check(pose((true,true,false,false,true)).directionalLabel(canned:"ILoveYou",score:0.95).0=="ILoveYou","learned I-love-you preserved")
-check(pose((false,true,false,false,false)).directionalLabel(canned:"Pointing_Up",score:0.9).0=="Pointing_Up","point up")
-check(pose((false,true,false,false,false),vector:(0,-1)).directionalLabel(canned:"None",score:0).0=="Pointing_Down","downward pointing works without a canned down class")
-check(pose((false,true,false,false,false),vector:(1,0)).directionalLabel(canned:"Pointing_Up",score:0.9).0=="None","horizontal pointing cannot climb")
-check(pose((false,false,false,false,false)).directionalLabel(canned:"Closed_Fist",score:0.9).0=="Closed_Fist","learned fist preserved")
-check(pose((false,false,false,false,false)).directionalLabel(canned:"Closed_Fist",score:0.4).0=="None","uncertain learned fist rejected")
-check(pose((false,true,true,true,true)).directionalLabel(canned:"Open_Palm",score:0.9).0=="Open_Palm","learned palm preserved")
+for vector in [(0.0,1.0),(1.0,0.0),(0.0,-1.0),(-1.0,0.0)] {
+    check(pose((false,false,false,false,false),vector:vector).command(canned:"None",score:0).0=="Closed_Fist","curled landmarks recognize fist even when canned is None")
+    check(pose((false,true,false,false,false),vector:vector).command(canned:"None",score:0).0=="One_Finger_Up","one index finger climbs regardless of direction")
+    check(pose((false,true,true,false,false),vector:vector).command(canned:"Victory",score:0.9).0=="Two_Fingers_Down","index and middle descend regardless of direction")
+}
+check(pose((true,false,false,false,false)).command(canned:"Thumb_Up",score:0.9).0=="Closed_Fist","thumb position does not interfere with curled four fingers")
+check(pose((false,true,true,true,true)).command(canned:"Open_Palm",score:0.9).0=="None","open palm has no command")
+check(pose((false,true,true,true,false)).command(canned:"None",score:0).0=="None","three fingers have no command")
+check(pose((false,false,true,false,false)).command(canned:"None",score:0).0=="None","middle finger alone has no command")
+var depthPose=pose((false,true,false,false,false))
+// Rotate its index finger from the image plane into depth: 2D would collapse it.
+let jointKeys:[WritableKeyPath<PhoneHandPose,P>]=[\.indexMCP,\.indexPIP,\.indexTip]
+for key in jointKeys { let point=depthPose[keyPath:key]; depthPose[keyPath:key] = .init(x:point.x,y:0,z:point.y,confidence:1) }
+check(depthPose.command(canned:"None",score:0).0=="One_Finger_Up","3D extension survives foreshortening")
+var ambiguous=pose((false,true,false,false,false))
+ambiguous.indexTip=ambiguous.indexPIP
+check(ambiguous.command(canned:"None",score:0).0=="None","degenerate joint geometry is not a fist")
 
 var filter=PhoneGestureFilter()
 check(filter.update(label:"Closed_Fist",score:0.9,at:0).0=="None","one frame cannot command")
@@ -45,9 +54,4 @@ check(filter.update(label:"None",score:0,at:0.5).0=="None","lost hand clears com
 filter.reset()
 check(filter.update(label:"Thumb_Down",score:0.99,at:1).0=="None","reset discards previous votes")
 
-var swing=PhoneFingerSwing();var result:String?
-let sequence=[pose((false,true,true,false,false),vector:(0,1)),pose((false,true,true,false,false),vector:(-1,0)),pose((false,true,true,false,false),vector:(0,1)),pose((false,true,true,false,false),vector:(-1,0))]
-var t=0.0
-for item in sequence { _=swing.update(pose:item,at:t);t+=0.13;result=swing.update(pose:item,at:t);t+=0.02 }
-check(result=="Dash_Left","mirrored V-H-V-H resolves left")
-print("Gesture geometry tests passed")
+print("Three-gesture and temporal filter tests passed")

@@ -210,19 +210,33 @@ private struct GestureStatus: View {
             Text("FRONT CAMERA · \(camera.processedFrames) frames processed")
                 .font(.caption2.monospaced()).foregroundStyle(roomMint)
             GesturePreview(session: camera.session)
+                .overlay {
+                    Canvas { context,size in
+                        let scale=min(size.width/camera.frameSize.width,size.height/camera.frameSize.height)
+                        let width=camera.frameSize.width*scale,height=camera.frameSize.height*scale
+                        let points=camera.handLandmarks.map{CGPoint(x:(size.width-width)/2+$0.x*width,y:(size.height-height)/2+$0.y*height)}
+                        guard points.count==21 else{return}
+                        let chains=[[0,1,2,3,4],[0,5,6,7,8],[5,9,10,11,12],[9,13,14,15,16],[13,17,18,19,20],[0,17]]
+                        var path=Path()
+                        for chain in chains { path.move(to:points[chain[0]]);for index in chain.dropFirst(){path.addLine(to:points[index])} }
+                        context.stroke(path,with:.color(.green),lineWidth:2)
+                        for point in points { context.fill(Path(ellipseIn:CGRect(x:point.x-3,y:point.y-3,width:6,height:6)),with:.color(.yellow)) }
+                    }.allowsHitTesting(false)
+                }
                 .frame(height: 220).clipShape(RoundedRectangle(cornerRadius: 10))
-            Text("Hold upright; show your whole hand. Fist: call and follow. Index up: climb. Index down: descend. Open palm: stop. Hold each pose about half a second.")
+            Text(camera.rawStatus).font(.caption2.monospaced()).foregroundStyle(roomMint)
+            Text("Hold upright; show your whole hand. Fist: call and follow. One finger (index): climb. Two fingers (index + middle): descend. Direction does not matter. Lower your hand to stop vertical movement. Use Stop drone in the visualizer to cancel follow.")
                 .font(.caption2).foregroundStyle(roomMuted)
         HStack(spacing: 10) {
             Image(systemName: camera.gesture == "None" ? "hand.raised.slash" : "hand.raised.fill")
                 .foregroundStyle(camera.gesture == "None" ? roomMuted : roomMint)
             VStack(alignment: .leading, spacing: 3) {
-                Text("GESTURE · \(camera.gesture)")
+                Text("STABLE GESTURE · \(camera.gesture.replacingOccurrences(of:"_",with:" "))")
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 Text(camera.status).font(.caption2).foregroundStyle(roomMuted)
             }
             Spacer()
-            Text(camera.gesture == "None" ? "—" : String(format: "%.0f%%", camera.confidence * 100))
+            Text(camera.gesture == "None" ? "—" : "HELD")
                 .font(.system(size: 13, weight: .medium, design: .monospaced)).foregroundStyle(roomMint)
         }
         }.padding(14).background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
@@ -234,6 +248,8 @@ private struct GesturePreview: UIViewRepresentable {
     final class PreviewView: UIView {
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
         var preview: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+        private var rotation:AVCaptureDevice.RotationCoordinator?
+        private var rotationObservation:NSKeyValueObservation?
         override init(frame:CGRect) {
             super.init(frame:frame)
             NotificationCenter.default.addObserver(self,selector:#selector(sessionStarted(_:)),name:AVCaptureSession.didStartRunningNotification,object:nil)
@@ -247,7 +263,14 @@ private struct GesturePreview: UIViewRepresentable {
             // SwiftUI may lay out this view before the camera adds its input.
             // Retry on updates after session startup, when the connection exists.
             guard let connection=preview.connection else{return}
-            if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle=90 }
+            if rotation==nil,let device=(preview.session?.inputs.first as? AVCaptureDeviceInput)?.device {
+                rotation=AVCaptureDevice.RotationCoordinator(device:device,previewLayer:preview)
+                rotationObservation=rotation?.observe(\.videoRotationAngleForHorizonLevelPreview,options:[.new]) { [weak self] _,_ in self?.orientPreview() }
+            }
+            if let rotation {
+                let angle=(round(rotation.videoRotationAngleForHorizonLevelPreview/90)*90).truncatingRemainder(dividingBy:360)
+                if connection.videoRotationAngle != angle,connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle=angle }
+            }
             if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false; connection.isVideoMirrored=true }
         }
         override func layoutSubviews() {

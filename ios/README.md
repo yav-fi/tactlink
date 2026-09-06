@@ -114,15 +114,19 @@ The usual Visualizer host and camera gestures then drive the same one-drone demo
 
 ## On-device gestures
 
-Keep the phone upright and the whole hand visible in the mirrored selfie preview. Allow roughly half a second to a second for recognition and the drone command hold.
+Only three poses command the phone demo. Show the whole hand and hold the pose for about one second for recognition and the command hold. Hand direction and thumb position are ignored.
 
-- Closed fist: call the drone above you and follow your mapped position. Another person's fresh fist transfers control.
-- Index finger up/down, with other fingers curled: climb/descend. Horizontal pointing is neutral. Altitude commands leave follow and hold their resulting altitude on release; the caller retains control until another fist, an open palm, or signal loss.
-- Open palm: stop and release claimed control. Either phone can stop the demo.
-- Thumb up/down: retained climb/descend aliases.
-- Three fingers (index, middle, ring; pinky curled): forward relative to phone heading; thumb is ignored, matching the PC detector.
-- Two fingers (index and middle): vertical → horizontal → vertical → horizontal within four seconds triggers left/right according to the final direction in the selfie view.
-- Thumb + index + pinky (ILoveYou): return to the starting location while held.
-- Victory is recognized but a still V has no flight action, matching the PC default configuration.
+- **Fist:** curl index, middle, ring, and pinky. Call the drone above you and follow your mapped position. Another person's fresh fist transfers control.
+- **One finger:** index extended, middle/ring/pinky curled. Climb while held.
+- **Two fingers:** index + middle extended, ring/pinky curled. Descend to the hover floor while held.
+- Lower your hand to stop vertical movement and hover at the resulting height. Fist-follow stays active after releasing the fist. Use **Stop drone** in the visualizer to cancel follow and release control.
 
-The PC's old pointing-up orbit mapping is replaced by the requested climb mapping in phone demo mode. MediaPipe supplies canned gesture scores; the added directional/three-finger/swing signs use landmark rules with a fixed acceptance score, not a learned class probability. Recent-frame voting stabilizes labels, and a missing hand clears the output after 180 ms. The optional PC custom k-nearest-neighbor model is not bundled because no trained artifact was present in this checkout.
+Other finger combinations have no command. The PC paths are unchanged. Old phone directional Pointing_Up/Pointing_Down labels are no longer movement commands; both phones need the updated build for the new one/two-finger mapping.
+
+MediaPipe estimates the hand's 21 landmarks. The app checks 3D finger-bend angles and fingertip reach, with separate extended/curled thresholds and an uncertain band. It recognizes a geometrically closed fist even when Google's canned gesture label is None. A confident canned fist can also fill in uncertain geometry when no finger is clearly extended. Recent-frame voting suppresses single-frame flips; losing the hand clears output. This is not custom model training.
+
+The preview shows the tracked skeleton, raw Google label/score, frame dimensions/rotation, and each finger's up/curled/? state. STABLE GESTURE shows the accepted command. Rule acceptance flags in the UDP confidence field are not calibrated probabilities and are no longer displayed as percentage confidence. Raw Google scores remain visible separately.
+
+Capture requests 640×480. Apple's device-specific rotation coordinator sets capture and preview orientation; a hardcoded 90-degree angle is not assumed for all front cameras. Camera images stay on-device.
+
+Physical recognition reliability still requires testing on the phones. Compilation and synthetic geometric tests do not establish accuracy for real hands, occlusion, or lighting.

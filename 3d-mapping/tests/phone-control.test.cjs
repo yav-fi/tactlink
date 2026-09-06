@@ -16,7 +16,7 @@ const { applyPhoneAction } = loadSource("phone-flight");
 const { Fleet } = loadSource("fleet");
 const alignment = { anchor: "0", rotation: 0, mirror: false };
 const phone = (id, extra = {}) => ({ id: String(id), name: `Phone ${id}`, room: "room", pos: [id * 3, 0], z: id,
-  heading: 0, compassValid: true, gesture: "Thumb_Up", confidence: 0.95, flat: false, geometryAge: 0, age: 0, ...extra });
+  heading: 0, compassValid: true, gesture: "One_Finger_Up", confidence: 0.95, flat: false, geometryAge: 0, age: 0, ...extra });
 
 test("three-phone flat and five-phone XYZ placement preserve measured relative metres", () => {
   for (const count of [3, 5]) {
@@ -39,7 +39,7 @@ test("missing anchor, stale geometry and different rooms never invent a formatio
 
 test("only the nearest phone commands the actual drone after a deliberate hold", () => {
   const control = new PhoneControl();
-  const operators = placePhones([phone(0), phone(1, { gesture: "Thumb_Down" }), phone(2)], alignment);
+  const operators = placePhones([phone(0), phone(1, { gesture: "Two_Fingers_Down" }), phone(2)], alignment);
   const drone = { x: 3, y: 5 };
   assert.equal(control.update(operators, drone, 0).action, undefined);
   const command = control.update(operators, drone, 400);
@@ -67,18 +67,18 @@ test("phone camera labels move the production browser drone and stop it on relea
   const fleet = new Fleet({ entities: new Cesium.EntityCollection() });
   const drone = fleet.deploy(home);
   const control = new PhoneControl();
-  let operators = placePhones([phone(0, { gesture: "Three_Finger_Forward", heading: 0 }), phone(1), phone(2)], alignment);
+  let operators = placePhones([phone(0, { gesture: "One_Finger_Up", heading: 0 }), phone(1), phone(2)], alignment);
   control.update(operators, { x: 0, y: 0 }, 0);
   const command = control.update(operators, { x: 0, y: 0 }, 400);
   applyPhoneAction(drone, command.action, command.operator, home, { x: 0, y: 0, z: 0 });
   for (let i = 0; i < 60; i++) drone.update(1 / 60);
-  assert(drone.snapshot().longitude > home.longitude, "east-facing operator flies east");
+  assert(drone.snapshot().altitude > home.altitude, "pointing up climbs");
   assert.equal(fleet.drones.size, 1);
   operators = operators.map(operator => ({ ...operator, gesture: "None" }));
   if (control.update(operators, { x: 0, y: 0 }, 1400).stop) drone.stopCommand();
-  const stopped = drone.snapshot().longitude;
+  const stopped = drone.snapshot().altitude;
   for (let i = 0; i < 60; i++) drone.update(1 / 60);
-  assert.equal(drone.snapshot().longitude, stopped);
+  assert.equal(drone.snapshot().altitude, stopped);
 });
 
 test("phone takeoff ceiling prevents continued ascent", () => {
@@ -94,15 +94,6 @@ test("phone takeoff ceiling prevents continued ascent", () => {
   assert.equal(drone.snapshot().altitude, altitude);
 });
 
-test("phone return-home gesture starts actual flight instead of only recording a route", () => {
-  const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
-  const start = { ...home, longitude: home.longitude + 0.0001, altitude: 82 };
-  const drone = new Fleet({ entities: new Cesium.EntityCollection() }).deploy(start);
-  const [owner] = placePhones([phone(0)], alignment);
-  applyPhoneAction(drone, "return_home", owner, home, { x: 10, y: 0, z: 2 });
-  for (let i = 0; i < 60; i++) drone.update(1 / 60);
-  assert(drone.snapshot().longitude < start.longitude);
-});
 
 test("two-phone assumed-axis positions preserve the one distance and enter gesture control", () => {
   const phones = [phone(0, { pos: [0, -2], z: 0, flat: true, twoPhone: true }), phone(1, { pos: [0, 2], z: 0, flat: true, twoPhone: true })];
@@ -192,7 +183,7 @@ test("any phone can claim follow with a fist, release keeps following, and anoth
   assert.equal(result.operator.operator_id, "0"); assert.equal(result.action, "follow"); assert(result.stop);
 });
 
-test("a continuously held fist does not steal follow back; another person's palm cancels it", () => {
+test("a continuously held fist does not steal follow back; explicit stop clears the claim", () => {
   const control = new PhoneControl();
   const people = placePhones([phone(0, { gesture: "Closed_Fist" }), phone(1, { gesture: "None" })], alignment);
   const drone = { x: 0, y: 5 };
@@ -200,11 +191,10 @@ test("a continuously held fist does not steal follow back; another person's palm
   people[1].gesture = "Closed_Fist";
   control.update(people, drone, 500); control.update(people, drone, 900);
   assert.equal(control.update(people, drone, 1000).operator.operator_id, "1");
-  people[0].gesture = "Open_Palm";
-  control.update(people, drone, 1100);
-  const stop = control.update(people, drone, 1500);
-  assert(stop.stop); assert.equal(stop.action, "halt"); assert.equal(control.following, "");
-  assert.notEqual(control.update(people, drone, 1600).action, "follow");
+  control.reset();
+  people.forEach(p => p.gesture = "None");
+  assert.equal(control.following, "");
+  assert.notEqual(control.update(people, drone, 1100).action, "follow");
 });
 
 test("lost follow position stops without silently following the remaining phone", () => {
@@ -235,12 +225,12 @@ test("follow survives one wrong gesture but a deliberate different command still
   const people = placePhones([phone(0, { gesture: "None" }), phone(1, { gesture: "Closed_Fist" })], alignment);
   const drone = { x: 0, y: 5 };
   control.update(people, drone, 0); control.update(people, drone, 400);
-  people[1].gesture = "Thumb_Up";
+  people[1].gesture = "One_Finger_Up";
   let result = control.update(people, drone, 500);
   assert.equal(result.action, "follow"); assert.equal(result.operator.operator_id, "1");
   people[1].gesture = "None";
   assert.equal(control.update(people, drone, 600).action, "follow");
-  people[1].gesture = "Thumb_Up";
+  people[1].gesture = "One_Finger_Up";
   assert.equal(control.update(people, drone, 700).action, "follow");
   result = control.update(people, drone, 1100);
   assert.equal(result.action, "takeoff"); assert.equal(result.operator.operator_id, "1"); assert(result.stop);
@@ -253,7 +243,7 @@ test("a losing held fist cannot steal back after flicker; a released and repeate
   control.update(people, drone, 0); control.update(people, drone, 400);
   people[1].gesture = "Closed_Fist";
   control.update(people, drone, 500); control.update(people, drone, 900);
-  people[0].gesture = "Thumb_Up";
+  people[0].gesture = "One_Finger_Up";
   control.update(people, drone, 1000);
   people[0].gesture = "Closed_Fist";
   control.update(people, drone, 1100);
@@ -280,25 +270,25 @@ test("a long dropout discards an incomplete fist hold", () => {
 
 test("fist caller retains up/down control even while the other phone remains nearer", () => {
   const control = new PhoneControl();
-  const people = placePhones([phone(0, { gesture: "Thumb_Up" }), phone(1, { gesture: "Closed_Fist" })], alignment);
+  const people = placePhones([phone(0, { gesture: "One_Finger_Up" }), phone(1, { gesture: "Closed_Fist" })], alignment);
   const drone = { x: 0, y: 5 };
   control.update(people, drone, 0); control.update(people, drone, 400);
-  people[1].gesture = "Pointing_Up";
+  people[1].gesture = "One_Finger_Up";
   control.update(people, drone, 500);
   let result = control.update(people, drone, 900);
   assert.equal(result.action, "takeoff"); assert.equal(result.operator.operator_id, "1");
   result = control.update(people, drone, 1000);
   assert.equal(result.action, "takeoff"); assert.equal(result.operator.operator_id, "1");
-  people[1].gesture = "Pointing_Down";
+  people[1].gesture = "Two_Fingers_Down";
   control.update(people, drone, 1100);
   result = control.update(people, drone, 1500);
   assert.equal(result.action, "land"); assert.equal(result.operator.operator_id, "1");
   people[1].gesture = "None";
   result = control.update(people, drone, 1600);
   assert.equal(result.action, undefined); assert(result.stop);
-  people[0].gesture = "Open_Palm";
-  control.update(people, drone, 1700);
-  assert.equal(control.update(people, drone, 2100).action, "halt");
+  control.reset();
+  people.forEach(p => p.gesture = "None");
+  assert.equal(control.update(people, drone, 1700).action, undefined);
 });
 
 test("follow flies above the selected person, settles, and tracks a changed mapped position", () => {
@@ -354,4 +344,13 @@ test("drag rotates the close phone camera without changing range or jumping back
   events.get("wheel")({ deltaMode: 0, deltaY: -100, preventDefault() {} }); render.raiseEvent();
   assert(pose.range < afterDrag.range); assert.deepEqual(pose.center, afterDrag.center);
   scene.dispose(); assert.equal(events.size, 0); assert.equal(canvas.style.touchAction, "auto");
+});
+
+test("legacy gestures cannot command the three-gesture demo", () => {
+  for (const gesture of ["Thumb_Up", "Thumb_Down", "Open_Palm", "Three_Finger_Forward", "Dash_Left", "Dash_Right", "ILoveYou", "Victory"]) {
+    const control = new PhoneControl();
+    const people = placePhones([phone(0, { gesture })], alignment);
+    control.update(people, { x: 0, y: 5 }, 0);
+    assert.equal(control.update(people, { x: 0, y: 5 }, 1000).action, undefined, gesture);
+  }
 });

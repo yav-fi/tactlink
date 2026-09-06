@@ -636,6 +636,7 @@ final class RoomSession: ObservableObject {
         Room fingerprint: \(transport.room)
         Local: \(displayName) [\(localID)]
         Gesture camera: \(gestureCamera.status); label=\(gestureCamera.gesture); confidence=\(String(format:"%.2f",gestureCamera.confidence)); frames remain on-device
+        Raw gesture: \(gestureCamera.rawStatus)
         NI camera assistance: not used; no AR session
         Transport: Network framework, peer-to-peer enabled, AES-GCM room encryption, no cellular
         Members: \(participantCount)/\(targetCount); direct links: \(transport.peers.count)
