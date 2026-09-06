@@ -36,7 +36,7 @@ final class RoomSession: ObservableObject {
     @Published private(set) var running = false
     @Published private(set) var benchAvailable = false
     @Published private(set) var threePhoneMode = false
-    @Published private(set) var twoPhoneMode = false
+    @Published private(set) var twoPhoneMode = true // Demo defaults to two phones; legacy default was false.
     var flatMode: Bool { threePhoneMode || twoPhoneMode }
     @Published private(set) var motionHeading = RelativeMotionHeading()
     @Published private(set) var paused = false
@@ -49,7 +49,7 @@ final class RoomSession: ObservableObject {
     @Published private(set) var ranges: [String: ReceivedRange] = [:]
     @Published private(set) var clocks: [String: PeerClock] = [:]
     @Published private(set) var geometry: GeometrySolution?
-    @Published private(set) var geometryStatus = "Positions need a complete cycle of ranges from at least four phones."
+    @Published private(set) var geometryStatus = "Positions need a complete cycle of ranges from the selected two or three phones."
     @Published private(set) var geometryAge = 0.0
     @Published private(set) var diagnostics = ""
     @Published private(set) var logError: String?
@@ -142,7 +142,8 @@ final class RoomSession: ObservableObject {
     var leader: String? { onlineIDs.first }
     var isLeader: Bool { leader == localID }
     var participantCount: Int { onlineIDs.count }
-    var targetCount: Int { twoPhoneMode ? 2 : threePhoneMode ? 3 : 5 }
+    // Legacy five-phone mode: var targetCount: Int { twoPhoneMode ? 2 : threePhoneMode ? 3 : 5 }
+    var targetCount: Int { twoPhoneMode ? 2 : 3 }
     var roomCodeDisplay: String { RoomTransport.displayCode(code) }
     var allProfiles: [DeviceProfile] { ([profile()] + members.map(\.profile)).sorted { $0.id < $1.id } }
     var availableRanges: [ReceivedRange] {
@@ -158,6 +159,7 @@ final class RoomSession: ObservableObject {
     func join(_ enteredCode: String) {
         let clean = RoomTransport.normalized(enteredCode)
         guard RoomTransport.validCode(clean) else { status="Enter the 6-digit room code."; return }
+        guard clean.first == "2" || clean.first == "3" else { status="This demo supports two- or three-phone rooms. Create a new room."; return }
         leave()
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         displayName = name.isEmpty ? "Phone \(localID.prefix(4))" : String(name.prefix(24))
@@ -227,12 +229,12 @@ final class RoomSession: ObservableObject {
     func requestResume() { request(.init(action: "resume")) }
     func requestBench() { request(.init(action: "bench", availableBench: true)) }
     func setThreePhoneMode(_ enabled: Bool) {
-        if joined { request(.init(action:"settings",threePhoneMode:enabled,twoPhoneMode:false)) }
-        else { threePhoneMode=enabled; twoPhoneMode=false }
+        if joined { request(.init(action:"settings",threePhoneMode:enabled,twoPhoneMode:!enabled)) }
+        else { threePhoneMode=enabled; twoPhoneMode = !enabled }
     }
     func setTwoPhoneMode(_ enabled: Bool) {
-        if joined { request(.init(action:"settings",threePhoneMode:false,twoPhoneMode:enabled)) }
-        else { twoPhoneMode=enabled; threePhoneMode=false }
+        if joined { request(.init(action:"settings",threePhoneMode:!enabled,twoPhoneMode:enabled)) }
+        else { twoPhoneMode=enabled; threePhoneMode = !enabled }
     }
     func benchmarkWhenPeersJoin() { benchWhenReady = true }
     func requestSettings(seconds: Double, extended: Bool) {
@@ -432,6 +434,8 @@ final class RoomSession: ObservableObject {
         known=known.filter { now-$0.value.lastSeen<120 }
     }
     private func changeMode(_ test:Bool, two:Bool = false) {
+        // Legacy five-phone requests used test=false, two=false; retain protocol support but disable selection.
+        guard test || two else { status="Select a two- or three-phone room for this demo."; return }
         ranging.cancel(reason:"Group test mode changed")
         gate.release(); jobs=[:]; pending=[]; cycleStarted=nil
         ranges=[:]; geometry=nil; geometryUpdated=nil; sharedSnapshot=nil; geometryCycle = -1
@@ -439,7 +443,8 @@ final class RoomSession: ObservableObject {
         everStarted=false; benchAvailable=false; running=false; paused=false
         cycleTimes=[]; cycle=0; retries=[:]
         topologyChanged=ProcessInfo.processInfo.systemUptime; epoch=UUID().uuidString
-        log.event("mode",two ? "2-phone assumed-axis test" : test ? "3-phone flat test" : "5-phone XYZ")
+        // Legacy: log.event("mode",two ? "2-phone assumed-axis test" : test ? "3-phone flat test" : "5-phone XYZ")
+        log.event("mode",two ? "2-phone assumed-axis test" : "3-phone flat test")
     }
     private func tick() {
         guard joined, sceneActive else { return }
@@ -482,7 +487,8 @@ final class RoomSession: ObservableObject {
             if isLeader && !everStarted { everStarted=true; broadcastControl() }
             if everStarted {
                 running=true
-                status=twoPhoneMode ? "2-phone test · real distance, assumed map axis" : threePhoneMode ? "3-phone flat test · rotating all three pairs" : benchAvailable && participantCount<5 ? "Benchmarking \(participantCount) phones · full group target is five" : "Coordinating \(participantCount) phones · UWB distance only"
+                // Legacy: status=twoPhoneMode ? "2-phone test · real distance, assumed map axis" : threePhoneMode ? "3-phone flat test · rotating all three pairs" : benchAvailable && participantCount<5 ? "Benchmarking \(participantCount) phones · full group target is five" : "Coordinating \(participantCount) phones · UWB distance only"
+                status=twoPhoneMode ? "2-phone test · real distance, assumed map axis" : "3-phone flat test · rotating all three pairs"
                 if isLeader { coordinate(now) }
             }
         } else if !paused {
@@ -584,9 +590,10 @@ final class RoomSession: ObservableObject {
         }
     }
     private func updateGeometry(_ now: Double) {
-        guard onlineIDs.count >= (twoPhoneMode ? 2 : threePhoneMode ? 3 : 4), !paused else {
+        guard onlineIDs.count >= targetCount, !paused else {
             geometry=nil
-            geometryStatus=twoPhoneMode ? "Waiting for two phones and one measured distance." : threePhoneMode ? "Waiting for three phones and all three pair distances." : "\(participantCount) phones joined. Four or five phones and a complete range graph are needed for XYZ."
+            // Legacy: geometryStatus=twoPhoneMode ? "Waiting for two phones and one measured distance." : threePhoneMode ? "Waiting for three phones and all three pair distances." : "\(participantCount) phones joined. Four or five phones and a complete range graph are needed for XYZ."
+            geometryStatus=twoPhoneMode ? "Waiting for two phones and one measured distance." : "Waiting for three phones and all three pair distances."
             return
         }
         let ids=onlineIDs
@@ -641,7 +648,7 @@ final class RoomSession: ObservableObject {
         Transport: Network framework, peer-to-peer enabled, AES-GCM room encryption, no cellular
         Members: \(participantCount)/\(targetCount); direct links: \(transport.peers.count)
         Coordinator: \(leader.map(name) ?? "none")
-        Mode: \(twoPhoneMode ? "two-phone assumed-axis test" : threePhoneMode ? "three-phone flat test" : benchAvailable ? "available-device benchmark" : "five-person session")
+        Mode: \(twoPhoneMode ? "two-phone assumed-axis test" : "three-phone flat test")
         Status: \(status)
         NI: \(ranging.state); \(ranging.lastFields)
         Cycle: \(cycle); round priority: \(currentRound); active jobs: \(jobs.count)

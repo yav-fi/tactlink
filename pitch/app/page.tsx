@@ -637,18 +637,19 @@ export default function Home() {
           </div>
           <div className="timing-note">
             <div>
-              <span className="mono">
-                THE INTERACTION WE ARE BUILDING TOWARD
-              </span>
-              <h4>Follow the plan. Stay responsive to the people.</h4>
+              <span className="mono">GESTURES AND NATURAL LANGUAGE</span>
+              <h4>Talk to the drone like you would a teammate.</h4>
             </div>
-            <p>
-              The vision is a drone that can act on a planned mission and
-              respond when the squad’s intent changes. Today’s phone demo
-              establishes a small gesture vocabulary and shared control. Onboard
-              gesture recognition, spoken interaction, and physical flight still
-              need integration and validation.
-            </p>
+            <div>
+              <p>
+                Give it a route in plain language, then change the plan as the
+                situation changes. Spoken commands let it break from a
+                preplanned route and respond to what you need next.
+              </p>
+              <p className="fine">
+                Demonstrated in our simulation test environment.
+              </p>
+            </div>
           </div>
         </section>
         <section className="section wrap" id="positioning">

@@ -8,7 +8,13 @@ other operator by holding a Victory sign.
 
 Gestures (hold ~0.4 s): thumbs up = take off / climb, thumbs down = land,
 open palm = halt, point up = orbit the controlling operator, I-love-you =
-return to them. Hold a Victory sign ~2 s to hand the drone to a random operator.
+return to them.
+
+Hand-off: point at an operator and hold ~1.4 s (goes to that operator), OR hold
+a Victory sign ~2 s (goes to a random operator). Two-finger "wiper" - swing
+index+middle vertical<->horizontal<->vertical<->horizontal - dashes the drone
+left or right the way the fingers point.
+
 Runs on the repo's deps (mediapipe / opencv / numpy); imports nothing from src/.
 Recognition is local; webcam frames are neither recorded nor uploaded.
 """
@@ -59,22 +65,44 @@ class Sim:
 
     def __init__(self, n_operators=4, seed=None):
         from flight import Autopilot, Operators, Quad
-        from gestures import GestureGate
+        from gestures import FingerSwingDetector, GestureGate
 
         self.ops = Operators(n_operators, seed=seed)
         self.quad = Quad(self.ops.anchor_pos())
         self.pilot = Autopilot(self.ops)
         self.gate = GestureGate()
-        self.hud = {'mode': 'idle', 'gesture': 'None', 'progress': 0.0, 'note': ''}
+        self.swing = FingerSwingDetector()
+        self.hud = {'mode': 'idle', 'gesture': 'None', 'progress': 0.0,
+                    'note': '', 'aim': 0.0, 'swing': ''}
         self._note_until = 0.0
 
-    def advance(self, raw_label, dt, now):
-        command, progress, held = self.gate.update(raw_label, now)
+    def _note(self, text, now):
+        if text:
+            self.hud['note'] = text
+            self._note_until = now + 2.5
+
+    def advance(self, raw_label, hand, dt, now, force_aim=None):
+        # Two-finger wiper -> dash. While a swing is in progress, don't let a
+        # transient Victory read (2 fingers up) start the hand-off timer.
+        dash = self.swing.update(hand, now)
+        if dash:
+            self._note(self.pilot.command(dash, self.quad, now), now)
+        gate_label = 'None' if (raw_label == 'Victory' and self.swing.active) else raw_label
+        command, progress, held = self.gate.update(gate_label, now)
         if command:
-            note = self.pilot.command(command, self.quad, now)
-            if note:
-                self.hud['note'] = note
-                self._note_until = now + 2.5
+            self._note(self.pilot.command(command, self.quad, now), now)
+
+        # Targeted hand-off: point steadily at an operator (not mid-swing, not
+        # while another gesture is held).
+        if force_aim is not None:
+            self.ops.aim(force_aim, now)
+        elif hand is not None and hand.present and held in ('None', '') and not self.swing.active:
+            self.ops.aim(self.ops.aim_from_point(hand.point_dir, self.quad.pos[:2]), now)
+        else:
+            self.ops.aim(None, now)
+        if self.ops.aim_progress(now) >= 1.0:
+            self._note(self.pilot.command('handoff_aim', self.quad, now), now)
+
         self.pilot.update(self.quad, dt, now)
 
         if now > self._note_until:
@@ -82,6 +110,8 @@ class Sim:
         self.hud['mode'] = self.pilot.mode
         self.hud['gesture'] = FRIENDLY.get(held, held if held != 'None' else 'None')
         self.hud['progress'] = progress
+        self.hud['aim'] = self.ops.aim_progress(now)
+        self.hud['swing'] = self.swing.progress if self.swing.active else ''
 
     def render_scene(self, scene):
         return scene.render(self.quad, self.ops, self.hud)
@@ -89,25 +119,40 @@ class Sim:
 
 # --- scripted demo input -------------------------------------------------
 
-# (start, end) seconds -> gesture label held during the scripted demo.
+# (start, end) seconds -> (gesture label, extra) where extra is None,
+# "dash:left" / "dash:right" (wiper), or "aim:<operator index>".
 _DEMO = [
-    (1.5, 2.6, 'Thumb_Up'),       # take off
-    (4.0, 5.0, 'Thumb_Up'),       # climb a step
-    (6.5, 8.0, 'Pointing_Up'),    # orbit the starting operator
-    (9.5, 10.5, 'Open_Palm'),     # halt / stop orbiting
-    (12.0, 16.0, 'Victory'),      # hold ~2 s -> hand off to a random operator
-    (19.5, 21.0, 'Pointing_Up'),  # orbit the new operator
-    (23.5, 24.5, 'ILoveYou'),     # return to them
-    (26.5, 30.5, 'Victory'),      # hold ~2 s -> hand off again
-    (33.5, 34.7, 'Thumb_Down'),   # land
+    (1.5, 2.6, 'Thumb_Up', None),        # take off
+    (4.0, 5.0, 'Thumb_Up', None),        # climb a step
+    (6.5, 8.0, 'Pointing_Up', None),     # orbit the starting operator
+    (9.5, 10.5, 'Open_Palm', None),      # halt / stop orbiting
+    (12.5, 13.0, 'None', 'dash:right'),  # wiper -> dash right
+    (16.0, 16.5, 'None', 'dash:left'),   # wiper -> dash left
+    (19.0, 22.0, 'None', 'aim:2'),       # point at OP3, hold -> targeted hand off
+    (25.0, 26.5, 'Pointing_Up', None),   # orbit OP3
+    (29.0, 33.0, 'Victory', None),       # hold ~2 s -> hand off to a random operator
+    (36.0, 37.2, 'Thumb_Down', None),    # land
 ]
 
 
 def _demo_input(t):
-    for a, b, label in _DEMO:
+    for a, b, label, extra in _DEMO:
         if a <= t < b:
-            return label
-    return 'None'
+            return label, extra
+    return 'None', None
+
+
+def _demo_step(sim, t, prev_extra):
+    """Translate a demo timeline entry into (label, force_aim), firing one-shot
+    dash commands on segment entry."""
+    label, extra = _demo_input(t)
+    force_aim = None
+    if extra and extra.startswith('aim:'):
+        force_aim = int(extra.split(':')[1])
+    elif extra and extra.startswith('dash:') and extra != prev_extra:
+        sim.pilot.command('dash_west' if extra.endswith('left') else 'dash_east',
+                          sim.quad, t)
+    return label, force_aim, extra
 
 
 # --- panels + compositing ---------------------------------------------------
@@ -157,12 +202,11 @@ def run_demo(args):
     scene = Scene(PANEL_W, PANEL_H)
 
     if args.headless:                       # virtual clock: renders immediately
-        dt, vt = 1 / 60, 0.0
-        raw_label = 'None'
+        dt, vt, raw_label, extra = 1 / 60, 0.0, 'None', None
         while vt < args.seconds:
             vt += dt
-            raw_label = _demo_input(vt)
-            sim.advance(raw_label, dt, vt)
+            raw_label, force_aim, extra = _demo_step(sim, vt, extra)
+            sim.advance(raw_label, None, dt, vt, force_aim=force_aim)
         composite = np.hstack([_demo_panel(cv2, np, raw_label), sim.render_scene(scene)])
         if args.out:
             cv2.imwrite(args.out, composite)
@@ -173,13 +217,14 @@ def run_demo(args):
     cv2.namedWindow(window, cv2.WINDOW_NORMAL)
     start = time.monotonic()
     prev = start
+    extra = None
     while True:
         now = time.monotonic()
         t = now - start
         dt = min(0.05, now - prev)
         prev = now
-        raw_label = _demo_input(t)
-        sim.advance(raw_label, dt if dt > 0 else 1 / 60, now)
+        raw_label, force_aim, extra = _demo_step(sim, t, extra)
+        sim.advance(raw_label, None, dt if dt > 0 else 1 / 60, now, force_aim=force_aim)
         composite = np.hstack([_demo_panel(cv2, np, raw_label), sim.render_scene(scene)])
         cv2.imshow(window, composite)
         if cv2.waitKey(16) & 0xFF in (27, ord('q')):
@@ -193,6 +238,7 @@ def run_live(args):
     import cv2
     import mediapipe as mp
     import numpy as np
+    from gestures import hand_from_landmarks
     from scene import Scene
 
     model = Path(__file__).with_name('gesture_recognizer.task')
@@ -256,7 +302,8 @@ def run_live(args):
                             hint = f'{FRIENDLY[top.category_name]}? {top.score:.0%}'
 
                 hands = [[(p.x, p.y) for p in h] for h in result.hand_landmarks]
-                sim.advance(raw, dt if dt > 0 else 1 / 60, now)
+                hand = hand_from_landmarks(hands[0]) if hands else None
+                sim.advance(raw, hand, dt if dt > 0 else 1 / 60, now)
 
                 disp = FRIENDLY.get(raw, 'Unknown') if raw != 'None' else 'Unknown'
                 label, conf, prog = stable.update(disp, score, now)
