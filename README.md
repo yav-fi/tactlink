@@ -2,49 +2,68 @@
 
 ## Direct a drone like a teammate.
 
-**Human signals become drone actions.** Point, and the drone circles you.
-Signal forward, and it moves that way. Call it back, and it arrives overhead —
-above *you*, the person who asked. Show an open palm, and it stops. No sticks,
-no tablet, no eyes off what is in front of you.
+**Human signals become drone actions.** Hold a fist and the drone comes to you and
+keeps following. Point an index finger and it circles you. Open your palm and it
+holds station overhead. Hold two fingers and it flies to the teammate standing
+nearest you. Lower your hand and it stops. No sticks, no tablet, no eyes off what
+is in front of you.
+
+**Gesture → intent → action.**
 
 **Mission:** Give American teams a faster, safer way to run reconnaissance and
 protect the people beside them. When there is no time to fly a drone stick by
-stick, TactLink reads the hand signals a squad already uses and turns them into
-coordinated drone commands.
+stick, TactLink reads hand signals and turns them into drone commands.
 
-### Three design choices
+## What the demo actually does
 
-- **Deliberate commands.** A small gesture vocabulary, each pose held ~0.4 s, so
-  the drone acts on intent rather than on a twitch.
-- **Spatial meaning.** Commands resolve against the person who gave them —
-  "return" means overhead of the sender, "forward" means their forward.
-- **Direct intervention.** An open palm is an emergency stop that anyone in
-  view can give.
+Two or three iPhones range each other over ultra-wideband. The people appear in a
+shared 3D scene where they actually stand, and the drone obeys whoever holds a
+gesture. Every row below runs today, in simulation:
+
+| Hold this | The drone |
+| --- | --- |
+| ✊ Closed fist | Flies above you, then keeps following you |
+| ☝️ Index finger | Orbits you at 5 m |
+| ✋ Open palm | Holds station 3.5 m above you |
+| ✌️ Two fingers | Flies above the operator nearest you |
+| 👍 Thumbs up | Climbs at 2 m/s |
+| 👎 Thumbs down | Descends at 1 m/s |
+
+Two things we think matter, and that the demo already shows:
+
+- **Deliberate commands.** A small vocabulary, each pose held steadily for about a
+  second before it fires, so the drone acts on intent rather than on a twitch. Two
+  people signalling at once stops the drone instead of guessing between them.
+- **Spatial meaning.** Commands resolve against the person who gave them. "Orbit"
+  circles *you*; "come here" arrives above *you*; two fingers picks the operator
+  nearest *you*.
+
+Stopping today is releasing the pose, plus a **Stop drone** control at the station
+that pauses every phone command. Operator spacing is displayed at 10× the measured
+UWB distance, so a room-sized test reads at field scale.
 
 Design input: conversation with a Mach Industries representative.
 
-### What works today
+## What we believe, and have not built yet
 
-Phones as operators → main computer → shared 3D simulation. Each iPhone ranges
-the others over UWB, so the people appear on the map where they actually stand,
-and the drone takes orders from the operator nearest it.
+These are the ideas the product is being built toward. None of them are in the
+demo, and we would rather say so than imply otherwise.
 
-| Command | What the drone does |
-| --- | --- |
-| **Orbit** | Circle the operator |
-| **Move** | Follow directional intent |
-| **Return** | Come overhead to the sender |
-| **Stop** | Open-palm emergency stop |
+- **Direct intervention.** An open palm should be an unmistakable emergency stop
+  that anyone in view can give. Today the palm means "hold station above me," and
+  stopping is the release-and-button path above.
+- **Missions that adapt mid-flight.** Plan a route in 2D, watch it fly in 3D, and
+  let a gesture change the drone's behavior while the mission is running. The
+  planner, the 3D world, and gesture control each exist here as separate pieces;
+  nothing joins them into a live mid-flight override yet.
+- **Spoken commands.** "Take a picture of my location." A local LLM already turns
+  written instructions into mission JSON on a separate path, but no speech reaches
+  the phone demo.
 
-A planned mission stays responsive: plan the route in 2D, watch it in 3D, and
-interrupt it by gesture mid-flight. Spoken commands ("take a picture of my
-location") are in development.
-
-**Honest status:** this is a connected phone prototype in simulation. No
-physical flight data yet. GPS-independent navigation is a separate problem.
-Next validation gates are measuring errors, latency and unintended commands;
-stress-testing visibility and competing operators; and integrating onboard
-compute with physical flight.
+**Status:** a connected phone prototype in simulation. No physical flight data.
+GPS-independent navigation is a separate problem we have not solved. The next
+things worth measuring are error and latency, what happens with poor visibility
+and competing operators, and what it takes to run on onboard compute.
 
 Clone:
 
@@ -57,31 +76,52 @@ consistent across tools.
 
 ## How it is built
 
-TactLink brings together seven hackathon workstreams:
+TactLink brings together seven hackathon workstreams. The first four are the live
+demo path; the last three are built and runnable, but sit beside it rather than
+inside it.
 
 - **[iOS UWB group positioning](ios/README.md)** — iPhones range each other over
   ultra-wideband to build a live relative map of where everyone is standing (`ios/`).
-- **[Phones as live operators](#advanced-phones-in-the-separate-distributed-runtime)** —
-  those phones appear as people in the simulation, and the nearest one commands
-  each drone (`simulation/operators.py`, `server/phone_listener.py`).
-- **[Webcam gesture quadcopter control](#webcam-gesture-quadcopter-control)** —
-  hand gestures read by a camera fly a simulated drone (`src/`).
-- **[Cesium 3D mapping](#cesium-3d-mapping)** — the shared 3D world: fleet
-  deployment, piloting, and deterministic local missions in the browser (`3d-mapping/`).
+- **[Phones as live operators](#one-command-demo)** — those phones appear as people
+  in the simulation, and gestures from whichever phone claims control fly the drone
+  (`server/phone_listener.py`, `3d-mapping/src/phone-control.ts`).
+- **[Cesium 3D mapping](#cesium-3d-mapping)** — the shared 3D world everyone watches
+  during the demo (`3d-mapping/`).
+- **[Webcam gesture quadcopter control](#webcam-gesture-quadcopter-control)** — the
+  original camera-driven version, still runnable without any phones (`src/`).
 - **[Autonomous planning engine](planning/README.md)** — mission and motion
   planning with obstacle routing, deconfliction, and energy checks (`planning/`).
 - **[Distributed mission runtime](#distributed-mission-runtime)** — many drones
-  keeping the mission alive under degraded communications (`simulation/`, `server/`).
+  keeping a mission alive under degraded communications (`simulation/`, `server/`).
 - **[Local LLM chat + benchmark](#local-llm-chat--benchmark)** — on-device
-  inference for turning spoken instructions into missions (`chat_client.py`, `scripts/`).
+  inference that compiles written instructions into missions (`chat_client.py`, `scripts/`).
 
 ## Close-up phone demo
 
-Open `./start` at `?mode=local`. The phone scene uses real metre offsets: a 1 m grid, 1.75 m human figures, and a drone scaled to a 0.8 m spinning-rotor envelope. The camera frames the group and drone at a close distance for 1–10 m tests. Use **Frame group** to restore that view after dragging; +/− changes zoom. Drone models are not enlarged to a minimum screen size in this mode.
+Open `./start` at `?mode=local`. The scene is drawn at simulated metre scale: a 1 m
+grid, 1.75 m human figures, and a drone scaled to a 0.8 m spinning-rotor envelope.
+Operator spacing is displayed at **10× the measured UWB distance** (1 real m = 10
+simulated m), so a room-sized group reads as a field-sized formation; the raw phone
+measurements are unchanged. Use **Frame group** to restore the framed view after
+dragging; +/− changes zoom. Drone models are not enlarged to a minimum screen size
+in this mode.
 
-The drone begins hovering 3.5 m above the scene ground. Movement stays between 2.5 m and 8 m above the highest positioned person's base; thumbs-down descends to that floor. Pointing with one index finger orbits at a target radius of 2 m. The visible **Gestures → Drone** guide lists exact finger poses, speeds, 0.4 s hold behavior, and which actions repeat. The gold person is the current controller. Hold a closed fist for 0.4 s on either phone to fly above and follow that person’s mapped position, even if another person is closer. Follow stays on after lowering the hand; another fresh held fist switches the target. Hold an open palm on either phone to cancel follow. Ordinary movement still stops when the pose is released. Follow tracks the relative UWB map, so the anchor must remain stationary.
+The drone stays between 2.5 m and 8 m above the highest positioned person's base;
+thumbs-down descends to that floor and thumbs-up climbs to the ceiling. The visible
+**Gestures → Drone** guide lists the exact finger poses, speeds, and hold behavior.
+The gold person is the current controller. Fist, index finger, open palm and two
+fingers each claim control; hold one steadily for about a second. Fist flies above
+that person and then follows their mapped position, and follow stays on after the
+hand is lowered — **Stop drone** cancels it. Index finger orbits them at 5 m, open
+palm holds 3.5 m above them, and two fingers flies above the operator nearest them.
+Every other motion stops when the pose is released, and two people claiming at once
+stops the drone until only one hand is up. Follow tracks the relative UWB map, so
+the anchor must remain stationary.
 
-These are chosen demo model dimensions, not measurements of a particular person or drone. UWB relative positions retain their measured metre separation; the two-phone axis and three-phone flat assumptions still apply. Five-phone shape height is relative group geometry, not measured gravity altitude. The legacy runtime controls documented below are separate from this browser-owned phone demo.
+These are chosen demo model dimensions, not measurements of a particular person or
+drone. The demo supports two or three phones; the two-phone axis and three-phone
+flat assumptions still apply, and five-phone mode is retired. The legacy runtime
+controls documented below are separate from this browser-owned phone demo.
 
 ## One-command demo
 
@@ -98,24 +138,28 @@ the Mac camera and the separate distributed-drone simulation are not used.
 1. Put the Mac and phones on the same trusted Wi-Fi. Keep Wi-Fi and Bluetooth on.
 2. Install the current SignalMap build on every phone. Set **Visualizer host** to
    the address printed by `./start` (Mac Wi-Fi IP, port 9870).
-3. Create one room and join it from the others. Five-phone mode remains the default.
-   For two phones, enable **2-phone gesture test**: it uses real UWB distance but assumes
-   a fixed vertical map line (X = Z = 0). For three, enable **3-phone flat test** (Z = 0).
-   Keep exactly the selected number of phones in the room, all on the current build.
+3. Create one room and join it from the others. Choose **2-phone test** or
+   **3-phone flat test** on the app's main screen; five-phone mode is retired.
+   Two phones use real UWB distance but assume a fixed vertical map line (X = Z = 0);
+   three phones share Z = 0. Keep exactly the selected number of phones in the room,
+   all on the current build.
 4. Keep the app open and accept Local Network, Nearby Interaction and Camera permissions.
    The console distinguishes phones connected from phones with a completed UWB position.
-5. Once positions appear, the nearest phone controls the single drone. Hold gestures
-   for 0.4 s: thumb up climbs, thumb down descends, open palm stops, pointing up orbits
-   the operator, three fingers move forward, directional dashes move left/right,
-   closed fist turns 90°, and ILoveYou returns toward the starting point. Release
-   the gesture to stop motion. Loss of the controlling phone also stops the drone.
+5. Once positions appear, whoever holds a claiming gesture controls the single drone.
+   Hold a pose steadily for about a second: closed fist comes overhead and follows,
+   index finger orbits at 5 m, open palm holds 3.5 m overhead, two fingers flies to
+   the operator nearest the sender, thumb up climbs and thumb down descends. Release
+   the pose to stop motion; **Stop drone** cancels a follow and pauses all phone
+   commands. Two people claiming at once stops the drone until one hand is lowered,
+   and loss of the controlling phone stops it too.
 
 The **Group alignment** controls choose a stationary anchor, rotation and mirror.
-UWB preserves relative metre offsets, not global location or compass alignment.
-Keep the anchor still. Two-phone mode assumes direction and measures only separation; three-phone mode is flat; five-phone mode preserves relative
-XYZ, whose third axis is not gravity height. Camera/compass processing stays on
-phones; frames are never uploaded. Phone motion is 2 m/s, descent 1 m/s, and climb
-is capped at 10 m above the starting point for this close-range demo.
+UWB preserves relative metre offsets, not global location or compass alignment, and
+the scene displays those offsets at 10× measured distance. Keep the anchor still.
+Two-phone mode assumes direction and measures only separation; three-phone mode is
+flat. Camera and compass processing stays on the phones; frames are never uploaded.
+Climb is 2 m/s, descent 1 m/s, and the drone is held between 2.5 m and 8 m above
+the highest positioned person for this close-range demo.
 
 `./start --no-open` starts without opening a browser. Open
 [the phone demo](http://127.0.0.1:5173/?mode=local). Ctrl+C stops services started by
@@ -128,9 +172,9 @@ Automatic app setup from another terminal:
 ./ios/scripts/dev watch --room YOUR_ROOM_CODE --bridge MAC_WIFI_IP:9870
 ```
 
-With no phones, `.venv/bin/python scripts/mock_phone_feed.py --phones 5 --still --script`
-sends synthetic phone input (use `--phones 3` for the flat test). The console labels
-the mock room; stop the mock feed and select the real room before a hardware test.
+With no phones, `.venv/bin/python scripts/mock_phone_feed.py --phones 3 --still --script`
+sends synthetic phone input (use `--phones 2` for the two-phone test). The console
+labels the mock room; stop the mock feed and select the real room before a hardware test.
 
 The former browser-camera sandbox remains available at `?mode=local&input=camera`.
 The separate distributed runtime remains an advanced path started directly with
