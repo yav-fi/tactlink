@@ -42,19 +42,49 @@ Run this from the repository root:
 ./start
 ```
 
-It creates/installs missing local dependencies, starts the Python runtime,
-waypoint-planner bridge, and 3D frontend, starts the local mission AI when its
-downloaded model is present, and opens the flight sandbox. The main browser page privately opens a hidden
-camera stream and runs MediaPipe gesture recognition on-device. It shows the
-recognized hand signal in the mission HUD and drives the selected drone; camera
-frames are not displayed, recorded, uploaded, or sent to Python, and no
-secondary OpenCV simulation window is rendered. The browser controller includes
-the same landmark-driven three-finger forward dash and two-finger V-H-V-H
-pointing motion documented below, in addition to the canned static signs.
-Type `/` in the bottom command line for direct commands, or enter a
-plain-language mission for the AI compiler. Press `Ctrl+C` once to stop
-everything it started. Use `./start --no-open` when you do not want it to open
-a browser.
+It installs missing dependencies, starts the phone UDP receiver and serves the detailed
+3D flight simulator. The default is **one simulated drone controlled by the phones**;
+the Mac camera and the separate distributed-drone simulation are not used.
+
+1. Put the Mac and phones on the same trusted Wi-Fi. Keep Wi-Fi and Bluetooth on.
+2. Install the current SignalMap build on every phone. Set **Visualizer host** to
+   the address printed by `./start` (Mac Wi-Fi IP, port 9870).
+3. Create one room and join it from the others. Five-phone mode remains the default.
+   For a quicker test, enable **3-phone flat test** and use three phones; this sets Z = 0.
+4. Keep the app open and accept Local Network, Nearby Interaction and Camera permissions.
+   The console distinguishes phones connected from phones with a completed UWB position.
+5. Once positions appear, the nearest phone controls the single drone. Hold gestures
+   for 0.4 s: thumb up climbs, thumb down descends, open palm stops, pointing up orbits
+   the operator, three fingers move forward, directional dashes move left/right,
+   closed fist turns 90°, and ILoveYou returns toward the starting point. Release
+   the gesture to stop motion. Loss of the controlling phone also stops the drone.
+
+The **Group alignment** controls choose a stationary anchor, rotation and mirror.
+UWB preserves relative metre offsets, not global location or compass alignment.
+Keep the anchor still. Three-phone mode is flat; five-phone mode preserves relative
+XYZ, whose third axis is not gravity height. Camera/compass processing stays on
+phones; frames are never uploaded. Phone motion is 2 m/s, descent 1 m/s, and climb
+is capped at 10 m above the starting point for this close-range demo.
+
+`./start --no-open` starts without opening a browser. Open
+[the phone demo](http://127.0.0.1:5173/?mode=local). Ctrl+C stops services started by
+the launcher. It refuses to reuse an old server without the active LAN phone receiver.
+
+Automatic app setup from another terminal:
+
+```sh
+./ios/scripts/dev ship
+./ios/scripts/dev watch --room YOUR_ROOM_CODE --bridge MAC_WIFI_IP:9870
+```
+
+With no phones, `.venv/bin/python scripts/mock_phone_feed.py --phones 5 --still --script`
+sends synthetic phone input (use `--phones 3` for the flat test). The console labels
+the mock room; stop the mock feed and select the real room before a hardware test.
+
+The former browser-camera sandbox remains available at `?mode=local&input=camera`.
+The separate distributed runtime remains an advanced path started directly with
+`PHONE_DEMO=0 .venv/bin/uvicorn server.main:app`; its console is `?mode=runtime`.
+It is not the phone demo. Optional AI model setup is separate from `./start`.
 
 ---
 
@@ -404,7 +434,11 @@ controls, and its local mission format.
 
 ---
 
-# Phones on the ground → live operators in the runtime
+# Advanced: phones in the separate distributed runtime
+
+For the integrated single-drone phone test, use **One-command demo** above. This
+section describes the older distributed mission runtime and its separate task auction.
+Do not use its runtime-mode browser URL for the single-drone test.
 
 The same iPhones that range each other over UWB also show up as **people** in
 the Cesium console, standing on the lawn beside the drones, and the drone obeys

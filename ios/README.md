@@ -72,7 +72,7 @@ Point **Visualizer host** at the machine running the runtime; nothing on the pho
 changes. See the repository README, "Phones on the ground". The feed is
 unauthenticated, so the runtime binds loopback unless `PHONE_FEED_HOST` is set.
 
-Set the target as **Visualizer host** in the lobby (`192.168.1.50:9870`, port defaults to 9870), or pass `--sim-bridge host:port` as a launch argument. The value is remembered. Blank turns it off. Positions only exist once a full range cycle has resolved, so nothing is sent before the group map appears.
+Set the target as **Visualizer host** in the lobby (`192.168.1.50:9870`, port defaults to 9870), or pass `--sim-bridge host:port` as a launch argument. The value is remembered. Blank turns it off. Heartbeat telemetry starts as soon as the room is joined, so the Mac can show a connected phone while UWB is still resolving. Position fields are omitted until a full range cycle resolves. Packets include geometry age and member count; an expired position is never replaced with a made-up coordinate.
 
 ## Fast automatic deployment
 
@@ -91,3 +91,7 @@ Deployment regression checks: `python3 -m unittest discover -s Tests/DeployTests
 Each device card now shows the latest attempt's first and last accepted distance, mean, median, minimum, maximum, sample standard deviation (`n - 1` denominator), signed first-minus-median difference, and first-reading z-score `(first - mean) / sample SD`. These summarize every accepted reading in that attempt, including the first and completion-grace readings. The existing quality check and map measurement still use their bounded recent-reading window. No raw sensor precision or ground-truth accuracy is implied.
 
 The z-score is undefined with fewer than two readings or effectively zero standard deviation. Per-device p50/p95 of `abs(first - median)` summarizes attempts with readings, including unsuccessful attempts; it does not pool different partners' distances. Expand entries under **Recent attempts** to inspect older attempts. The JSONL `distanceStatistics` object and text snapshot include the new fields. Older peer builds can still exchange reports but cannot supply these statistics. Tests include known distributions, single/identical readings, signed scores, JSON round trips, and retaining the initial reading beyond the quality window.
+
+## Single-drone phone demo
+
+Run `./start` from the repository root. It now connects this app to the detailed browser flight simulator and one drone; the Mac camera is off. Three-phone flat mode and five-phone mode both use the same path. The console shows connected phones, position readiness, and the nearest controlling operator. Set Visualizer host on every phone or launch the installer with `./scripts/dev watch --room YOUR_ROOM_CODE --bridge MAC_WIFI_IP:9870`. After changing those installer arguments, the watcher relaunches already installed phones with the new configuration.

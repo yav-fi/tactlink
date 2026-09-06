@@ -26,8 +26,8 @@ final class RoomBridge {
         var room: String
         var t: Double            // sender ProcessInfo.systemUptime, seconds
         var cycle: Int
-        var pos: [Double]        // [x, y] metres, arbitrary shared group frame
-        var z: Double
+        var pos: [Double]?        // absent while waiting for UWB geometry
+        var z: Double?
         var heading: Double      // radians in the same frame; held when stationary
         var moving: Bool
         var speed: Double
@@ -38,6 +38,8 @@ final class RoomBridge {
         var gestureConfidence: Double
         var gestureSource: String
         var flat: Bool
+        var geometryAge: Double
+        var members: Int
     }
 
     /// Minimum gap between datagrams (~15 Hz). `tick()` runs at 10 Hz, so in
@@ -87,23 +89,25 @@ final class RoomBridge {
     }
 
     func send(id: String, name: String, room: String, cycle: Int,
-              position: Vector3, heading: RelativeMotionHeading,
+              position: Vector3?, heading: RelativeMotionHeading,
               compassDegrees: Double?, gesture: String,
-              gestureConfidence: Double, flat: Bool) {
+              gestureConfidence: Double, flat: Bool, geometryAge: Double = 0, members: Int = 0) {
         queue.async { [weak self] in
-            guard let self, let connection = self.connection, position.finite else { return }
+            guard let self, let connection = self.connection else { return }
+            let position = position.flatMap { $0.finite ? $0 : nil }
             let now = ProcessInfo.processInfo.systemUptime
             guard now - self.lastSend >= self.minInterval else { return }
             self.lastSend = now
             let compassOK = (compassDegrees?.isFinite ?? false)
             let sample = Sample(id: id, name: String(name.prefix(24)), room: room, t: now,
-                                cycle: cycle, pos: [position.x, position.y], z: position.z,
+                                cycle: cycle, pos: position.map { [$0.x, $0.y] }, z: position?.z,
                                 heading: heading.angle, moving: heading.moving,
                                 speed: heading.speed, headingReady: heading.available,
                                 compass: compassOK ? compassDegrees! : 0, compassValid: compassOK,
                                 gesture: gesture.isEmpty ? "None" : String(gesture.prefix(32)),
                                 gestureConfidence: gestureConfidence.isFinite ? max(0, min(1, gestureConfidence)) : 0,
-                                gestureSource: gesture == "None" ? "none" : "vision", flat: flat)
+                                gestureSource: gesture == "None" ? "none" : "vision", flat: flat,
+                                geometryAge: geometryAge.isFinite ? max(0, geometryAge) : 0, members: members)
             guard let data = try? self.encoder.encode(sample) else { return }
             connection.send(content: data, completion: .idempotent)
         }

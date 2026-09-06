@@ -22,6 +22,7 @@ import asyncio
 import logging
 
 from simulation.operators import OperatorRegistry, parse_phone_datagram
+from .phone_demo import PhoneFeed
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,11 +32,14 @@ DEFAULT_PORT = 9870
 class PhoneDatagramProtocol(asyncio.DatagramProtocol):
     """Parses each datagram into the registry, dropping anything malformed."""
 
-    def __init__(self, registry: OperatorRegistry) -> None:
+    def __init__(self, registry: OperatorRegistry, feed: PhoneFeed | None = None) -> None:
         self.registry = registry
+        self.feed = feed
         self.dropped = 0
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
+        if self.feed is not None:
+            self.feed.ingest(data)
         report = parse_phone_datagram(data)
         if report is None:
             self.dropped += 1
@@ -47,12 +51,12 @@ class PhoneDatagramProtocol(asyncio.DatagramProtocol):
 
 
 async def start_phone_listener(
-    registry: OperatorRegistry, host: str, port: int
+    registry: OperatorRegistry, host: str, port: int, feed: PhoneFeed | None = None
 ) -> asyncio.DatagramTransport:
     """Bind the phone feed. Raises OSError if the port is unavailable."""
     loop = asyncio.get_running_loop()
     transport, _protocol = await loop.create_datagram_endpoint(
-        lambda: PhoneDatagramProtocol(registry), local_addr=(host, port)
+        lambda: PhoneDatagramProtocol(registry, feed), local_addr=(host, port)
     )
     LOGGER.info("phone feed listening on %s:%s", host, port)
     return transport

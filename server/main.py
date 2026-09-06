@@ -32,6 +32,7 @@ from simulation.world import WorldDefinition
 
 from .mission_intel import install as install_mission_intel
 from .phone_listener import DEFAULT_PORT, start_phone_listener
+from .phone_demo import PhoneFeed
 from .websocket import WebSocketHub
 
 # How often, in simulated seconds, a registered mission plan is re-evaluated.
@@ -61,6 +62,8 @@ def create_app(
     phone_feed_port: int | None = None,
 ) -> FastAPI:
     runtime = engine or _default_engine()
+    phone_demo = os.environ.get("PHONE_DEMO", "0") == "1"
+    phone_samples = PhoneFeed()
     hub = WebSocketHub()
     if phone_feed_port is None:
         phone_feed_port = int(os.environ.get("PHONE_FEED_PORT", DEFAULT_PORT))
@@ -70,7 +73,7 @@ def create_app(
         next_plan_evaluation = 0.0
         while True:
             started = asyncio.get_running_loop().time()
-            if runtime.running:
+            if runtime.running and not phone_demo:
                 runtime.tick(interval)
                 # Mission plans advance on their own cadence: trigger checks and
                 # constraint enforcement do not need to run at the tick rate.
@@ -90,7 +93,7 @@ def create_app(
         if start_runner and phone_feed_port > 0:
             try:
                 phones = await start_phone_listener(
-                    runtime.operators, PHONE_FEED_HOST, phone_feed_port
+                    runtime.operators, PHONE_FEED_HOST, phone_feed_port, phone_samples
                 )
             except OSError as exc:
                 # A busy port must not take the whole runtime down: HTTP ingest
@@ -119,6 +122,7 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.engine = runtime
+    app.state.phone_samples = phone_samples
     app.state.websocket_hub = hub
     app.state.mission_session = install_mission_intel(app, runtime, mission_backend)
     app.add_middleware(
@@ -163,6 +167,12 @@ def create_app(
             return runtime.submit_mission(command)
         except RuntimeError as exc:
             raise HTTPException(503, str(exc)) from exc
+
+    @app.get("/api/phones")
+    async def phones() -> dict:
+        return {"phones": phone_samples.snapshot(), "packets": phone_samples.packets,
+                "listening": getattr(app.state, "phone_feed", None) is not None,
+                "host": PHONE_FEED_HOST, "port": phone_feed_port, "phone_demo": phone_demo}
 
     @app.get("/api/operators", response_model=list[OperatorState])
     async def operators() -> list[OperatorState]:

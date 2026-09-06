@@ -12,6 +12,7 @@ import { previewCoordinate } from "./flight-preview";
 import { COMMANDS, parseCommandSequence, type CommandIntent } from "./command-console";
 import { compileMissionSequence, isFlightSequenceIntent } from "./mission-sequence";
 import { startGestureCamera, type BrowserGestureState } from "./gesture-camera";
+import { startPhoneDemo } from "./phone-demo";
 
 const monument = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
 // The south side of the monument plaza: visibly at the base, but outside the
@@ -39,6 +40,9 @@ new MutationObserver(() => {
 }).observe(commandStatus, { childList: true, characterData: true, subtree: true });
 const runtimeApiBase = ((import.meta.env.VITE_RUNTIME_URL as string | undefined) ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 const runtimeMode = new URLSearchParams(window.location.search).get("mode") === "runtime";
+const phoneMode = !runtimeMode && new URLSearchParams(window.location.search).get("input") !== "camera";
+document.body.classList.toggle("phone-mode", phoneMode);
+if (phoneMode) hud.altitude.previousElementSibling!.textContent = "Height";
 document.body.classList.toggle("runtime-mode", runtimeMode);
 const gestureHud = {
   root: document.querySelector<HTMLElement>("#gesture-hud")!,
@@ -284,6 +288,7 @@ function refreshFleet(): void {
   updateTelemetry();
 }
 
+let lastPhoneTelemetry: { point: Cesium.Cartesian3; at: number } | undefined;
 function updateTelemetry(): void {
   const snapshot = drone?.snapshot();
   hud.drone.textContent = drone?.id.replace("_", " ") ?? "None";
@@ -291,6 +296,15 @@ function updateTelemetry(): void {
   hud.longitude.textContent = snapshot ? snapshot.longitude.toFixed(5) : "—";
   hud.altitude.textContent = snapshot ? `${snapshot.altitude.toFixed(1)} m` : "—";
   hud.speed.textContent = drone ? `${drone.speedMph.toFixed(1)} mph` : "—";
+  if (phoneMode && snapshot) {
+    hud.altitude.textContent = `${Math.max(0, snapshot.altitude - home.altitude).toFixed(1)} m`;
+    const point = Cesium.Cartesian3.fromDegrees(snapshot.longitude, snapshot.latitude, snapshot.altitude);
+    const at = performance.now();
+    const speed = lastPhoneTelemetry && at > lastPhoneTelemetry.at
+      ? Cesium.Cartesian3.distance(point, lastPhoneTelemetry.point) / ((at - lastPhoneTelemetry.at) / 1000) : 0;
+    hud.speed.textContent = `${speed.toFixed(1)} m/s`;
+    lastPhoneTelemetry = { point, at };
+  }
   hud.state.textContent = snapshot?.state.replaceAll("_", " ") ?? "Idle";
   hud.fleet.textContent = String(fleet.drones.size);
 }
@@ -564,6 +578,8 @@ async function groundStartingHome(): Promise<void> {
   } else {
     try { height = viewer.scene.globe.getHeight(location); } catch { /* Use fallback. */ }
   }
+  // The fallback globe is the zero-height ellipsoid, including before its tiles load.
+  if (!Number.isFinite(height) && viewer.scene.globe.show) height = 0;
   if (Number.isFinite(height)) home.altitude = height! + 0.62;
 }
 
@@ -705,7 +721,7 @@ function updateGestureHud(state: BrowserGestureState): void {
 }
 
 let stopGestureCamera: (() => void) | undefined;
-if (!runtimeMode) {
+if (!runtimeMode && !phoneMode) {
   void startGestureCamera(updateGestureHud, executeGestureAction)
     .then(stop => { stopGestureCamera = stop; })
     .catch(error => updateGestureHud({
@@ -963,6 +979,7 @@ commandInput.addEventListener("keydown", event => {
 });
 commandForm.addEventListener("submit", event => {
   event.preventDefault();
+  if (phoneMode) return;
   const value = commandInput.value;
   commandInput.value = "";
   commandSuggestions.hidden = true;
@@ -996,7 +1013,10 @@ if (!runtimeMode) void worldReady.then(async () => {
   drone = fleet.deploy(home);
   selectedIds.add(drone.id);
   refreshFleet();
-  commandStatus.textContent = "Drone 1 grounded beside the Washington Monument · show a gesture to fly.";
+  if (phoneMode) {
+    stopGestureCamera = startPhoneDemo(viewer, drone, home, runtimeApiBase);
+    commandStatus.textContent = "One drone · waiting for phone positions and gestures";
+  } else commandStatus.textContent = "Drone 1 grounded beside the Washington Monument · show a gesture to fly.";
 });
 
 function updateFreeCamera(deltaSeconds: number): void {

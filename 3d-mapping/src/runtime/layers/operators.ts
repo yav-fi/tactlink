@@ -65,7 +65,7 @@ export class OperatorLayer {
     return match ? match[1] : null;
   }
 
-  update(snapshot: RuntimeSnapshot): void {
+  update(snapshot: Pick<RuntimeSnapshot, "operators">): void {
     const seen = new Set<string>();
     for (const operator of snapshot.operators ?? []) {
       if (!Number.isFinite(operator.position.x) || !Number.isFinite(operator.position.y)) continue;
