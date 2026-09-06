@@ -20,7 +20,8 @@ export function placePhones(phones: PhoneSample[], alignment: PhoneAlignment): R
       operator_id: phone.id, name: phone.name,
       position: { x: Math.cos(rotation) * x - Math.sin(rotation) * y, y: 5 + Math.sin(rotation) * x + Math.cos(rotation) * y, z: phone.flat ? 0 : phone.z - anchor.z },
       heading: phone.compassValid ? phone.heading : (alignment.mirror ? -phone.heading : phone.heading) + rotation,
-      gesture: phone.confidence >= 0.65 ? phone.gesture : "None", gesture_confidence: phone.confidence,
+      // The phone publishes a fist at 0.55; don't silently reject it at the Mac.
+      gesture: phone.confidence >= (phone.gesture === "Closed_Fist" ? 0.55 : 0.65) ? phone.gesture : "None", gesture_confidence: phone.confidence,
       gesture_source: "phone", action: null, is_anchor: phone.id === anchor.id,
       controls: [], nearest_distance: null, age: phone.age,
     };
@@ -40,7 +41,11 @@ export class PhoneControl {
   private since = 0;
   private fired = false;
   following = "";
-  private claims = new Map<string, { gesture: string; since: number; fired: boolean }>();
+  private claims = new Map<string, { since: number; lastSeen: number; missingSince?: number; fired: boolean }>();
+  claimProgress(id: string): number {
+    const claim = this.claims.get(`${id}:Closed_Fist`);
+    return claim && !claim.fired ? Math.min(1, (claim.lastSeen - claim.since) / 400) : 0;
+  }
   reset(): void { this.owner = ""; this.following = ""; this.held = "None"; this.fired = false; this.claims.clear(); }
 
   update(operators: RuntimeOperator[], drone: { x: number; y: number }, now: number): {
@@ -48,15 +53,33 @@ export class PhoneControl {
   } {
     const live = operators.filter(operator => operator.age <= PHONE_TIMEOUT);
     // Any phone can deliberately claim follow; distance must not prevent a handoff.
-    for (const id of this.claims.keys()) if (!live.some(p => p.operator_id === id)) this.claims.delete(id);
+    for (const key of this.claims.keys()) if (!live.some(p => key === `${p.operator_id}:Closed_Fist` || key === `${p.operator_id}:Open_Palm`)) this.claims.delete(key);
     const ready: RuntimeOperator[] = [];
     for (const person of live) {
-      if (!["Closed_Fist", "Open_Palm"].includes(person.gesture)) { this.claims.delete(person.operator_id); continue; }
-      let claim = this.claims.get(person.operator_id);
-      if (!claim || claim.gesture !== person.gesture) {
-        claim = { gesture: person.gesture, since: now, fired: false }; this.claims.set(person.operator_id, claim);
+      for (const gesture of ["Closed_Fist", "Open_Palm"]) {
+        const key = `${person.operator_id}:${gesture}`;
+        let claim = this.claims.get(key);
+        if (person.gesture !== gesture) {
+          if (claim) {
+            claim.missingSince ??= now;
+            if (now - claim.missingSince >= 250) this.claims.delete(key);
+          }
+          continue;
+        }
+        if (claim?.missingSince !== undefined) {
+          if (now - claim.missingSince >= 250) claim = undefined;
+          else {
+            // Pause the hold through brief misclassification; never count missing frames.
+            claim.since += now - claim.lastSeen;
+            claim.missingSince = undefined;
+          }
+        }
+        if (!claim) {
+          claim = { since: now, lastSeen: now, fired: false }; this.claims.set(key, claim);
+        }
+        claim.lastSeen = now;
+        if (!claim.fired && now - claim.since >= 400) { claim.fired = true; ready.push(person); }
       }
-      if (!claim.fired && now - claim.since >= 400) { claim.fired = true; ready.push(person); }
     }
     const palm = ready.find(p => p.gesture === "Open_Palm");
     if (palm && this.following) {
@@ -64,7 +87,7 @@ export class PhoneControl {
       return { operator: palm, action: "halt", progress: 1, stop: true };
     }
     const claimant = ready.filter(p => p.gesture === "Closed_Fist")
-      .sort((a, b) => this.claims.get(b.operator_id)!.since - this.claims.get(a.operator_id)!.since || a.operator_id.localeCompare(b.operator_id))[0];
+      .sort((a, b) => this.claims.get(`${b.operator_id}:Closed_Fist`)!.since - this.claims.get(`${a.operator_id}:Closed_Fist`)!.since || a.operator_id.localeCompare(b.operator_id))[0];
     if (claimant && !palm) {
       const changed = this.following !== claimant.operator_id;
       this.following = claimant.operator_id; this.owner = claimant.operator_id; this.held = claimant.gesture;
@@ -77,11 +100,14 @@ export class PhoneControl {
         return { progress: 0, stop: true };
       }
       if (followed.gesture === "None" || followed.gesture === "Closed_Fist" || !ACTIONS[followed.gesture]) {
-        this.owner = followed.operator_id;
+        this.owner = followed.operator_id; this.held = "None";
         return { operator: followed, action: "follow", progress: 1, stop: false, following: true };
       }
-      // A different control gesture from the followed person leaves follow mode.
-      this.following = ""; this.held = "None"; this.fired = false;
+      // A single wrong camera label must not hand control back to the nearest person.
+      if (this.held !== followed.gesture) { this.held = followed.gesture; this.since = now; }
+      if (now - this.since < 400) return { operator: followed, action: "follow", progress: 1, stop: false, following: true };
+      this.following = ""; this.fired = true;
+      return { operator: followed, action: ACTIONS[followed.gesture], progress: 1, stop: true };
     }
     const distance = (operator: RuntimeOperator) => Math.hypot(operator.position.x - drone.x, operator.position.y - drone.y);
     const nearest = [...live].sort((a, b) => distance(a) - distance(b) || a.operator_id.localeCompare(b.operator_id))[0];

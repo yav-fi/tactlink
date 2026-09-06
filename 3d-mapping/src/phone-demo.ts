@@ -118,7 +118,10 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       members.replaceChildren(...phones.map(phone => {
         const row = document.createElement("div");
         const health = phone.age > PHONE_TIMEOUT ? "signal lost" : !phone.pos ? "waiting for UWB" : phone.geometryAge > 8 ? "position expired" : `${phone.geometryAge.toFixed(1)} s position age`;
-        row.textContent = `${phone.name}${phone.id === owner?.operator_id ? " · controlling" : ""} — ${health}`;
+        const claim = controller.claimProgress(phone.id);
+        const gesture = phone.gesture.replaceAll("_", " ");
+        const claiming = claim > 0 ? ` · calling drone ${Math.round(claim * 100)}%` : "";
+        row.textContent = `${phone.name}${phone.id === owner?.operator_id ? " · controlling" : ""} — ${gesture} ${Math.round(phone.confidence * 100)}%${claiming} · ${health}`;
         return row;
       }));
       const reportedMembers = Math.max(0, ...live.map(phone => phone.members));

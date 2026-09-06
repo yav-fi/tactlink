@@ -215,6 +215,69 @@ test("lost follow position stops without silently following the remaining phone"
   assert(lost.stop); assert.equal(lost.action, undefined); assert.equal(control.following, "");
 });
 
+test("a phone-visible fist claims from the farther person despite a brief detection dropout", () => {
+  const control = new PhoneControl();
+  const people = placePhones([phone(0, { gesture: "None" }), phone(1, { gesture: "Closed_Fist", confidence: 0.6 })], alignment);
+  const drone = { x: 0, y: 5 };
+  control.update(people, drone, 0);
+  control.update(people, drone, 200);
+  assert.equal(control.claimProgress("1"), 0.5);
+  people[1].gesture = "None";
+  assert.notEqual(control.update(people, drone, 300).action, "follow");
+  people[1].gesture = "Closed_Fist";
+  assert.notEqual(control.update(people, drone, 400).action, "follow", "missing frames don't complete the hold");
+  const result = control.update(people, drone, 600);
+  assert.equal(result.action, "follow"); assert.equal(result.operator.operator_id, "1");
+});
+
+test("follow survives one wrong gesture but a deliberate different command still works", () => {
+  const control = new PhoneControl();
+  const people = placePhones([phone(0, { gesture: "None" }), phone(1, { gesture: "Closed_Fist" })], alignment);
+  const drone = { x: 0, y: 5 };
+  control.update(people, drone, 0); control.update(people, drone, 400);
+  people[1].gesture = "Thumb_Up";
+  let result = control.update(people, drone, 500);
+  assert.equal(result.action, "follow"); assert.equal(result.operator.operator_id, "1");
+  people[1].gesture = "None";
+  assert.equal(control.update(people, drone, 600).action, "follow");
+  people[1].gesture = "Thumb_Up";
+  assert.equal(control.update(people, drone, 700).action, "follow");
+  result = control.update(people, drone, 1100);
+  assert.equal(result.action, "takeoff"); assert.equal(result.operator.operator_id, "1"); assert(result.stop);
+});
+
+test("a losing held fist cannot steal back after flicker; a released and repeated fist can", () => {
+  const control = new PhoneControl();
+  const people = placePhones([phone(0, { gesture: "Closed_Fist" }), phone(1, { gesture: "None" })], alignment);
+  const drone = { x: 0, y: 5 };
+  control.update(people, drone, 0); control.update(people, drone, 400);
+  people[1].gesture = "Closed_Fist";
+  control.update(people, drone, 500); control.update(people, drone, 900);
+  people[0].gesture = "Thumb_Up";
+  control.update(people, drone, 1000);
+  people[0].gesture = "Closed_Fist";
+  control.update(people, drone, 1100);
+  assert.equal(control.update(people, drone, 1500).operator.operator_id, "1");
+  people[0].gesture = "None";
+  control.update(people, drone, 1600);
+  people[0].gesture = "Closed_Fist";
+  control.update(people, drone, 1900);
+  assert.equal(control.update(people, drone, 2300).operator.operator_id, "0");
+});
+
+test("a long dropout discards an incomplete fist hold", () => {
+  const control = new PhoneControl();
+  const people = placePhones([phone(0, { gesture: "Closed_Fist" })], alignment);
+  const drone = { x: 0, y: 5 };
+  control.update(people, drone, 0); control.update(people, drone, 200);
+  people[0].gesture = "None";
+  control.update(people, drone, 300);
+  people[0].gesture = "Closed_Fist";
+  assert.notEqual(control.update(people, drone, 600).action, "follow");
+  assert.notEqual(control.update(people, drone, 900).action, "follow");
+  assert.equal(control.update(people, drone, 1000).action, "follow");
+});
+
 test("follow flies above the selected person, settles, and tracks a changed mapped position", () => {
   const { GeoFrame } = loadSource("runtime/frame");
   const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
