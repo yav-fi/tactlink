@@ -8,6 +8,7 @@ import { collisionWarning } from "./collision";
 import { parseMission, sampleMission } from "./mission";
 import { startRuntimeMode } from "./runtime/index";
 import { previewCoordinate, previewMission, type FlightPreview } from "./flight-preview";
+import { startPlannerLink } from './planner-link';
 
 const home = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
 const token = import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined;
@@ -69,6 +70,7 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
   })),
 });
 if (runtimeMode) startRuntimeMode(viewer);
+if (!runtimeMode) startPlannerLink(viewer);
 
 viewer.scene.globe.enableLighting = false;
 const fleet = new Fleet(viewer);

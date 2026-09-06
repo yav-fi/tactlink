@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -30,6 +31,8 @@ class PreviewRequest(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
     origin: Origin | None = None
     sample_spacing_m: float = Field(default=2, ge=0.5, le=10)
+    publish: bool = True
+    map_origin: dict[str, float] | None = None
 
 
 class InterpretRequest(BaseModel):
@@ -39,12 +42,24 @@ class InterpretRequest(BaseModel):
     position: int = Field(ge=0, le=100)
 
 
+class SimulationPosition(BaseModel):
+    model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
+    mission_id: str = Field(max_length=100)
+    x: float
+    y: float
+    z: float
+    paused: bool
+    complete: bool
+
+
 def create_app(endpoint=None, baud=115200, allowed_origins=(), link_factory=ArduPilotLink, transcriber=None, interpreter=None):
     preview = None
     link = None
     link_error = None
     speech = transcriber or LocalTranscriber()
     natural = interpreter or NaturalPlanner()
+    simulation = None
+    simulation_updated = 0
 
     async def read_telemetry():
         nonlocal link_error
@@ -99,7 +114,14 @@ def create_app(endpoint=None, baud=115200, allowed_origins=(), link_factory=Ardu
                                    request.sample_spacing_m)
         except MissionError as error:
             raise HTTPException(422, str(error)) from error
-        preview = result
+        if request.map_origin is not None:
+            try:
+                location = Origin(**request.map_origin, altitude_msl_m=0)
+            except (ValueError, TypeError):
+                raise HTTPException(422, 'Invalid map home coordinates.')
+            result['map_origin'] = {'latitude_deg': location.latitude_deg, 'longitude_deg': location.longitude_deg}
+        if request.publish:
+            preview = result
         return result
 
     @app.get('/api/preview')
@@ -121,6 +143,21 @@ def create_app(endpoint=None, baud=115200, allowed_origins=(), link_factory=Ardu
     @app.get('/api/telemetry')
     async def get_telemetry():
         return telemetry()
+
+    @app.post('/api/simulation')
+    async def simulation_position(request: SimulationPosition):
+        nonlocal simulation, simulation_updated
+        if preview is None or request.mission_id != preview['mission_id']:
+            raise HTTPException(409, 'Planner mission changed. Reload it in the Python simulator.')
+        simulation = request.model_dump()
+        simulation_updated = time.monotonic()
+        return {'ok': True}
+
+    @app.get('/api/simulation')
+    async def simulation_snapshot():
+        return {'preview': preview, 'simulation': simulation,
+                'stale': time.monotonic() - simulation_updated > 3 or simulation is None
+                         or preview is None or simulation['mission_id'] != preview['mission_id']}
 
     @app.get('/api/planner/ai/status')
     async def ai_status():
@@ -200,7 +237,7 @@ def main():
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--allow-origin', action='append', default=[], help='Additional visualizer web origin')
     args = parser.parse_args()
-    uvicorn.run(create_app(args.connect, args.baud, args.allow_origin), host=args.host, port=args.port)
+    uvicorn.run(create_app(args.connect, args.baud, args.allow_origin), host=args.host, port=args.port, access_log=False)
 
 
 if __name__ == '__main__':

@@ -33,3 +33,11 @@ Offline verification:
 
 The demo includes takeoff, movement, orbit, hover, return home and landing. Headless mode
 fails if a mission does not finish within 1200 simulated seconds.
+
+## Hand gestures
+
+Press G in the Python preview to open webcam 0 and enter gesture mode. Mission playback stops advancing. Space freezes either mode. M closes the camera and returns to mission mode paused; Space then resumes toward the next pending waypoint from the drone's current position. R restarts the mission. Use --camera 1 for another camera.
+
+Current config: thumbs up takes off/steps altitude, thumbs down lands, pointing up orbits, I-love-you returns home, open palm halts. The existing interpreter also supports its geometric directional gestures. The adapter uses a fixed home anchor, not multi-operator tracking. Missing hands cancel maneuvers; a camera failure pauses simulation. Position updates still drive the world-map overlay. Gesture movement does not edit the saved route. Install mediapipe for camera mode.
+
+Forward in this standalone adapter follows the drone heading at gesture trigger, rather than operator facing. Brief hand-tracking gaps under 350ms do not cancel a maneuver.
