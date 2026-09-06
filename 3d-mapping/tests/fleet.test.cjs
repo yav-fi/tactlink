@@ -18,7 +18,8 @@ function loadSource(name) {
   return module.exports;
 }
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
-const { fleetCameraFrame } = loadSource("cinematic-camera");
+const { fleetCameraFrame, screenRelativeMovement } = loadSource("cinematic-camera");
+const { MOTION_TRACE_LIFETIME_MS, motionTraceAlpha } = loadSource("motion-trace");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
 
 test("cinematic camera framing expands to keep the whole fleet visible", () => {
@@ -29,9 +30,26 @@ test("cinematic camera framing expands to keep the whole fleet visible", () => {
   const single = fleetCameraFrame([center]);
   const fleet = fleetCameraFrame([near, far]);
   assert.equal(fleetCameraFrame([]), undefined);
-  assert.equal(single.range, 85);
+  assert.equal(single.range, 32);
   assert(fleet.range > single.range);
   assert(Cesium.Cartesian3.distance(fleet.center, center) < 0.01);
+});
+
+test("WASD movement follows the camera's screen axes", () => {
+  const position = Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, home.altitude);
+  const frame = Cesium.Transforms.eastNorthUpToFixedFrame(position);
+  const east = Cesium.Matrix4.multiplyByPointAsVector(frame, Cesium.Cartesian3.UNIT_X, new Cesium.Cartesian3());
+  const north = Cesium.Matrix4.multiplyByPointAsVector(frame, Cesium.Cartesian3.UNIT_Y, new Cesium.Cartesian3());
+  const forward = screenRelativeMovement(position, north, east, 1, 0);
+  const right = screenRelativeMovement(position, north, east, 0, 1);
+  assert(Math.abs(forward.east) < 1e-9 && Math.abs(forward.north - 1) < 1e-9);
+  assert(Math.abs(right.east - 1) < 1e-9 && Math.abs(right.north) < 1e-9);
+});
+
+test("motion trace fades quickly to transparent", () => {
+  assert.equal(motionTraceAlpha(0), 0.72);
+  assert(motionTraceAlpha(MOTION_TRACE_LIFETIME_MS / 2) < 0.3);
+  assert.equal(motionTraceAlpha(MOTION_TRACE_LIFETIME_MS), 0);
 });
 
 test("first manual-flight undo keeps hidden render geometry at valid geographic positions", () => {

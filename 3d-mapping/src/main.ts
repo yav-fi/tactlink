@@ -5,7 +5,7 @@ import { DroneController } from "./drone-controller";
 import { Fleet, DRONE_COLORS } from "./fleet";
 import { formationSlots } from "./formation";
 import { collisionWarning } from "./collision";
-import { fleetCameraFrame } from "./cinematic-camera";
+import { fleetCameraFrame, screenRelativeMovement } from "./cinematic-camera";
 import { parseMission, sampleMission } from "./mission";
 import { startRuntimeMode } from "./runtime/index";
 import { previewCoordinate, previewMission, type FlightPreview } from "./flight-preview";
@@ -360,13 +360,12 @@ document.querySelector<HTMLButtonElement>("#deploy-drone")!.addEventListener("cl
   cameraMode = "placement";
   viewer.scene.screenSpaceCameraController.enableInputs = true;
   placementMode = "single";
-  showPlacementControls(false);
   countInput.disabled = true;
   countInput.value = "1";
-  confirmDeployment.textContent = "Deploy here";
-  deploymentPanel.hidden = false;
-  deploymentStatus.textContent = `Next drone: ${fleet.nextColor.name}. Fly the camera, then click a starting point on the map. No route is recorded during placement.`;
-  commandStatus.textContent = "Choose a starting point, then confirm deployment.";
+  heightInput.value = "20";
+  document.querySelector<HTMLSelectElement>("#drone-type")!.value = "normal";
+  commandDrawer.open = false;
+  commandStatus.textContent = `Click the map to deploy ${fleet.nextColor.name} immediately.`;
   refreshFleet();
 });
 document.querySelector<HTMLButtonElement>("#bulk-deploy")!.addEventListener("click", () => {
@@ -413,13 +412,19 @@ cameraHandler.setInputAction((event: { position: Cesium.Cartesian2 }) => {
   }
   if (!picked) {
     deploymentStatus.textContent = "Click a visible map surface; sky cannot be used as a starting point.";
+    commandStatus.textContent = "Click a visible map surface; sky cannot be used for deployment.";
     return;
   }
   pickedSurface = Cesium.Cartographic.fromCartesian(picked);
+  if (placementMode === "single") {
+    completeDeployment();
+    return;
+  }
   updatePreview();
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
-confirmDeployment.addEventListener("click", () => {
-  if (!deploying || !pickedSurface || confirmDeployment.disabled) return;
+
+function completeDeployment(): void {
+  if (!deploying || !pickedSurface || (placementMode !== "single" && confirmDeployment.disabled)) return;
   fleet.checkpoint(placementMode === "command" ? "destination command" : "deployment");
   const center = { latitude: Cesium.Math.toDegrees(pickedSurface.latitude), longitude: Cesium.Math.toDegrees(pickedSurface.longitude), altitude: pickedSurface.height + heightInput.valueAsNumber };
   if (placementMode === "command") {
@@ -432,7 +437,8 @@ confirmDeployment.addEventListener("click", () => {
   drone = added[0]; selectedIds.clear(); for (const item of added) selectedIds.add(item.id);
   cancelDeployment(); selectDrone(drone.id);
   commandStatus.textContent = `${added.length} drone(s) deployed. Select Fly to pilot; the camera will keep the fleet framed.`;
-});
+}
+confirmDeployment.addEventListener("click", completeDeployment);
 
 function selectDrone(id: string): void {
   flyToFreeCameraOverview();
@@ -519,7 +525,7 @@ controlDroneButton.addEventListener("click", () => {
   viewer.scene.screenSpaceCameraController.enableInputs = false;
   controlDroneButton.textContent = "Release drone";
   controlDroneButton.setAttribute("aria-pressed", "true");
-  commandStatus.textContent = "PILOT MODE · WASD relative to drone heading · Q/E turns · Space/Shift up/down (R/F also works) · Esc releases. Mission canceled; trail preserved.";
+  commandStatus.textContent = "PILOT MODE · WASD follows the screen · Q/E turns · Space/Shift moves up/down · Esc releases.";
   viewer.canvas.focus();
 });
 
@@ -548,8 +554,8 @@ function updateFreeCamera(deltaSeconds: number): void {
     const forward = axis("KeyW", "KeyS");
     const right = axis("KeyD", "KeyA");
     const up = Number(activeCameraKeys.has("Space") || activeCameraKeys.has("KeyR")) - Number(activeCameraKeys.has("ShiftLeft") || activeCameraKeys.has("ShiftRight") || activeCameraKeys.has("KeyF"));
-    const east = forward * Math.sin(pilotView.heading) + right * Math.cos(pilotView.heading);
-    const north = forward * Math.cos(pilotView.heading) - right * Math.sin(pilotView.heading);
+    const movement = screenRelativeMovement(drone.cameraPosition, viewer.camera.directionWC, viewer.camera.rightWC, forward, right);
+    const { east, north } = movement;
     if (fleet.manualBatch.length) fleet.moveBatch(east, north, up, deltaSeconds, pilotView.heading);
     else drone.moveManually(east, north, up, deltaSeconds, pilotView.heading);
     const position = drone.snapshot();
