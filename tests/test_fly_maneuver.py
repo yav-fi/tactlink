@@ -195,6 +195,29 @@ def test_return_home_re_leashes_the_drone():
     assert ctl._leashed
 
 
+def test_halt_cancels_a_maneuver_and_holds_position():
+    ctl = GestureController()
+    sim = QuadSimulator()
+    _armed_at(ctl, sim, alt=3.0)
+    sim.state.pos[:2] = [1.0, 0.0]
+    anchor = (0.0, 0.0)
+    # orbit for a bit, then halt
+    for i in range(600):
+        ev = ["orbit"] if i == 0 else (["halt"] if i == 300 else [])
+        cmd = ctl.update(HandState(present=False),
+                         GestureState(events=ev, follow_pos=anchor), sim.state)
+        sim.step(cmd, 1 / 60)
+    assert ctl.maneuver == ""
+    here = np.array(sim.state.pos[:2])
+    # keep running - it must stay put, not resume orbit or drift to the anchor
+    for _ in range(300):
+        cmd = ctl.update(HandState(present=False),
+                         GestureState(follow_pos=anchor), sim.state)
+        sim.step(cmd, 1 / 60)
+    assert np.linalg.norm(np.array(sim.state.pos[:2]) - here) < 0.8, sim.state.pos
+    assert abs(sim.state.pos[2] - 3.0) < 0.4
+
+
 def test_idle_drone_follows_the_given_point():
     ctl = GestureController()
     sim = QuadSimulator()

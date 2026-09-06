@@ -163,10 +163,11 @@ Hold a sign steady for ~0.4 s to fire it; relax before repeating.
 | --- | --- |
 | 👍 Thumb up | **Arm + take off** (to ~3 m, above the operators); each one after that **steps the altitude up ~1.5 m** (to 9 m) |
 | 👎 Thumb down | **Land + disarm** |
+| ✋ Open palm | **Halt** — cancel whatever it's doing and hover right where it is |
 | ☝️ Pointing up | Orbit: circle the **controlling operator** at ~6 m, nose kept pointed inward — point again to stop |
 | 🤟 ILoveYou | Fly back to the **controlling operator** and hover |
 | **Three fingers** (index+middle+ring, pinky curled), held ~0.45 s | Dash ~5 m **forward** — along the bearing the controlling operator faces (`ThreeFingerForward`). Any hand orientation. |
-| ✋ Open palm · ✊ Closed fist · ✌️ Victory | *no action* |
+| ✊ Closed fist · ✌️ Victory | *no action* |
 
 Take off, land, orbit, return-home (and the `fly_*` dashes) run as autopilot
 routines that take over until they finish (`MODE` turns red in the HUD). Orbit

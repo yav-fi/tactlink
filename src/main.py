@@ -52,12 +52,13 @@ def _load_mission_integration():
 _DEMO_GESTURES = [
     (1.5, 2.5, "Thumb_Up"),       # arm + takeoff
     (4.0, 5.0, "Thumb_Up"),       # airborne: step altitude up
-    (7.0, 8.3, "Pointing_Up"),    # orbit the origin (until the next command)
-    (17.5, 18.5, "ILoveYou"),     # return home + hover
-    (22.0, 23.5, "Thumb_Down"),   # disarm + land
+    (7.0, 8.3, "Pointing_Up"),    # orbit the operator
+    (10.0, 10.8, "Open_Palm"),    # halt: stop orbiting, hover in place
+    (18.5, 19.5, "ILoveYou"),     # return to the operator + hover
+    (23.0, 24.5, "Thumb_Down"),   # disarm + land
 ]
-_DEMO_SWING = (10.5, 14.0)        # two-finger wiper V-H-V-H -> fly east
-_DEMO_THREE = (15.5, 16.6)        # three fingers sideways -> forward (operator-relative)
+_DEMO_SWING = (12.0, 15.5)        # two-finger wiper V-H-V-H -> fly east
+_DEMO_THREE = (16.5, 17.6)        # three fingers -> forward (operator bearing = north)
 
 
 def _demo_hand(t: float) -> HandState:

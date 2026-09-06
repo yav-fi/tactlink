@@ -1,8 +1,9 @@
 """Translate hand pose + gesture state into a normalized ControlInput.
 
 The drone is flown entirely by discrete gesture commands and the autopilot
-routines they trigger (takeoff, land, spin360, return_home,
-fly_north/south/east/west, orbit). ``orbit`` and ``return_home`` are relative to
+routines they trigger (takeoff, land, halt, spin360, return_home,
+fly_north/south/east/west, orbit). ``halt`` cancels the current routine and
+freezes the drone where it is. ``orbit`` and ``return_home`` are relative to
 the current **anchor** - the controlling operator's position, passed in via
 ``GestureState.follow_pos`` (falls back to the origin). When no routine is
 running an armed drone trails the anchor and holds its target altitude. A
@@ -156,6 +157,11 @@ class GestureController:
         elif event == "land":
             self._alt_target = 0.0
             self.maneuver = "land"
+        elif event == "halt" and self._armed:
+            # Cancel whatever it's doing and hold this exact spot + altitude.
+            self.maneuver = ""
+            self._leashed = False
+            self._alt_target = float(state.pos[2])
         elif event == "spin360" and self._armed:
             self._spin_start_yaw = state.yaw
             self.maneuver = "spin360"
