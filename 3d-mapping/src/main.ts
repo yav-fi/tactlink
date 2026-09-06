@@ -5,17 +5,36 @@ import { DroneController } from "./drone-controller";
 import { Fleet, DRONE_COLORS } from "./fleet";
 import { formationSlots } from "./formation";
 import { collisionWarning } from "./collision";
-import { parseMission, sampleMission } from "./mission";
+import { blendHeading, fleetCameraFrame, screenRelativeMovement } from "./cinematic-camera";
+import { parseMission, sampleMission, type MissionStep } from "./mission";
 import { startRuntimeMode } from "./runtime/index";
-import { previewCoordinate, previewMission, type FlightPreview } from "./flight-preview";
+import { previewCoordinate } from "./flight-preview";
 import { startPlannerLink } from './planner-link';
+import { COMMANDS, parseCommandSequence, type CommandIntent } from "./command-console";
+import { compileMissionSequence, isFlightSequenceIntent } from "./mission-sequence";
 
 const home = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
 const token = import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined;
 const status = document.querySelector<HTMLParagraphElement>("#world-status")!;
-const commandStatus = document.querySelector<HTMLParagraphElement>("#command-status")!;
+const commandStatus = document.querySelector<HTMLElement>("#command-status")!;
 const missionInput = document.querySelector<HTMLTextAreaElement>("#mission-json")!;
-const stateElement = document.querySelector<HTMLDListElement>("#drone-state")!;
+const commandDrawer = document.querySelector<HTMLDetailsElement>("#command-drawer")!;
+const commandForm = document.querySelector<HTMLFormElement>("#command-form")!;
+const commandInput = document.querySelector<HTMLInputElement>("#command-input")!;
+const commandSuggestions = document.querySelector<HTMLDivElement>("#command-suggestions")!;
+const hud = {
+  drone: document.querySelector<HTMLElement>("#hud-drone")!,
+  latitude: document.querySelector<HTMLElement>("#hud-latitude")!,
+  longitude: document.querySelector<HTMLElement>("#hud-longitude")!,
+  altitude: document.querySelector<HTMLElement>("#hud-altitude")!,
+  speed: document.querySelector<HTMLElement>("#hud-speed")!,
+  state: document.querySelector<HTMLElement>("#hud-state")!,
+  fleet: document.querySelector<HTMLElement>("#hud-fleet")!,
+};
+new MutationObserver(() => {
+  if (commandStatus.textContent) commandInput.placeholder = commandStatus.textContent;
+}).observe(commandStatus, { childList: true, characterData: true, subtree: true });
+const runtimeApiBase = ((import.meta.env.VITE_RUNTIME_URL as string | undefined) ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 const runtimeMode = new URLSearchParams(window.location.search).get("mode") === "runtime";
 document.body.classList.toggle("runtime-mode", runtimeMode);
 
@@ -43,6 +62,7 @@ function showPlacementControls(batch: boolean): void {
   const name = batch ? "batches" : "drone";
   showControlTab(name);
   document.getElementById(`panel-${name}`)!.append(deploymentPanel);
+  commandDrawer.open = true;
   for (const id of ["batch-count", "formation-spacing"]) {
     document.getElementById(id)!.hidden = !batch;
     document.querySelector<HTMLLabelElement>(`label[for="${id}"]`)!.hidden = !batch;
@@ -69,10 +89,18 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
     backgroundColor: Cesium.Color.fromCssColorString("#233d34"),
   })),
 });
+const placeGeocoder = token ? new Cesium.IonGeocoderService({
+  scene: viewer.scene,
+  accessToken: token,
+  geocodeProviderType: Cesium.IonGeocodeProviderType.GOOGLE,
+}) : undefined;
 if (runtimeMode) startRuntimeMode(viewer);
 if (!runtimeMode) startPlannerLink(viewer);
 
 viewer.scene.globe.enableLighting = false;
+viewer.scene.globe.maximumScreenSpaceError = 3;
+viewer.scene.postProcessStages.fxaa.enabled = true;
+viewer.scene.msaaSamples = 1;
 const fleet = new Fleet(viewer);
 const replayButton = document.querySelector<HTMLButtonElement>("#run-all-paths")!;
 const stopReplayButton = document.querySelector<HTMLButtonElement>("#stop-paths")!;
@@ -103,6 +131,7 @@ let deploying = false;
 let pickedSurface: Cesium.Cartographic | undefined;
 let previews: Cesium.Entity[] = [];
 let placementMode: "single" | "bulk" | "command" = "single";
+let quickPlacement = false;
 const selectedIds = new Set<string>();
 const batchControlButton = document.querySelector<HTMLButtonElement>("#control-batch")!;
 const batchSpeedInput = document.querySelector<HTMLInputElement>("#batch-speed")!;
@@ -116,6 +145,7 @@ let pendingIds: string[] = [];
 let pendingGroup = "";
 const activeCameraKeys = new Set<string>();
 const controlDroneButton = document.querySelector<HTMLButtonElement>("#control-drone")!;
+const rotationControls = document.querySelector<HTMLDivElement>("#rotation-controls")!;
 let controllingDrone = false;
 const pilotView = { heading: 0 };
 const pilotCameraSelect = document.querySelector<HTMLSelectElement>("#pilot-camera")!;
@@ -134,6 +164,17 @@ function clearInput(): void {
   for (const member of fleet.manualBatch) member.stopManualMotion();
 }
 
+for (const [id, code] of [["rotate-left", "KeyQ"], ["rotate-right", "KeyE"]] as const) {
+  const button = document.querySelector<HTMLButtonElement>(`#${id}`)!;
+  button.addEventListener("pointerdown", event => {
+    event.preventDefault();
+    if (controllingDrone) activeCameraKeys.add(code);
+  });
+  for (const eventName of ["pointerup", "pointercancel", "pointerleave"]) {
+    button.addEventListener(eventName, () => activeCameraKeys.delete(code));
+  }
+}
+
 function releaseDrone(): void {
   clearInput();
   if (fleet.manualBatch.length) {
@@ -142,14 +183,14 @@ function releaseDrone(): void {
   } else if (controllingDrone) drone?.setManualControl(false);
   controllingDrone = false;
   activeCameraKeys.clear();
-  controlDroneButton.textContent = "Control drone";
+  controlDroneButton.textContent = "Fly";
   controlDroneButton.setAttribute("aria-pressed", "false");
   batchControlButton.textContent = "Control selected batch";
   batchControlButton.setAttribute("aria-pressed", "false");
 }
 const monumentTarget = Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, 20);
 const orbitCamera = { heading: Cesium.Math.toRadians(30), pitch: Cesium.Math.toRadians(-22), range: 450 };
-let cameraMode: "orbit" | "free" = "orbit";
+let cameraMode: "auto" | "placement" = "auto";
 let isOrbitDragging = false;
 const cameraHandler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
 
@@ -162,27 +203,27 @@ function activateOrbitCamera(): void {
   releaseDrone();
   activeCameraKeys.clear();
   viewer.camera.cancelFlight();
-  cameraMode = "orbit";
+  cameraMode = "auto";
   viewer.trackedEntity = undefined;
   viewer.scene.screenSpaceCameraController.enableInputs = false;
   applyOrbitCamera();
   refreshFleet();
-  commandStatus.textContent = "Orbit camera active. Drag the map to see every side of the monument; scroll to zoom.";
+  commandStatus.textContent = "Automatic camera active.";
 }
 
 function flyToFreeCameraOverview(): void {
   releaseDrone();
-  cameraMode = "free";
+  cameraMode = "auto";
   isOrbitDragging = false;
   viewer.camera.cancelFlight();
   viewer.trackedEntity = undefined;
   viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
-  viewer.scene.screenSpaceCameraController.enableInputs = true;
-  commandStatus.textContent = "Free camera active. W/A/S/D moves; R/F moves up/down. Ctrl + drag rotates the view.";
+  viewer.scene.screenSpaceCameraController.enableInputs = false;
+  commandStatus.textContent = fleet.drones.size ? "Camera is framing the fleet." : "Camera is orbiting the Washington Monument.";
   refreshFleet();
 }
 
-cameraHandler.setInputAction(() => { isOrbitDragging = cameraMode === "orbit"; steering = controllingDrone; }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+cameraHandler.setInputAction(() => { isOrbitDragging = cameraMode === "auto"; steering = controllingDrone; }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
 cameraHandler.setInputAction(() => { isOrbitDragging = false; steering = false; }, Cesium.ScreenSpaceEventType.LEFT_UP);
 window.addEventListener("pointerup", () => { steering = false; isOrbitDragging = false; });
 cameraHandler.setInputAction((movement: { startPosition: Cesium.Cartesian2; endPosition: Cesium.Cartesian2 }) => {
@@ -190,20 +231,20 @@ cameraHandler.setInputAction((movement: { startPosition: Cesium.Cartesian2; endP
     pilotView.heading += (movement.endPosition.x - movement.startPosition.x) * 0.005;
     return;
   }
-  if (!isOrbitDragging || cameraMode !== "orbit") return;
+  if (!isOrbitDragging || cameraMode !== "auto") return;
   orbitCamera.heading -= (movement.endPosition.x - movement.startPosition.x) * 0.008;
   orbitCamera.pitch = Cesium.Math.clamp(orbitCamera.pitch + (movement.endPosition.y - movement.startPosition.y) * 0.006, Cesium.Math.toRadians(-85), Cesium.Math.toRadians(-5));
   applyOrbitCamera();
 }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 cameraHandler.setInputAction((delta: number) => {
   if (controllingDrone) return;
-  if (cameraMode !== "orbit") return;
+  if (cameraMode !== "auto" || fleet.drones.size > 0) return;
   orbitCamera.range = Cesium.Math.clamp(orbitCamera.range + delta * 0.22, 80, 4_000);
   applyOrbitCamera();
 }, Cesium.ScreenSpaceEventType.WHEEL);
-viewer.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude - 0.008, 900), orientation: { heading: 0, pitch: Cesium.Math.toRadians(-35), roll: 0 } });
-flyToFreeCameraOverview();
-commandStatus.textContent = "No drones deployed. Choose Deploy a new drone to begin.";
+viewer.scene.screenSpaceCameraController.enableInputs = false;
+applyOrbitCamera();
+commandStatus.textContent = "Camera is orbiting the Washington Monument. Deploy when ready.";
 
 function refreshFleet(): void {
   droneSelect.replaceChildren();
@@ -227,8 +268,21 @@ function refreshFleet(): void {
   replayButton.disabled = deploying || fleet.replay.running || !fleet.drones.size;
   stopReplayButton.disabled = !fleet.replay.running;
   controlDroneButton.disabled ||= fleet.manualBatch.length > 0;
+  rotationControls.hidden = !controllingDrone;
   document.querySelector<HTMLButtonElement>("#bulk-deploy")!.disabled = fleet.replay.running;
   refreshGroups();
+  updateTelemetry();
+}
+
+function updateTelemetry(): void {
+  const snapshot = drone?.snapshot();
+  hud.drone.textContent = drone?.id.replace("_", " ") ?? "None";
+  hud.latitude.textContent = snapshot ? snapshot.latitude.toFixed(5) : "—";
+  hud.longitude.textContent = snapshot ? snapshot.longitude.toFixed(5) : "—";
+  hud.altitude.textContent = snapshot ? `${snapshot.altitude.toFixed(1)} m` : "—";
+  hud.speed.textContent = drone ? `${drone.speedMph.toFixed(1)} mph` : "—";
+  hud.state.textContent = snapshot?.state.replaceAll("_", " ") ?? "Idle";
+  hud.fleet.textContent = String(fleet.drones.size);
 }
 
 function refreshGroups(): void {
@@ -315,12 +369,18 @@ stopReplayButton.addEventListener("click", () => {
 });
 
 function cancelDeployment(): void {
+  const wasDeploying = deploying;
   deploying = false;
+  quickPlacement = false;
   pickedSurface = undefined;
   for (const preview of previews) viewer.entities.remove(preview);
   previews = [];
   deploymentPanel.hidden = true;
   confirmDeployment.disabled = true;
+  if (wasDeploying) {
+    cameraMode = "auto";
+    viewer.scene.screenSpaceCameraController.enableInputs = false;
+  }
   refreshFleet();
 }
 
@@ -351,18 +411,20 @@ document.querySelector<HTMLButtonElement>("#deploy-drone")!.addEventListener("cl
   cancelDeployment();
   flyToFreeCameraOverview();
   deploying = true;
+  cameraMode = "placement";
+  viewer.scene.screenSpaceCameraController.enableInputs = true;
   placementMode = "single";
-  showPlacementControls(false);
   countInput.disabled = true;
   countInput.value = "1";
-  confirmDeployment.textContent = "Deploy here";
-  deploymentPanel.hidden = false;
-  deploymentStatus.textContent = `Next drone: ${fleet.nextColor.name}. Fly the camera, then click a starting point on the map. No route is recorded during placement.`;
-  commandStatus.textContent = "Choose a starting point, then confirm deployment.";
+  heightInput.value = "20";
+  document.querySelector<HTMLSelectElement>("#drone-type")!.value = "normal";
+  commandDrawer.open = false;
+  commandStatus.textContent = `Click the map to deploy ${fleet.nextColor.name} immediately.`;
   refreshFleet();
 });
 document.querySelector<HTMLButtonElement>("#bulk-deploy")!.addEventListener("click", () => {
   cancelDeployment(); flyToFreeCameraOverview(); deploying = true; placementMode = "bulk";
+  cameraMode = "placement"; viewer.scene.screenSpaceCameraController.enableInputs = true;
   showPlacementControls(true);
   countInput.disabled = false; countInput.value = "10"; deploymentPanel.hidden = false; confirmDeployment.textContent = "Deploy batch here";
   deploymentStatus.textContent = "Choose a map location for the batch, then adjust number, height and spacing.";
@@ -372,6 +434,7 @@ document.querySelector<HTMLButtonElement>("#choose-destination")!.addEventListen
   if (!selectedIds.size) return;
   pendingIds = [...selectedIds]; pendingGroup = savedGroups.value;
   cancelDeployment(); flyToFreeCameraOverview(); deploying = true; placementMode = "command";
+  cameraMode = "placement"; viewer.scene.screenSpaceCameraController.enableInputs = true;
   showPlacementControls(true);
   countInput.disabled = true; countInput.value = String(pendingIds.length); deploymentPanel.hidden = false;
   confirmDeployment.textContent = "Send selected drones";
@@ -403,13 +466,20 @@ cameraHandler.setInputAction((event: { position: Cesium.Cartesian2 }) => {
   }
   if (!picked) {
     deploymentStatus.textContent = "Click a visible map surface; sky cannot be used as a starting point.";
+    commandStatus.textContent = "Click a visible map surface; sky cannot be used for deployment.";
     return;
   }
   pickedSurface = Cesium.Cartographic.fromCartesian(picked);
+  if (placementMode === "single") {
+    completeDeployment();
+    return;
+  }
   updatePreview();
+  if (quickPlacement && placementMode === "bulk") completeDeployment();
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
-confirmDeployment.addEventListener("click", () => {
-  if (!deploying || !pickedSurface || confirmDeployment.disabled) return;
+
+function completeDeployment(): void {
+  if (!deploying || !pickedSurface || (placementMode !== "single" && confirmDeployment.disabled)) return;
   fleet.checkpoint(placementMode === "command" ? "destination command" : "deployment");
   const center = { latitude: Cesium.Math.toDegrees(pickedSurface.latitude), longitude: Cesium.Math.toDegrees(pickedSurface.longitude), altitude: pickedSurface.height + heightInput.valueAsNumber };
   if (placementMode === "command") {
@@ -421,8 +491,9 @@ confirmDeployment.addEventListener("click", () => {
   const added = placementMode === "bulk" ? fleet.deployBulk(center, countInput.valueAsNumber, spacingInput.valueAsNumber, type) : [fleet.deploy(center, type)];
   drone = added[0]; selectedIds.clear(); for (const item of added) selectedIds.add(item.id);
   cancelDeployment(); selectDrone(drone.id);
-  commandStatus.textContent = `${added.length} drone(s) deployed. Select Control drone for individual flight or Choose destination for the selection.`;
-});
+  commandStatus.textContent = `${added.length} drone(s) deployed. Select Fly to pilot; the camera will keep the fleet framed.`;
+}
+confirmDeployment.addEventListener("click", completeDeployment);
 
 function selectDrone(id: string): void {
   flyToFreeCameraOverview();
@@ -457,6 +528,8 @@ async function loadWorld(): Promise<void> {
 if (token) {
   try {
     const tileset = await Cesium.createGooglePhotorealistic3DTileset();
+    tileset.maximumScreenSpaceError = 24;
+    tileset.dynamicScreenSpaceError = true;
     viewer.scene.primitives.add(tileset);
     viewer.scene.globe.show = false;
     status.textContent = "Google Photorealistic 3D Tiles connected.";
@@ -499,7 +572,7 @@ controlDroneButton.addEventListener("click", () => {
   if (!drone || deploying) return;
   if (controllingDrone) {
     flyToFreeCameraOverview();
-    commandStatus.textContent = "Drone hovering. Free camera active.";
+    commandStatus.textContent = "Drone hovering. Automatic fleet camera active.";
     return;
   }
   flyToFreeCameraOverview();
@@ -509,17 +582,282 @@ controlDroneButton.addEventListener("click", () => {
   viewer.scene.screenSpaceCameraController.enableInputs = false;
   controlDroneButton.textContent = "Release drone";
   controlDroneButton.setAttribute("aria-pressed", "true");
-  commandStatus.textContent = "PILOT MODE · WASD relative to drone heading · Q/E turns · Space/Shift up/down (R/F also works) · Esc releases. Mission canceled; trail preserved.";
+  commandStatus.textContent = "PILOT MODE · WASD follows the screen · Q/E turns · Space/Shift moves up/down · Esc releases.";
   viewer.canvas.focus();
 });
 
+function requireDrone(number?: number): DroneController {
+  const target = number ? fleet.drones.get(`drone_${number}`) : drone;
+  if (!target) throw new Error(number ? `Drone ${number} is not deployed.` : "Deploy or select a drone first.");
+  return target;
+}
+
+function setCommandMessage(message: string): void {
+  if (commandStatus.textContent !== message) commandStatus.textContent = message;
+  commandInput.placeholder = message;
+}
+
+function localOffset(target: DroneController, east: number, north: number): { latitude: number; longitude: number; altitude: number } {
+  return previewCoordinate({ x: east, y: north, z: 0 }, target.snapshot());
+}
+
+function runLocalMission(target: DroneController, mission: Parameters<DroneController["run"]>[0], label: string): void {
+  if (controllingDrone) flyToFreeCameraOverview();
+  fleet.checkpoint(label);
+  target.run(mission);
+  drone = target;
+  refreshFleet();
+}
+
+type AiObjective = {
+  type: string;
+  desired_units?: number;
+  target?: { point?: { x: number; y: number; z: number }; region_id?: string };
+};
+
+async function executeAiInstruction(instruction: string): Promise<void> {
+  commandInput.disabled = true;
+  setCommandMessage("AI is compiling and validating the mission…");
+  try {
+    const response = await fetch(`${runtimeApiBase}/api/mission-plans/compile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ utterance: instruction, selected_drone_id: drone?.id ?? null, start: false }),
+    });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    const payload = await response.json() as { result?: { status?: string; plan?: { objectives?: AiObjective[] }; clarification_question?: string; rejection_reason?: string; interpretation_summary?: string } };
+    const result = payload.result;
+    if (result?.status !== "READY" || !result.plan?.objectives?.length) {
+      throw new Error(result?.clarification_question ?? result?.rejection_reason ?? "The AI could not form a safe mission.");
+    }
+    let world: { regions?: { id: string; center: { x: number; y: number; z: number } }[] } | undefined;
+    const objectives = result.plan.objectives;
+    const members = [...fleet.drones.values()];
+    if (!members.length) throw new Error("Deploy a drone before assigning an AI mission.");
+    fleet.checkpoint("AI mission");
+    if (controllingDrone) flyToFreeCameraOverview();
+    let assigned = 0;
+    for (const objective of objectives) {
+      const count = Math.max(1, Math.min(members.length, objective.desired_units ?? 1));
+      const targets = [drone, ...members].filter((item, index, all): item is DroneController => Boolean(item) && all.indexOf(item) === index).slice(0, count);
+      let point = objective.target?.point;
+      if (!point && objective.target?.region_id) {
+        if (!world) {
+          const worldResponse = await fetch(`${runtimeApiBase}/api/world`);
+          if (!worldResponse.ok) throw new Error("Could not load the AI mission region.");
+          world = await worldResponse.json() as { regions?: { id: string; center: { x: number; y: number; z: number } }[] };
+        }
+        point = world.regions?.find(region => region.id.toLowerCase() === objective.target!.region_id!.toLowerCase())?.center;
+      }
+      for (const target of targets) {
+        const type = objective.type.toUpperCase();
+        if (type === "RETURN") {
+          target.run({ drone_id: target.id, mission: [{ action: "return_home", speed_mps: target.speedMph * 0.44704 }] });
+        } else if (type === "HOLD") {
+          target.stopCommand();
+        } else if (point) {
+          const destination = previewCoordinate(point, home);
+          const mission: MissionStep[] = [{ action: "goto", ...destination, speed_mps: target.speedMph * 0.44704 }];
+          if (["WATCH", "SEARCH"].includes(type)) mission.push({ action: "orbit", radius_m: 30, duration_s: 24 });
+          target.run({ drone_id: target.id, mission });
+        } else {
+          continue;
+        }
+        assigned++;
+      }
+    }
+    if (!assigned) throw new Error("The AI plan did not contain a location this map can fly to.");
+    refreshFleet();
+    setCommandMessage(`AI mission accepted · ${result.interpretation_summary || `${assigned} drone${assigned === 1 ? "" : "s"} assigned`}`);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "AI command failed.";
+    setCommandMessage(`${detail} · Common commands still work; type / to see them.`);
+  } finally {
+    commandInput.disabled = false;
+    commandInput.focus();
+  }
+}
+
+async function executeCommand(intent: CommandIntent): Promise<void> {
+  if (intent.type === "help") {
+    commandInput.value = "/";
+    renderCommandSuggestions();
+    setCommandMessage("Try “go to the Washington Monument, wait 5 seconds, then go back 50 meters”.");
+    return;
+  }
+  if (intent.type === "deploy") {
+    if (intent.count === 1) {
+      document.querySelector<HTMLButtonElement>("#deploy-drone")!.click();
+    } else {
+      document.querySelector<HTMLButtonElement>("#bulk-deploy")!.click();
+      countInput.value = String(intent.count);
+      quickPlacement = true;
+    }
+    document.querySelector<HTMLSelectElement>("#drone-type")!.value = intent.survey ? "survey" : "normal";
+    setCommandMessage(`Click the map to deploy ${intent.count === 1 ? "the drone" : `${intent.count} drones`} immediately.`);
+    return;
+  }
+  if (intent.type === "fly") {
+    const target = requireDrone(intent.droneNumber);
+    if (target !== drone) selectDrone(target.id);
+    if (!controllingDrone) controlDroneButton.click();
+    return;
+  }
+  if (intent.type === "release") {
+    if (controllingDrone) flyToFreeCameraOverview();
+    setCommandMessage("Manual control released · drone hovering.");
+    return;
+  }
+  if (intent.type === "select") {
+    const target = requireDrone(intent.droneNumber);
+    selectDrone(target.id);
+    setCommandMessage(`${target.id.replace("_", " ")} selected.`);
+    return;
+  }
+  if (intent.type === "speed") {
+    const target = requireDrone();
+    fleet.checkpoint("speed change");
+    target.speedMph = intent.mph;
+    refreshFleet();
+    setCommandMessage(`${target.id.replace("_", " ")} speed set to ${intent.mph} mph.`);
+    return;
+  }
+  if (intent.type === "return") {
+    const targets = intent.all ? [...fleet.drones.values()] : [requireDrone()];
+    if (!targets.length) throw new Error("Deploy a drone first.");
+    fleet.checkpoint("return command");
+    if (controllingDrone) flyToFreeCameraOverview();
+    for (const target of targets) target.run({ drone_id: target.id, mission: [{ action: "return_home", speed_mps: target.speedMph * 0.44704 }] });
+    setCommandMessage(`${targets.length === 1 ? targets[0].id.replace("_", " ") : "Fleet"} returning home.`);
+    return;
+  }
+  if (intent.type === "reset") {
+    if (intent.all) document.querySelector<HTMLButtonElement>("#reset-all")!.click();
+    else {
+      const target = requireDrone(); fleet.checkpoint("reset drone"); target.reset(); refreshFleet();
+      setCommandMessage(`${target.id.replace("_", " ")} reset to its home coordinate.`);
+    }
+    return;
+  }
+  if (intent.type === "goto") {
+    if (Math.abs(intent.latitude) > 90 || Math.abs(intent.longitude) > 180) throw new Error("Latitude or longitude is outside the valid range.");
+    const targets = intent.all ? [...fleet.drones.values()] : [requireDrone()];
+    if (!targets.length) throw new Error("Deploy a drone first.");
+    fleet.checkpoint("coordinate command");
+    if (controllingDrone) flyToFreeCameraOverview();
+    for (const target of targets) target.run({ drone_id: target.id, mission: [{ action: "goto", latitude: intent.latitude, longitude: intent.longitude, altitude: intent.altitude ?? target.snapshot().altitude, speed_mps: target.speedMph * 0.44704 }] });
+    setCommandMessage(`${targets.length === 1 ? targets[0].id.replace("_", " ") : "Fleet"} flying to ${intent.latitude.toFixed(5)}, ${intent.longitude.toFixed(5)}.`);
+    return;
+  }
+  if (intent.type === "move") {
+    const target = requireDrone();
+    const heading = target.horizontalFlightHeading ?? target.heading;
+    const forward = intent.direction === "forward" ? intent.meters : intent.direction === "back" ? -intent.meters : 0;
+    const right = intent.direction === "right" ? intent.meters : intent.direction === "left" ? -intent.meters : 0;
+    const destination = localOffset(target, Math.sin(heading) * forward + Math.cos(heading) * right, Math.cos(heading) * forward - Math.sin(heading) * right);
+    runLocalMission(target, { drone_id: target.id, mission: [{ action: "goto", ...destination, speed_mps: target.speedMph * 0.44704 }] }, "text movement");
+    setCommandMessage(`${target.id.replace("_", " ")} moving ${intent.direction} ${intent.meters} m.`);
+    return;
+  }
+  if (intent.type === "hover") {
+    const target = requireDrone();
+    runLocalMission(target, { drone_id: target.id, mission: [{ action: "hover", duration_s: intent.seconds }] }, "hover command");
+    setCommandMessage(`${target.id.replace("_", " ")} hovering for ${intent.seconds} seconds.`);
+    return;
+  }
+  if (intent.type === "orbit") {
+    const target = requireDrone();
+    runLocalMission(target, { drone_id: target.id, mission: [{ action: "orbit", radius_m: intent.radius, duration_s: intent.seconds }] }, "orbit command");
+    setCommandMessage(`${target.id.replace("_", " ")} orbiting at ${intent.radius} m for ${intent.seconds} seconds.`);
+    return;
+  }
+  if (intent.type === "landmark" || intent.type === "place" || intent.type === "turn") {
+    await executeCommandSequence([intent], intent.type === "turn" ? `turn ${intent.direction}` : `go to ${intent.type === "landmark" ? intent.name : intent.query}`);
+    return;
+  }
+  await executeAiInstruction(intent.instruction);
+}
+
+async function executeCommandSequence(intents: CommandIntent[], original: string): Promise<void> {
+  const resolvedIntents = await Promise.all(intents.map(async intent => {
+    if (intent.type !== "place") return intent;
+    if (!placeGeocoder) throw new Error(`“${intent.query}” is not in the built-in DC landmarks; add a Cesium ion token to enable place search.`);
+    setCommandMessage(`Finding ${intent.query}…`);
+    const results = await placeGeocoder.geocode(`${intent.query}, Washington, DC`, Cesium.GeocodeType.SEARCH);
+    const result = results[0];
+    if (!result) throw new Error(`Could not find “${intent.query}”.`);
+    const center = result.destination instanceof Cesium.Rectangle
+      ? Cesium.Rectangle.center(result.destination)
+      : Cesium.Cartographic.fromCartesian(result.destination);
+    return {
+      type: "landmark" as const,
+      name: result.displayName,
+      latitude: Cesium.Math.toDegrees(center.latitude),
+      // Aim beside the returned feature center so collision avoidance does not
+      // try to enter the landmark's building geometry.
+      longitude: Cesium.Math.toDegrees(center.longitude) + 0.00065,
+    };
+  }));
+  if (resolvedIntents.length === 1 && !isFlightSequenceIntent(resolvedIntents[0])) {
+    await executeCommand(resolvedIntents[0]);
+    return;
+  }
+  if (resolvedIntents.some(intent => intent.type === "ai")) {
+    await executeAiInstruction(original);
+    return;
+  }
+  if (!resolvedIntents.every(isFlightSequenceIntent)) throw new Error("Deployment and pilot-mode commands cannot be mixed into an automatic flight sequence.");
+  const target = requireDrone();
+  const steps = compileMissionSequence(
+    resolvedIntents,
+    target.snapshot(),
+    target.homeCoordinates,
+    target.horizontalFlightHeading ?? target.heading,
+    target.speedMph * 0.44704,
+  );
+  runLocalMission(target, { drone_id: target.id, mission: steps }, "text flight sequence");
+  const landmark = resolvedIntents.find((intent): intent is Extract<CommandIntent, { type: "landmark" }> => intent.type === "landmark");
+  setCommandMessage(`${target.id.replace("_", " ")} running ${steps.length}-step mission${landmark ? ` via ${landmark.name}` : ""}.`);
+}
+
+function renderCommandSuggestions(): void {
+  const query = commandInput.value.trim().toLowerCase();
+  if (!query.startsWith("/")) { commandSuggestions.hidden = true; return; }
+  const matches = COMMANDS.filter(item => item.command.startsWith(query.split(" ")[0]));
+  commandSuggestions.replaceChildren(...matches.map(item => {
+    const button = document.createElement("button");
+    button.type = "button"; button.className = "command-suggestion"; button.setAttribute("role", "option");
+    const command = document.createElement("code"); command.textContent = item.command;
+    const hint = document.createElement("small"); hint.textContent = item.hint;
+    button.append(command, hint);
+    button.addEventListener("click", () => { commandInput.value = `${item.command} `; commandSuggestions.hidden = true; commandInput.focus(); });
+    return button;
+  }));
+  commandSuggestions.hidden = matches.length === 0;
+}
+
+commandInput.addEventListener("input", renderCommandSuggestions);
+commandInput.addEventListener("keydown", event => {
+  if (event.key === "Escape") { commandSuggestions.hidden = true; commandInput.blur(); }
+});
+commandForm.addEventListener("submit", event => {
+  event.preventDefault();
+  const value = commandInput.value;
+  commandInput.value = "";
+  commandSuggestions.hidden = true;
+  try { void executeCommandSequence(parseCommandSequence(value), value).catch(error => setCommandMessage(error instanceof Error ? error.message : "Command failed.")); }
+  catch (error) { setCommandMessage(error instanceof Error ? error.message : "Command failed."); }
+});
+
 window.addEventListener("keydown", (event) => {
+  if (event.key === "/" && !(event.target instanceof HTMLElement && event.target.closest('textarea, input, select, [contenteditable="true"]'))) {
+    event.preventDefault(); commandInput.value = "/"; commandInput.focus(); renderCommandSuggestions(); return;
+  }
   if (event.target instanceof HTMLElement && event.target.closest('textarea, input, select, [contenteditable="true"]')) return;
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (deploying && event.code === "Escape") { cancelDeployment(); return; }
   if (controllingDrone && event.code === "Escape") { flyToFreeCameraOverview(); return; }
-  if (["KeyW", "KeyA", "KeyS", "KeyD", "KeyR", "KeyF"].includes(event.code) || (controllingDrone && ["Space", "ShiftLeft", "ShiftRight", "KeyQ", "KeyE"].includes(event.code))) {
-    if (cameraMode !== "free") flyToFreeCameraOverview();
+  if (controllingDrone && ["KeyW", "KeyA", "KeyS", "KeyD", "KeyR", "KeyF", "Space", "ShiftLeft", "ShiftRight", "KeyQ", "KeyE"].includes(event.code)) {
     viewer.camera.cancelFlight();
     activeCameraKeys.add(event.code);
     event.preventDefault();
@@ -539,35 +877,67 @@ function updateFreeCamera(deltaSeconds: number): void {
     const forward = axis("KeyW", "KeyS");
     const right = axis("KeyD", "KeyA");
     const up = Number(activeCameraKeys.has("Space") || activeCameraKeys.has("KeyR")) - Number(activeCameraKeys.has("ShiftLeft") || activeCameraKeys.has("ShiftRight") || activeCameraKeys.has("KeyF"));
-    const east = forward * Math.sin(pilotView.heading) + right * Math.cos(pilotView.heading);
-    const north = forward * Math.cos(pilotView.heading) - right * Math.sin(pilotView.heading);
+    const movement = screenRelativeMovement(drone.cameraPosition, viewer.camera.directionWC, viewer.camera.rightWC, forward, right);
+    const { east, north } = movement;
     if (fleet.manualBatch.length) fleet.moveBatch(east, north, up, deltaSeconds, pilotView.heading);
     else drone.moveManually(east, north, up, deltaSeconds, pilotView.heading);
     const position = drone.snapshot();
-    let center = Cesium.Cartesian3.fromDegrees(position.longitude, position.latitude, position.altitude);
-    let batchRange = 8;
-    if (fleet.manualBatch.length > 1 && pilotCameraMode !== "first") {
-      const bounds = Cesium.BoundingSphere.fromPoints(fleet.manualBatch.map(member => { const p = member.snapshot(); return Cesium.Cartesian3.fromDegrees(p.longitude, p.latitude, p.altitude); }));
-      center = bounds.center; batchRange = Math.max(65, bounds.radius * 3 + 30);
-    }
+    const center = Cesium.Cartesian3.fromDegrees(position.longitude, position.latitude, position.altitude);
     if (pilotCameraMode === "first") {
       // Fixed mount just above the prism, looking forward along its heading.
       const mount = Cesium.Matrix4.multiplyByPoint(Cesium.Transforms.eastNorthUpToFixedFrame(center), new Cesium.Cartesian3(0, 0, 3), new Cesium.Cartesian3());
       viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
       viewer.camera.setView({ destination: mount, orientation: { heading: pilotView.heading, pitch: 0, roll: 0 } });
-    } else {
-      viewer.camera.lookAt(center, new Cesium.HeadingPitchRange(pilotView.heading, Cesium.Math.toRadians(-18), batchRange));
     }
     return;
   }
-  if (cameraMode !== "free" || activeCameraKeys.size === 0) return;
-  const distance = Math.max(viewer.camera.positionCartographic.height * 0.35, 20) * deltaSeconds;
-  if (activeCameraKeys.has("KeyW")) viewer.camera.moveForward(distance * 3);
-  if (activeCameraKeys.has("KeyS")) viewer.camera.moveBackward(distance * 3);
-  if (activeCameraKeys.has("KeyA")) viewer.camera.moveLeft(distance * 3);
-  if (activeCameraKeys.has("KeyD")) viewer.camera.moveRight(distance * 3);
-  if (activeCameraKeys.has("KeyR")) viewer.camera.moveUp(distance * 3);
-  if (activeCameraKeys.has("KeyF")) viewer.camera.moveDown(distance * 3);
+}
+
+let automaticCenter: Cesium.Cartesian3 | undefined;
+let automaticRange = orbitCamera.range;
+let stillSeconds = 0;
+const previousSubjects = new Map<string, Cesium.Cartesian3>();
+
+function updateAutomaticCamera(deltaSeconds: number): void {
+  if (runtimeMode || cameraMode !== "auto" || deploying || (controllingDrone && pilotCameraMode === "first")) return;
+  const subjects = [...fleet.drones.values()].map(member => ({ id: member.id, position: member.cameraPosition }));
+  if (!subjects.length) {
+    orbitCamera.heading += deltaSeconds * 0.08;
+    applyOrbitCamera();
+    automaticCenter = undefined;
+    previousSubjects.clear();
+    return;
+  }
+
+  let movement = 0;
+  let movingId: string | undefined;
+  for (const subject of subjects) {
+    const previous = previousSubjects.get(subject.id);
+    if (previous) {
+      const distance = Cesium.Cartesian3.distance(previous, subject.position);
+      if (distance > movement) { movement = distance; movingId = subject.id; }
+    }
+    previousSubjects.set(subject.id, Cesium.Cartesian3.clone(subject.position));
+  }
+  for (const id of previousSubjects.keys()) {
+    if (!subjects.some(subject => subject.id === id)) previousSubjects.delete(id);
+  }
+  stillSeconds = movement < 0.04 ? stillSeconds + deltaSeconds : 0;
+  const headingDrone = controllingDrone ? drone : movingId ? fleet.drones.get(movingId) : undefined;
+  const flightHeading = controllingDrone ? headingDrone?.heading : headingDrone?.horizontalFlightHeading;
+  if (flightHeading !== undefined && (controllingDrone || movement >= 0.04)) {
+    orbitCamera.heading = blendHeading(orbitCamera.heading, flightHeading, 1 - Math.exp(-4.5 * deltaSeconds));
+  } else if (stillSeconds > 0.65) {
+    orbitCamera.heading += deltaSeconds * 0.065;
+  }
+
+  const frame = fleetCameraFrame(subjects.map(subject => subject.position))!;
+  const blend = 1 - Math.exp(-2.8 * deltaSeconds);
+  automaticCenter = automaticCenter
+    ? Cesium.Cartesian3.lerp(automaticCenter, frame.center, blend, automaticCenter)
+    : Cesium.Cartesian3.clone(frame.center);
+  automaticRange = Cesium.Math.lerp(automaticRange, frame.range, blend);
+  viewer.camera.lookAt(automaticCenter, new Cesium.HeadingPitchRange(orbitCamera.heading, Cesium.Math.toRadians(-24), automaticRange));
 }
 
 let previousTime = Cesium.JulianDate.clone(viewer.clock.currentTime);
@@ -582,27 +952,10 @@ undoButton.addEventListener("click", () => {
   refreshFleet(); commandStatus.textContent = label ? `Undid ${label}. Drones restored at rest.` : "Nothing to undo.";
 });
 pauseButton.addEventListener("click", () => { fleet.togglePause(performance.now() / 1000); refreshFleet(); });
-let overviewTime = 0;
 let surveyUpdateIndex = 0;
-function updateOverview(now: number): void {
-  undoButton.disabled = !fleet.undoLabel;
-  undoButton.textContent = fleet.undoLabel ? `Undo ${fleet.undoLabel}` : "Undo last action";
-  pauseButton.disabled = !fleet.replay.running;
-  pauseButton.textContent = fleet.paused ? "Resume playback" : "Pause playback";
-  if (now - overviewTime < 250) return;
-  overviewTime = now;
-  const container = document.querySelector<HTMLDivElement>("#fleet-overview")!;
-  container.replaceChildren();
-  for (const member of fleet.drones.values()) {
-    const card = document.createElement("div"); card.className = "fleet-card"; card.style.borderLeftColor = member.colorHex;
-    const title = document.createElement("strong"); title.textContent = `${member.id.replace("_", " ")} · ${member.droneType}`;
-    const detail = document.createElement("p");
-    const route = member.routeLength;
-    detail.textContent = `${member.collisionBlocked ? "No safe route" : member.avoidanceActive ? "Auto-avoiding obstacle" : member.snapshot().state} · ${member.speedMph} mph · ${route.toFixed(0)} m route · ${(route / (member.speedMph * 0.44704)).toFixed(1)} s estimated${member.droneType === "survey" ? ` · ${member.coverageCount} coverage patches` : ""}`;
-    card.append(title, detail); container.append(card);
-  }
-}
 let previousCameraTime = performance.now();
+let pilotStatusTime = 0;
+let telemetryTime = 0;
 viewer.clock.onTick.addEventListener((clock) => {
   const deltaSeconds = Math.max(0, Math.min(0.1, Cesium.JulianDate.secondsDifference(clock.currentTime, previousTime)));
   previousTime = Cesium.JulianDate.clone(clock.currentTime, previousTime);
@@ -610,27 +963,23 @@ viewer.clock.onTick.addEventListener((clock) => {
   const cameraTime = performance.now();
   const wasPlaying = fleet.replay.running;
   fleet.updateReplay(cameraTime / 1000);
-  replayTime.textContent = `Elapsed: ${fleet.replay.elapsed.toFixed(2)} s`;
-  if (fleet.replay.total) {
-    replayStatus.textContent = `${fleet.replay.arrived} / ${fleet.replay.total} arrived${fleet.blockedCount ? ` · ${fleet.blockedCount} blocked by obstacles` : ""}${fleet.paused ? " · Paused" : fleet.replay.running ? " · Playing at assigned speeds" : fleet.blockedCount ? " · Playback stopped" : " · All paths complete"}`;
-  }
   if (wasPlaying && !fleet.replay.running) refreshFleet();
-  updateFreeCamera(Math.min(0.1, Math.max(0, (cameraTime - previousCameraTime) / 1000)));
+  const cameraDelta = Math.min(0.1, Math.max(0, (cameraTime - previousCameraTime) / 1000));
+  updateFreeCamera(cameraDelta);
+  updateAutomaticCamera(cameraDelta);
   previousCameraTime = cameraTime;
-  updateOverview(cameraTime);
-  const surveys = [...fleet.drones.values()].filter(member => member.droneType === "survey");
-  if (surveys.length) surveys[surveyUpdateIndex++ % surveys.length].updateSurvey(cameraTime);
-  if (runtimeMode) return;
-  const snapshot = drone?.snapshot();
-  if (controllingDrone) {
-    commandStatus.textContent = drone?.collisionBlocked
+  if (!runtimeMode && cameraTime - telemetryTime >= 100) {
+    telemetryTime = cameraTime;
+    updateTelemetry();
+  }
+  if (!runtimeMode && controllingDrone && cameraTime - pilotStatusTime >= 250) {
+    pilotStatusTime = cameraTime;
+    setCommandMessage(drone?.collisionBlocked
       ? "No safe path found. Steer away or climb to continue."
       : drone?.avoidanceActive
         ? "Obstacle detected: autopilot is routing around it."
-      : collisionWarning(viewer) ?? "Pilot control active. Esc releases; WASD moves; R/F changes height.";
+        : collisionWarning(viewer) ?? "Pilot active · WASD move · Q/E turn · R/F altitude · Esc release");
   }
-  if (!snapshot) { stateElement.innerHTML = "<dt>Fleet</dt><dd>No drones deployed</dd>"; return; }
-  stateElement.innerHTML = [
-    ["State", snapshot.state], ["Position", `${snapshot.latitude.toFixed(5)}, ${snapshot.longitude.toFixed(5)}`], ["Altitude", `${snapshot.altitude.toFixed(0)} m`], ["Step", snapshot.totalSteps ? `${snapshot.currentStep} / ${snapshot.totalSteps}` : "—"],
-  ].map(([label, value]) => `<dt>${label}</dt><dd>${value}</dd>`).join("");
+  const surveys = [...fleet.drones.values()].filter(member => member.droneType === "survey");
+  if (surveys.length) surveys[surveyUpdateIndex++ % surveys.length].updateSurvey(cameraTime);
 });

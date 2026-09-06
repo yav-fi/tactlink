@@ -48,7 +48,34 @@
           </div>
           <p class="hint">Click a drone for its task, battery, localization, peer, and capability details. Solid links are usable; red dashed links are unavailable.</p>
         </section>
-        <div class="local-only">
+        <div class="local-only" id="local-command-dock">
+        <div id="command-suggestions" class="command-suggestions" role="listbox" aria-label="Available commands" hidden></div>
+        <form id="command-form" class="command-form">
+          <span class="command-prompt" aria-hidden="true">›</span>
+          <input id="command-input" type="text" autocomplete="off" spellcheck="false" aria-label="Drone command" aria-controls="command-suggestions" placeholder="Tell the drones what to do · type / for commands" />
+          <span id="command-status" class="visually-hidden" role="status">Ready · type / for commands</span>
+        </form>
+        <dl class="flight-hud" aria-label="Selected drone telemetry">
+          <div><dt>Drone</dt><dd id="hud-drone">None</dd></div>
+          <div><dt>Lat</dt><dd id="hud-latitude">—</dd></div>
+          <div><dt>Long</dt><dd id="hud-longitude">—</dd></div>
+          <div><dt>Alt</dt><dd id="hud-altitude">—</dd></div>
+          <div><dt>Speed</dt><dd id="hud-speed">—</dd></div>
+          <div><dt>State</dt><dd id="hud-state">Idle</dd></div>
+          <div><dt>Fleet</dt><dd id="hud-fleet">0</dd></div>
+        </dl>
+        <div class="dock-row" hidden>
+          <button id="deploy-drone" type="button">+ Deploy</button>
+          <select id="selected-drone" aria-label="Selected drone" disabled><option>No drones deployed</option></select>
+          <div id="rotation-controls" class="rotation-controls" hidden>
+            <button id="rotate-left" type="button" aria-label="Rotate drone left" title="Rotate left (Q)">↶</button>
+            <button id="rotate-right" type="button" aria-label="Rotate drone right" title="Rotate right (E)">↷</button>
+          </div>
+          <button id="control-drone" type="button" aria-pressed="false" disabled>Fly</button>
+          <details id="command-drawer" class="command-drawer">
+            <summary aria-label="More commands">More</summary>
+            <div class="command-drawer-body">
+              <a class="dock-runtime-link" href="?mode=runtime">Open backend runtime</a>
         <button id="undo-action" class="secondary" type="button" disabled>Undo last action</button>
         <div class="panel-tabs" role="tablist" aria-label="Drone controls">
           <button id="tab-drone" type="button" role="tab" aria-selected="true" aria-controls="panel-drone">Individual drone</button>
@@ -56,16 +83,10 @@
         </div>
         <div id="panel-drone" role="tabpanel" aria-labelledby="tab-drone">
         <section>
-          <h2>Deploy &amp; select</h2>
-          <div class="actions">
-            <button id="deploy-drone" type="button">Deploy a new drone</button>
-          </div>
-          <label for="selected-drone">Selected drone</label>
-          <select id="selected-drone" disabled><option>No drones deployed</option></select>
           <label for="drone-speed">Selected drone speed (mph)</label>
           <input id="drone-speed" type="number" min="0.1" step="any" value="60" disabled />
           <p id="speed-status" class="hint" role="status">Default: 60 mph · 26.82 m/s</p>
-          <div class="actions">            <button id="control-drone" type="button" aria-pressed="false" disabled>Control drone</button>            <button id="reset-mission" type="button" class="secondary" disabled>Reset selected drone</button></div>
+          <button id="reset-mission" type="button" class="secondary" disabled>Reset selected drone</button>
         </section>
         <details class="advanced-controls">
           <summary>Advanced · mission JSON</summary>
@@ -105,7 +126,7 @@
             <div id="drone-type-fields">
             <label for="drone-type">Drone type</label>
             <select id="drone-type"><option value="normal">Normal</option><option value="survey">Survey · camera cone</option></select>
-            <p class="hint">Survey cones extend to sampled map surfaces. Missing surfaces create no coverage; unmatched rays display up to 10 km. Both types show a collision indicator when stopped by an obstacle.</p>
+            <p class="hint">Survey cones extend to sampled map surfaces. Both types automatically route around detected obstacles when a safe local path exists.</p>
             </div>
             <p id="deployment-status" class="hint" role="status">Click a starting point on the map.</p>
             <label for="deployment-height">Height above picked surface (m)</label>
@@ -120,18 +141,17 @@
             </div>
           </div>
         <section>
-          <h2>Camera</h2>
-          <div class="actions">
-            <button id="free-camera" type="button" class="secondary">Free camera</button>
+          <h2>View</h2>
+          <div class="actions" hidden>
+            <button id="free-camera" type="button" class="secondary">Auto frame</button>
             <button id="orbit-monument" type="button" class="secondary">Orbit monument</button>
           </div>
           <label for="pilot-camera">Drone camera</label>
           <select id="pilot-camera">
-            <option value="third">Third-person · fixed</option>
+            <option value="third">Automatic fleet camera</option>
             <option value="first">First-person · fixed</option>
           </select>
-          <p class="hint">Free camera releases pilot control. Attached views follow the controlled drone or batch.</p>
-          <p id="command-status" class="hint">Commands execute locally and deterministically.</p>
+          <p class="hint">The automatic camera frames every drone and circles still subjects.</p>
         </section>
         <section>
           <h2>Fleet playback</h2>
@@ -149,18 +169,8 @@
           <p class="hint">Survey effect fades with distance: 100% within 100 m, 60% to 250 m, 30% to 500 m, then 12%. Shading joins sampled surface hits; small obstacles may be missed. Up to 500 triangles per drone.</p>
           <div id="fleet-overview" aria-label="Fleet overview"></div>
         </section>
-        </div>
-        <section>
-          <h2>Selected drone details</h2>
-          <dl id="drone-state" class="state"></dl>
-        </section>
-        <details class="advanced-controls local-only"><summary>Keyboard &amp; mouse controls</summary><p class="hint">WASD moves; R/F changes height. When piloting, Q/E turns and Esc releases. In free camera, Ctrl + drag rotates. Orbit monument: drag to circle, scroll to zoom.</p></details>
-        <!-- Retained because main's flight-preview integration binds these IDs.
-             Hidden to preserve the current local interface. -->
-        <div hidden>
-          <textarea id="flight-text" aria-label="Flight instruction"></textarea>
-          <button id="preview-flight" type="button">Preview text path</button>
-          <p id="preview-status" role="status"></p>
+            </div>
+          </details>
         </div>
       </aside>
     </main>

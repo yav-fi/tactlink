@@ -97,6 +97,7 @@ def test_multi_objective_instruction_compiles_into_one_plan() -> None:
     assert plan.constraints[0].value == 0.25
     assert "Return exactly one JSON object" in str(completion.calls[0]["system_message"])
     assert completion.calls[0]["temperature"] == 0.0
+    assert completion.calls[0]["n_predict"] == 640
     assert render_plan(plan).startswith("MISSION PLAN")
 
 

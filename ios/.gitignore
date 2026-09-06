@@ -1,0 +1,11 @@
+.DS_Store
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+__pycache__/
+*.pyc
+
+# Archived app documentation screenshot.
+!docs/demo.png

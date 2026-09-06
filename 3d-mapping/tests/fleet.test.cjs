@@ -18,7 +18,84 @@ function loadSource(name) {
   return module.exports;
 }
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
+const { blendHeading, fleetCameraFrame, screenRelativeMovement } = loadSource("cinematic-camera");
+const { parseCommandInput, parseCommandSequence } = loadSource("command-console");
+const { compileMissionSequence } = loadSource("mission-sequence");
+const { resolveLandmark } = loadSource("landmarks");
+const { MOTION_TRACE_LIFETIME_MS, motionTraceAlpha } = loadSource("motion-trace");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
+
+test("command bar understands slash commands and common plain English", () => {
+  assert.deepEqual(parseCommandInput("/deploy 4 survey"), { type: "deploy", count: 4, survey: true });
+  assert.deepEqual(parseCommandInput("fly drone 2"), { type: "fly", droneNumber: 2 });
+  assert.deepEqual(parseCommandInput("move forward 75 meters"), { type: "move", direction: "forward", meters: 75 });
+  assert.deepEqual(parseCommandInput("/goto 38.8895, -77.0353, 120"), { type: "goto", latitude: 38.8895, longitude: -77.0353, altitude: 120, all: false });
+  assert.deepEqual(parseCommandInput("return the whole fleet home"), { type: "return", all: true });
+  assert.deepEqual(parseCommandInput("inspect the monuments with two drones"), { type: "ai", instruction: "inspect the monuments with two drones" });
+});
+
+test("named DC places resolve to safe real-world approach coordinates", () => {
+  const monument = resolveLandmark("the Washington Monument");
+  assert.equal(monument.name, "Washington Monument");
+  assert(Math.abs(monument.latitude - 38.8895) < 0.001);
+  assert.notEqual(monument.longitude, -77.0353, "approach point should not be inside the monument");
+  assert.deepEqual(parseCommandInput("go to the Washington Monument"), {
+    type: "landmark", name: "Washington Monument", latitude: monument.latitude, longitude: monument.longitude,
+  });
+  assert.deepEqual(parseCommandInput("go to the National Gallery of Art"), { type: "place", query: "the national gallery of art" });
+});
+
+test("plain text chains place, wait, relative movement, and return into one mission", () => {
+  const intents = parseCommandSequence("go to the Washington Monument, wait 5 seconds, then go forward 40 meters and then return home");
+  assert.deepEqual(intents.map(intent => intent.type), ["landmark", "hover", "move", "return"]);
+  const start = { latitude: 38.889, longitude: -77.045, altitude: 85 };
+  const steps = compileMissionSequence(intents, start, home, 0, 12);
+  assert.deepEqual(steps.map(step => step.action), ["goto", "hover", "goto", "return_home"]);
+  assert.equal(steps[1].duration_s, 5);
+  assert.equal(steps[0].latitude, resolveLandmark("Washington Monument").latitude);
+  assert(Cesium.Cartesian3.distance(
+    Cesium.Cartesian3.fromDegrees(steps[0].longitude, steps[0].latitude, steps[0].altitude),
+    Cesium.Cartesian3.fromDegrees(steps[2].longitude, steps[2].latitude, steps[2].altitude),
+  ) > 39);
+  assert.deepEqual(parseCommandSequence("go forward 10 and wait 5 seconds and go back 10").map(intent => intent.type), ["move", "hover", "move"]);
+});
+
+test("cinematic camera framing expands to keep the whole fleet visible", () => {
+  const center = Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, home.altitude);
+  const frame = Cesium.Transforms.eastNorthUpToFixedFrame(center);
+  const near = Cesium.Matrix4.multiplyByPoint(frame, new Cesium.Cartesian3(-50, 0, 0), new Cesium.Cartesian3());
+  const far = Cesium.Matrix4.multiplyByPoint(frame, new Cesium.Cartesian3(50, 0, 0), new Cesium.Cartesian3());
+  const single = fleetCameraFrame([center]);
+  const fleet = fleetCameraFrame([near, far]);
+  assert.equal(fleetCameraFrame([]), undefined);
+  assert.equal(single.range, 32);
+  assert(fleet.range > single.range);
+  assert(Cesium.Cartesian3.distance(fleet.center, center) < 0.01);
+});
+
+test("WASD movement follows the camera's screen axes", () => {
+  const position = Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, home.altitude);
+  const frame = Cesium.Transforms.eastNorthUpToFixedFrame(position);
+  const east = Cesium.Matrix4.multiplyByPointAsVector(frame, Cesium.Cartesian3.UNIT_X, new Cesium.Cartesian3());
+  const north = Cesium.Matrix4.multiplyByPointAsVector(frame, Cesium.Cartesian3.UNIT_Y, new Cesium.Cartesian3());
+  const forward = screenRelativeMovement(position, north, east, 1, 0);
+  const right = screenRelativeMovement(position, north, east, 0, 1);
+  assert(Math.abs(forward.east) < 1e-9 && Math.abs(forward.north - 1) < 1e-9);
+  assert(Math.abs(right.east - 1) < 1e-9 && Math.abs(right.north) < 1e-9);
+});
+
+test("cinematic heading takes the shortest turn behind a flying drone", () => {
+  const almostLeft = Cesium.Math.toRadians(179);
+  const almostRight = Cesium.Math.toRadians(-179);
+  const blended = blendHeading(almostLeft, almostRight, 0.5);
+  assert(Math.abs(Cesium.Math.toDegrees(blended) - 180) < 0.001);
+});
+
+test("motion trace fades quickly to transparent", () => {
+  assert.equal(motionTraceAlpha(0), 0.72);
+  assert(motionTraceAlpha(MOTION_TRACE_LIFETIME_MS / 2) < 0.3);
+  assert.equal(motionTraceAlpha(MOTION_TRACE_LIFETIME_MS), 0);
+});
 
 test("first manual-flight undo keeps hidden render geometry at valid geographic positions", () => {
   for (const type of ["normal", "survey"]) {
@@ -355,7 +432,7 @@ test("batch control shares speed and movement, releases markers and resumes pres
   const [markerId, markerIds] = [...fleet.batchMarkers][0];
   assert.deepEqual(markerIds, ids);
   assert(entities.getById(markerId).point);
-  assert(members.every(d => entities.getById(`${d.id}_release_1`).box));
+  assert(members.every(d => entities.getById(`${d.id}_release_1`).label));
   const paths = members.map(d => trail(d).map(p => Cesium.Cartesian3.clone(p)));
   const positions = members.map(position);
   fleet.releaseBatch(); // Releasing twice must not duplicate markers.
@@ -373,7 +450,7 @@ test("batch control shares speed and movement, releases markers and resumes pres
   });
   fleet.releaseBatch();
   assert.equal(fleet.batchMarkers.size, 2);
-  assert(members.every(d => entities.getById(`${d.id}_release_2`).box));
+  assert(members.every(d => entities.getById(`${d.id}_release_2`).label));
   fleet.takeBatch(ids, 60);
   fleet.clear();
   assert.equal(fleet.manualBatch.length, 0);
@@ -440,8 +517,8 @@ test("named groups launch together, share color and actually arrive at separate 
     assert(Math.abs(state.longitude - slots[i].longitude) < 1e-9);
     assert(Math.abs(state.latitude - slots[i].latitude) < 1e-9);
     assert.equal(state.state, "HOVERING");
-    const originColor = entities.getById(`${batch[i].id}_origin`).box.material.color.getValue();
-    assert.equal(originColor.withAlpha(1).toCssHexString(), batch[i].colorHex);
+    const originColor = entities.getById(`${batch[i].id}_origin`).label.fillColor.getValue();
+    assert.equal(originColor.toCssHexString(), batch[i].colorHex);
   }
   assert.deepEqual(batch[9].snapshot(), outsider);
   // An ad-hoc selection also gets one color and starts from its real current positions.
@@ -580,7 +657,7 @@ test("empty startup, unique drone IDs and eight-color wraparound", () => {
   assert.equal(fleet.drones.size, 9);
 });
 
-test("independent movement, release prisms, preserved routes and full cleanup", () => {
+test("independent movement, label-only releases, preserved routes and full cleanup", () => {
   const entities = new Cesium.EntityCollection();
   const fleet = new Fleet({ entities });
   const unrelated = entities.add({ id: "unrelated-map-marker" });
@@ -592,9 +669,10 @@ test("independent movement, release prisms, preserved routes and full cleanup", 
   first.setManualControl(false);
   assert.deepEqual(second.snapshot(), secondStart);
   const release = entities.getById(`${first.id}_release_1`);
-  assert(release.box);
+  assert(release.label);
+  assert.equal(release.label.text.getValue(), "RELEASE 1");
+  assert.equal(release.box, undefined);
   assert.equal(release.ellipsoid, undefined);
-  assert(Cesium.Cartesian3.equals(release.box.dimensions.getValue(), new Cesium.Cartesian3(16, 10, 4)));
   const trail = entities.getById(`${first.id}_trail`);
   const points = trail.polyline.positions.getValue().slice();
   first.setManualControl(true);
