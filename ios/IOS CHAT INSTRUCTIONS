@@ -1,0 +1,42 @@
+Complete the existing iPhone-to-Python drone-control integration.
+
+Goal:
+Three iPhones report their positions, facing directions, and locally recognized hand gestures. The Python visualizer displays all three as operator markers alongside a simulated drone. Only the nearest operator’s gestures control the drone.
+
+First inspect the current code and docs/phone-gestures-REMAINING.md. Verify what is already implemented; preserve existing work.
+
+Relevant files:
+- ios/SignalMap/RoomBridge.swift
+- ios/SignalMap/RoomSession.swift
+- ios/SignalMap/HeadingSource.swift
+- src/phone_feed.py
+- src/operator_gestures.py
+- src/operators.py
+- src/main.py
+- config/gesture_actions.json
+- scripts/mock_phone_feed.py
+
+Known gap:
+RoomBridge currently sends gesture: "None". Replace that placeholder with actual on-device camera recognition.
+
+Tasks:
+1. Build and verify the existing iOS position/heading bridge on a Mac.
+2. Add camera-based hand recognition on each iPhone, including camera permission, lifecycle handling, and a visible recognized-gesture/confidence indicator.
+3. Send gesture labels compatible with config/gesture_actions.json through the existing UDP protocol. Send "None" when tracking is lost or confidence is insufficient.
+4. Preserve independent per-operator gesture timing and nearest-operator control selection.
+5. Verify camera mirroring and coordinate conventions. Define forward relative to the operator’s facing.
+6. Support the two-finger left/right dash and three-finger forward gestures. These use geometric finger information in the Python webcam implementation; a canned gesture label alone does not reproduce them. Explicitly implement equivalent phone detection or extend the protocol and receiver.
+7. Add focused tests, then verify with three real phones.
+
+Acceptance:
+- Three distinct operator markers follow the correct phones.
+- Facing arrows match physical orientation.
+- Takeoff, land, halt, orbit, return-home, left/right dash, and forward work.
+- Noncontrolling operators cannot move the drone.
+- Control transfers correctly as the nearest operator changes.
+- Lost camera/network tracking does not leave stale gesture commands active.
+
+Keep this simulation-only. Do not add real-aircraft control.
+Do not replace the architecture or modify the separate planner/world-map integration unnecessarily.
+Do not push until requested.
+Report what was tested with mocks versus real devices, and any remaining blockers.
