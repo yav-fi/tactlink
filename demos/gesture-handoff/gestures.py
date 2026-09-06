@@ -17,16 +17,18 @@ from dataclasses import dataclass
 
 # Canned MediaPipe gesture name -> demo command (the ones the model does well).
 ACTIONS = {
-    "Thumb_Up": "takeoff",     # arm + take off; again while flying = climb a step
-    "Thumb_Down": "land",      # descend + disarm
-    "Open_Palm": "halt",       # cancel the routine, hover in place
-    "Pointing_Up": "orbit",    # circle the controlling operator (toggle)
-    "ILoveYou": "return",      # fly back to the controlling operator
+    "Thumb_Up": "takeoff",         # arm + take off; again while flying = climb a step
+    "Thumb_Down": "land",          # descend + disarm
+    "Open_Palm": "halt",           # cancel the routine, hover in place
+    "Pointing_Up": "orbit",        # circle the controlling operator (toggle)
+    "ILoveYou": "return",          # fly back to the controlling operator
+    "Closed_Fist": "handoff_random",  # hand off the drone to a random operator
 }
 
 HOLD_SEC = 0.40
 RELEASE_SEC = 0.25
 GAP_SEC = 0.5             # a recognizer dropout shorter than this does not break a hold
+HOLDS = {"Closed_Fist": 0.7}   # per-gesture hold overrides
 
 
 class GestureGate:
@@ -38,7 +40,7 @@ class GestureGate:
         self.hold = hold
         self.release = release
         self.gap = gap
-        self.holds = holds or {}
+        self.holds = HOLDS if holds is None else holds
         self._held = "None"
         self._since = 0.0
         self._seen = 0.0
@@ -100,9 +102,9 @@ def hand_from_landmarks(pts) -> Hand:
     w = pts[0]
 
     def ext(tip, pip):
-        return _d(pts[tip], w) > _d(pts[pip], w) * 1.02
+        return _d(pts[tip], w) > _d(pts[pip], w)      # tip farther from wrist than the joint
 
-    thumb = _d(pts[4], w) > _d(pts[2], w) * 1.05
+    thumb = _d(pts[4], w) > _d(pts[2], w)
     fingers = (thumb, ext(8, 6), ext(12, 10), ext(16, 14), ext(20, 18))
 
     dx = pts[8][0] - pts[5][0]
@@ -117,33 +119,28 @@ def hand_from_landmarks(pts) -> Hand:
 
 # --- geometric held poses ----------------------------------------------
 
-_POSE_HOLD = {"handoff_random": 1.0, "dash_forward": 0.55,
-              "dash_east": 0.5, "dash_west": 0.5}
-_POSE_LABEL = {"handoff_random": "hand off (2 fingers up)",
-               "dash_forward": "dash forward (3 fingers)",
+_POSE_HOLD = {"dash_forward": 0.55, "dash_east": 0.5, "dash_west": 0.5}
+_POSE_LABEL = {"dash_forward": "dash forward (3 fingers)",
                "dash_east": "dash right", "dash_west": "dash left"}
 _SIDE_DX = 0.45
+# canned gestures that ARE a command, so they should not also be read as a pose
+_CANNED_COMMANDS = {"Open_Palm", "Thumb_Up", "Thumb_Down", "Closed_Fist", "ILoveYou"}
 
 
 def classify_pose(hand: Hand | None, canned: str = "None") -> str | None:
-    """Which held-pose command the hand is making, or None. ``canned`` lets a
-    MediaPipe "Victory" also count as the two-finger hand-off pose."""
-    if canned == "Victory":
-        return "handoff_random"
+    """Which held-pose command the hand is making, or None. Three-ish fingers up
+    = dash forward; index held sideways = dash left/right."""
+    if canned in _CANNED_COMMANDS:
+        return None
     if hand is None or not hand.present:
         return None
-    idx, mid, rng, pnk = hand.fingers[1:]
+    up = hand.up_count
     dx, dy = hand.point_dir
     sideways = abs(dx) >= _SIDE_DX and abs(dx) >= abs(dy) * 1.2
 
-    if idx and mid and rng and not pnk:              # three fingers
+    if up >= 3:                                      # three (or four) fingers up
         return "dash_forward"
-    if idx and mid and not rng and not pnk:          # two fingers
-        if sideways:
-            return "dash_east" if dx > 0 else "dash_west"
-        if dy < -0.3:                                # pointing up = Victory shape
-            return "handoff_random"
-    if idx and not mid and not rng and not pnk and sideways:   # one finger, sideways
+    if up in (1, 2) and sideways:                    # one/two fingers held sideways
         return "dash_east" if dx > 0 else "dash_west"
     return None
 

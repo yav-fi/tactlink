@@ -172,5 +172,5 @@ class Scene:
             cv2.rectangle(img, (170, self.h - 44), (170 + 150, self.h - 34), (60, 60, 60), -1)
             cv2.rectangle(img, (170, self.h - 44),
                           (170 + int(150 * prog), self.h - 34), (90, 230, 90), -1)
-        cv2.putText(img, "2 fingers up = hand off  |  3 fingers = dash fwd  |  index L/R = dash  |  hold each",
+        cv2.putText(img, "closed fist = hand off  |  3 fingers = dash forward  |  index L/R = dash  |  hold each",
                     (14, self.h - 14), f, 0.34, (140, 140, 140), 1, cv2.LINE_AA)

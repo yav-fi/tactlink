@@ -51,28 +51,34 @@ class GestureGateTests(unittest.TestCase):
         self.assertEqual(fired, 'orbit')
         self.assertLess(t, 1.7)
 
-    def test_fist_and_victory_do_nothing_here(self):
+    def test_closed_fist_hands_off_after_a_short_hold(self):
+        gate = GestureGate()
+        self.assertIsNone(gate.update('Closed_Fist', 0.0)[0])
+        self.assertIsNone(gate.update('Closed_Fist', 0.4)[0])       # hold is ~0.7 s
+        self.assertEqual(gate.update('Closed_Fist', 0.8)[0], 'handoff_random')
+
+    def test_victory_does_nothing(self):
         gate = GestureGate()
         for t in range(20):
-            self.assertIsNone(gate.update('Closed_Fist', t * 0.2)[0])
             self.assertIsNone(gate.update('Victory', t * 0.2)[0])
 
 
 class ClassifyPoseTests(unittest.TestCase):
     def test_finger_counts_and_directions(self):
-        self.assertEqual(classify_pose(_hand(TWO, dy=-1.0)), 'handoff_random')
         self.assertEqual(classify_pose(_hand(THREE, dy=-1.0)), 'dash_forward')
-        self.assertEqual(classify_pose(_hand(THREE, dx=1.0)), 'dash_forward')
+        self.assertEqual(classify_pose(_hand(THREE, dx=1.0)), 'dash_forward')  # any orientation
         self.assertEqual(classify_pose(_hand(ONE, dx=1.0)), 'dash_east')
         self.assertEqual(classify_pose(_hand(ONE, dx=-1.0)), 'dash_west')
-        self.assertEqual(classify_pose(_hand(TWO, dx=1.0)), 'dash_east')
+        self.assertEqual(classify_pose(_hand(TWO, dx=1.0)), 'dash_east')       # 2 fingers sideways
 
-    def test_pointing_up_is_not_a_pose(self):
+    def test_two_up_and_pointing_up_are_not_poses(self):
+        self.assertIsNone(classify_pose(_hand(TWO, dy=-1.0)))     # peace sign does nothing now
         self.assertIsNone(classify_pose(_hand(ONE, dy=-1.0)))     # that's orbit (canned)
         self.assertIsNone(classify_pose(None))
 
-    def test_canned_victory_promotes_to_the_handoff_pose(self):
-        self.assertEqual(classify_pose(None, 'Victory'), 'handoff_random')
+    def test_a_canned_command_is_not_re_read_as_a_pose(self):
+        self.assertIsNone(classify_pose(_hand(THREE, dy=-1.0), 'Open_Palm'))
+        self.assertIsNone(classify_pose(_hand(THREE, dy=-1.0), 'Closed_Fist'))
 
 
 class HeldPoseTests(unittest.TestCase):
@@ -94,10 +100,10 @@ class HeldPoseTests(unittest.TestCase):
         t = 0.0
         while fired is None and t < 2.0:
             t += 0.05
-            p = None if round(t, 2) == 0.5 else 'handoff_random'   # one-frame blip
+            p = None if round(t, 2) == 0.35 else 'dash_forward'   # one-frame blip
             fired, _, _ = h.update(p, t)
-        self.assertEqual(fired, 'handoff_random')
-        self.assertLess(t, 1.4)                       # hand-off hold ~1.0 s
+        self.assertEqual(fired, 'dash_forward')
+        self.assertLess(t, 1.0)
 
     def test_needs_a_release_before_re_firing(self):
         h = HeldPose()

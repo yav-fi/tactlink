@@ -6,9 +6,9 @@ operators (scattered at random through the scene) and hands it between them.
     python demos/gesture-handoff/gesture_demo.py --check    # load the model and exit
 
 Canned gestures (hold ~0.4 s): thumbs up = take off / climb, thumbs down = land,
-open palm = halt, point up = orbit, I-love-you = return. Held finger poses:
-two fingers up ~1 s = hand off to a random operator, three fingers ~0.6 s = dash
-forward, index held left/right ~0.5 s = dash that way.
+open palm = halt, point up = orbit, I-love-you = return, closed fist = hand off
+to a random operator. Held finger poses: three fingers ~0.6 s = dash forward,
+index held left/right ~0.5 s = dash that way.
 
 ``--diag`` prints what the recognizer sees each frame. Runs on the repo's deps
 (mediapipe / opencv / numpy); imports nothing from src/. Recognition is local;
@@ -23,10 +23,10 @@ import urllib.request
 from pathlib import Path
 
 MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task'
-CANNED = {'Open_Palm', 'Thumb_Up', 'Thumb_Down', 'Pointing_Up', 'ILoveYou', 'Victory'}
+CANNED = {'Open_Palm', 'Thumb_Up', 'Thumb_Down', 'Pointing_Up', 'ILoveYou', 'Closed_Fist'}
 FRIENDLY = {'Open_Palm': 'Open palm', 'Thumb_Up': 'Thumbs up',
             'Thumb_Down': 'Thumbs down', 'Pointing_Up': 'Pointing up',
-            'ILoveYou': 'I love you', 'Victory': 'Victory'}
+            'ILoveYou': 'I love you', 'Closed_Fist': 'Closed fist'}
 EDGES = [(0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8),
          (5, 9), (9, 10), (10, 11), (11, 12), (9, 13), (13, 14), (14, 15),
          (15, 16), (13, 17), (0, 17), (17, 18), (18, 19), (19, 20)]
@@ -117,10 +117,10 @@ _DEMO = [
     (12.5, 13.5, 'None', 'dash_east'),            # index right -> dash right
     (16.0, 17.0, 'None', 'dash_west'),            # index left -> dash left
     (19.5, 20.5, 'None', 'dash_forward'),         # three fingers -> dash forward
-    (23.0, 25.0, 'None', 'handoff_random'),       # two fingers up -> hand off
+    (23.0, 24.5, 'Closed_Fist', None),            # closed fist -> hand off (random)
     (28.0, 29.5, 'Pointing_Up', None),            # orbit the new operator
     (32.0, 33.0, 'ILoveYou', None),               # return to them
-    (35.5, 37.5, 'None', 'handoff_random'),       # hand off again
+    (35.5, 37.0, 'Closed_Fist', None),            # hand off again
     (40.0, 41.2, 'Thumb_Down', None),             # land
 ]
 
