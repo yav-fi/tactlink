@@ -1,6 +1,12 @@
 export const GESTURE_HOLD_MS = 400;
 export const GESTURE_RELEASE_MS = 150;
 export const GESTURE_DROPOUT_GRACE_MS = 180;
+// Acquiring a gesture needs GESTURE_HOLD_MS of it in a row, and the classifier
+// drops below its score threshold often enough that a strict window restarts
+// the hold over and over — the pose has to be "found" several times before it
+// ever commands. A hand that is still plainly in frame gets far longer, so a
+// steady pose accumulates its hold instead of starting again.
+export const GESTURE_PRESENT_GRACE_MS = 500;
 
 const ACTIONS: Readonly<Record<string, string>> = {
   Thumb_Up: "takeoff",
@@ -24,8 +30,16 @@ export class GestureHoldInterpreter {
   private fired = "";
   private restSince: number | undefined;
 
-  update(gesture: string, nowMs: number): GestureHoldState {
-    if (gesture === "None" && this.held !== "None" && nowMs - this.lastSeen <= GESTURE_DROPOUT_GRACE_MS) {
+  /**
+   * Let the pose being held right now fire again. Without this, a command that
+   * was released while its pose never changed can only be restarted by lowering
+   * the hand and raising it again, because `fired` clears only after a rest.
+   */
+  rearm(): void { this.fired = ""; }
+
+  update(gesture: string, nowMs: number, handPresent = false): GestureHoldState {
+    const dropoutGrace = handPresent ? GESTURE_PRESENT_GRACE_MS : GESTURE_DROPOUT_GRACE_MS;
+    if (gesture === "None" && this.held !== "None" && nowMs - this.lastSeen <= dropoutGrace) {
       return { progress: Math.min(1, Math.max(0, nowMs - this.heldSince) / GESTURE_HOLD_MS) };
     }
     if (gesture !== this.held) {

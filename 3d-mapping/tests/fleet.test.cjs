@@ -80,6 +80,44 @@ test("held motion gestures repeat and release into one explicit stop", () => {
   assert.deepEqual(repeats.update(undefined, 20_440), ["gesture_stop"]);
 });
 
+test("a hand still in frame keeps its held command through unclassified frames", () => {
+  const repeats = new GestureCommandRepeater();
+  repeats.start("takeoff", "Thumb_Up", 0);
+  // Classification drops out while the hand is plainly still there.
+  assert.deepEqual(repeats.update(undefined, 300, true), []);
+  assert.deepEqual(repeats.update(undefined, 900, true), []);
+  // Recovering keeps the same command running rather than restarting it.
+  assert.deepEqual(repeats.update("Thumb_Up", 1_000, true), ["takeoff"]);
+  // A hand that actually leaves still stops the drone on the short grace.
+  assert.deepEqual(repeats.update(undefined, 1_100, false), []);
+  assert.deepEqual(repeats.update(undefined, 1_400, false), ["gesture_stop"]);
+
+  // A different pose is a deliberate change, so it stops promptly even in frame.
+  const swap = new GestureCommandRepeater();
+  swap.start("takeoff", "Thumb_Up", 0);
+  assert.deepEqual(swap.update("Open_Palm", 100, true), []);
+  assert.deepEqual(swap.update("Open_Palm", 400, true), ["gesture_stop"]);
+
+  // An unclassified hand cannot hold a command open forever.
+  const stale = new GestureCommandRepeater();
+  stale.start("takeoff", "Thumb_Up", 0);
+  assert.deepEqual(stale.update(undefined, 100, true), []);
+  assert.deepEqual(stale.update(undefined, 1_200, true), []);
+  assert.deepEqual(stale.update(undefined, 1_400, true), ["gesture_stop"]);
+});
+
+test("a released command can be re-held without lowering the hand", () => {
+  const gestures = new GestureHoldInterpreter();
+  assert.equal(gestures.update("Thumb_Up", 0).progress, 0);
+  assert.equal(gestures.update("Thumb_Up", 400).action, "takeoff");
+  // The pose never changes, so the interpreter would otherwise stay latched.
+  assert.equal(gestures.update("Thumb_Up", 800).action, undefined);
+  // Re-arming resumes the pose already being held, so recovery costs nothing.
+  gestures.rearm();
+  assert.equal(gestures.update("Thumb_Up", 900).action, "takeoff");
+  assert.equal(gestures.update("Thumb_Up", 1_000).action, undefined);
+});
+
 test("automatic camera keeps a restrained side-to-side drift", () => {
   assert.equal(idleCameraDriftRate(0), 0.012);
   assert(idleCameraDriftRate(Math.PI / 0.55) < 0);
@@ -124,6 +162,42 @@ test("three-finger W pose fires one forward dash per deliberate hold", () => {
   assert.deepEqual(stillHeld.actions, []);
   result = feedMotion(interpreter, motionHand([0, 0], [false, false, false, false, false]), stillHeld.now, 450);
   assert.deepEqual(feedMotion(interpreter, three, result.now, 800).actions, ["fly_forward"]);
+});
+
+test("a flickered hand shape cannot take over the gesture source", () => {
+  const interpreter = new FingerMotionInterpreter();
+  const three = motionHand([0, -1], [false, true, true, true, false]);
+  const curled = motionHand([0, 0], [false, false, false, false, false]);
+  // One or two stray frames of a misread shape must not be allowed to name the
+  // hand: the label is what the repeater treats as the gesture source, and
+  // swapping it cancels whatever command is being held.
+  assert.equal(interpreter.update(three, 0).label, undefined);
+  assert.equal(interpreter.update(curled, 60).label, undefined);
+  assert.equal(interpreter.update(three, 120).label, undefined);
+  assert.equal(interpreter.update(curled, 180).label, undefined);
+  // A shape that is genuinely held still names the hand, so the real
+  // finger gestures keep working.
+  interpreter.update(three, 240);
+  assert.equal(interpreter.update(three, 300).label, undefined);
+  assert.equal(interpreter.update(three, 460).label, "Three_Finger_Forward");
+});
+
+test("a hand in frame accumulates its hold across unclassified frames", () => {
+  const gestures = new GestureHoldInterpreter();
+  gestures.update("Thumb_Up", 0, true);
+  // Classification keeps dropping out while the hand is plainly still there.
+  assert.equal(gestures.update("None", 200, true).progress, 0.5);
+  assert.equal(gestures.update("Thumb_Up", 300, true).progress, 0.75);
+  assert.equal(gestures.update("None", 380, true).progress, 0.95);
+  // The hold completes instead of restarting from each recovery.
+  assert.equal(gestures.update("Thumb_Up", 420, true).action, "takeoff");
+
+  // With no hand in frame the original short window still applies.
+  const gone = new GestureHoldInterpreter();
+  gone.update("Thumb_Up", 0, false);
+  assert.equal(gone.update("None", 400, false).progress, 0);
+  assert.equal(gone.update("Thumb_Up", 500, false).progress, 0);
+  assert.equal(gone.update("Thumb_Up", 900, false).action, "takeoff");
 });
 
 test("browser landmarks recover the original three-finger geometry", () => {
