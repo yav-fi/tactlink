@@ -53,7 +53,7 @@
         <form id="command-form" class="command-form">
           <span class="command-prompt" aria-hidden="true">›</span>
           <input id="command-input" type="text" autocomplete="off" spellcheck="false" aria-label="Drone command" aria-controls="command-suggestions" placeholder="Tell the drones what to do · type / for commands" />
-          <span class="command-ai" title="Open-ended text uses the local mission AI">AI</span>
+          <span id="command-status" class="visually-hidden" role="status">Ready · type / for commands</span>
         </form>
         <div class="dock-row" hidden>
           <button id="deploy-drone" type="button">+ Deploy</button>
@@ -163,28 +163,7 @@
             </div>
           </details>
         </div>
-        <section>
-          <h2>Selected drone details</h2>
-          <dl id="drone-state" class="state"></dl>
-        </section>
-        <details class="advanced-controls local-only"><summary>Keyboard controls</summary><p class="hint">WASD moves relative to the current screen view; R/F or Space/Shift changes height. Q/E turns and Esc releases.</p></details>
-        <!-- Retained because main's flight-preview integration binds these IDs.
-             Hidden to preserve the current local interface. -->
-        <div hidden>
-          <textarea id="flight-text" aria-label="Flight instruction"></textarea>
-          <button id="preview-flight" type="button">Preview text path</button>
-          <p id="preview-status" role="status"></p>
-        </div>
       </aside>
-      <footer class="local-only telemetry-strip" aria-label="Flight telemetry">
-        <span id="command-status" class="telemetry-message" role="status">Ready · type / for commands</span>
-        <span id="telemetry-drone">NO DRONE</span>
-        <span id="telemetry-state">IDLE</span>
-        <span id="telemetry-lat">LAT —</span>
-        <span id="telemetry-lon">LON —</span>
-        <span id="telemetry-alt">ALT —</span>
-        <span id="telemetry-fps">— FPS</span>
-      </footer>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

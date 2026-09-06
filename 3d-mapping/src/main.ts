@@ -14,13 +14,15 @@ import { COMMANDS, parseCommandInput, type CommandIntent } from "./command-conso
 const home = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
 const token = import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined;
 const status = document.querySelector<HTMLParagraphElement>("#world-status")!;
-const commandStatus = document.querySelector<HTMLParagraphElement>("#command-status")!;
+const commandStatus = document.querySelector<HTMLElement>("#command-status")!;
 const missionInput = document.querySelector<HTMLTextAreaElement>("#mission-json")!;
-const stateElement = document.querySelector<HTMLDListElement>("#drone-state")!;
 const commandDrawer = document.querySelector<HTMLDetailsElement>("#command-drawer")!;
 const commandForm = document.querySelector<HTMLFormElement>("#command-form")!;
 const commandInput = document.querySelector<HTMLInputElement>("#command-input")!;
 const commandSuggestions = document.querySelector<HTMLDivElement>("#command-suggestions")!;
+new MutationObserver(() => {
+  if (commandStatus.textContent) commandInput.placeholder = commandStatus.textContent;
+}).observe(commandStatus, { childList: true, characterData: true, subtree: true });
 const runtimeApiBase = ((import.meta.env.VITE_RUNTIME_URL as string | undefined) ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 const runtimeMode = new URLSearchParams(window.location.search).get("mode") === "runtime";
 document.body.classList.toggle("runtime-mode", runtimeMode);
@@ -563,6 +565,7 @@ function requireDrone(number?: number): DroneController {
 
 function setCommandMessage(message: string): void {
   if (commandStatus.textContent !== message) commandStatus.textContent = message;
+  commandInput.placeholder = message;
 }
 
 function localOffset(target: DroneController, east: number, north: number): { latitude: number; longitude: number; altitude: number } {
@@ -874,70 +877,9 @@ undoButton.addEventListener("click", () => {
   refreshFleet(); commandStatus.textContent = label ? `Undid ${label}. Drones restored at rest.` : "Nothing to undo.";
 });
 pauseButton.addEventListener("click", () => { fleet.togglePause(performance.now() / 1000); refreshFleet(); });
-let overviewTime = 0;
 let surveyUpdateIndex = 0;
-let telemetryTime = 0;
-let fpsTime = performance.now();
-let fpsFrames = 0;
-let displayedFps = 0;
-const telemetryDrone = document.querySelector<HTMLSpanElement>("#telemetry-drone")!;
-const telemetryState = document.querySelector<HTMLSpanElement>("#telemetry-state")!;
-const telemetryLat = document.querySelector<HTMLSpanElement>("#telemetry-lat")!;
-const telemetryLon = document.querySelector<HTMLSpanElement>("#telemetry-lon")!;
-const telemetryAlt = document.querySelector<HTMLSpanElement>("#telemetry-alt")!;
-const telemetryFps = document.querySelector<HTMLSpanElement>("#telemetry-fps")!;
-
-function updateTelemetry(now: number): void {
-  fpsFrames++;
-  if (now - fpsTime >= 500) {
-    displayedFps = Math.round(fpsFrames * 1000 / (now - fpsTime));
-    fpsFrames = 0; fpsTime = now;
-  }
-  if (now - telemetryTime < 100) return;
-  telemetryTime = now;
-  const snapshot = drone?.snapshot();
-  telemetryDrone.textContent = drone?.id.replace("_", " ").toUpperCase() ?? "NO DRONE";
-  telemetryState.textContent = snapshot?.state ?? "IDLE";
-  telemetryLat.textContent = snapshot ? `LAT ${snapshot.latitude.toFixed(5)}` : "LAT —";
-  telemetryLon.textContent = snapshot ? `LON ${snapshot.longitude.toFixed(5)}` : "LON —";
-  telemetryAlt.textContent = snapshot ? `ALT ${snapshot.altitude.toFixed(0)} M` : "ALT —";
-  telemetryFps.textContent = displayedFps ? `${displayedFps} FPS` : "— FPS";
-  replayTime.textContent = `Elapsed: ${fleet.replay.elapsed.toFixed(2)} s`;
-  if (fleet.replay.total) {
-    replayStatus.textContent = `${fleet.replay.arrived} / ${fleet.replay.total} arrived${fleet.blockedCount ? ` · ${fleet.blockedCount} blocked by obstacles` : ""}${fleet.paused ? " · Paused" : fleet.replay.running ? " · Playing at assigned speeds" : fleet.blockedCount ? " · Playback stopped" : " · All paths complete"}`;
-  }
-  if (controllingDrone) {
-    setCommandMessage(drone?.collisionBlocked
-      ? "No safe path found. Steer away or climb to continue."
-      : drone?.avoidanceActive
-        ? "Obstacle detected: autopilot is routing around it."
-        : collisionWarning(viewer) ?? "Pilot active · WASD move · Q/E turn · R/F altitude · Esc release");
-  }
-  if (!snapshot) stateElement.innerHTML = "<dt>Fleet</dt><dd>No drones deployed</dd>";
-  else stateElement.innerHTML = [
-    ["State", snapshot.state], ["Position", `${snapshot.latitude.toFixed(5)}, ${snapshot.longitude.toFixed(5)}`], ["Altitude", `${snapshot.altitude.toFixed(0)} m`], ["Step", snapshot.totalSteps ? `${snapshot.currentStep} / ${snapshot.totalSteps}` : "—"],
-  ].map(([label, value]) => `<dt>${label}</dt><dd>${value}</dd>`).join("");
-}
-
-function updateOverview(now: number): void {
-  if (now - overviewTime < 250) return;
-  overviewTime = now;
-  undoButton.disabled = !fleet.undoLabel;
-  undoButton.textContent = fleet.undoLabel ? `Undo ${fleet.undoLabel}` : "Undo last action";
-  pauseButton.disabled = !fleet.replay.running;
-  pauseButton.textContent = fleet.paused ? "Resume playback" : "Pause playback";
-  const container = document.querySelector<HTMLDivElement>("#fleet-overview")!;
-  container.replaceChildren();
-  for (const member of fleet.drones.values()) {
-    const card = document.createElement("div"); card.className = "fleet-card"; card.style.borderLeftColor = member.colorHex;
-    const title = document.createElement("strong"); title.textContent = `${member.id.replace("_", " ")} · ${member.droneType}`;
-    const detail = document.createElement("p");
-    const route = member.routeLength;
-    detail.textContent = `${member.collisionBlocked ? "No safe route" : member.avoidanceActive ? "Auto-avoiding obstacle" : member.snapshot().state} · ${member.speedMph} mph · ${route.toFixed(0)} m route · ${(route / (member.speedMph * 0.44704)).toFixed(1)} s estimated${member.droneType === "survey" ? ` · ${member.coverageCount} coverage patches` : ""}`;
-    card.append(title, detail); container.append(card);
-  }
-}
 let previousCameraTime = performance.now();
+let pilotStatusTime = 0;
 viewer.clock.onTick.addEventListener((clock) => {
   const deltaSeconds = Math.max(0, Math.min(0.1, Cesium.JulianDate.secondsDifference(clock.currentTime, previousTime)));
   previousTime = Cesium.JulianDate.clone(clock.currentTime, previousTime);
@@ -950,7 +892,14 @@ viewer.clock.onTick.addEventListener((clock) => {
   updateFreeCamera(cameraDelta);
   updateAutomaticCamera(cameraDelta);
   previousCameraTime = cameraTime;
-  if (!runtimeMode) { updateTelemetry(cameraTime); updateOverview(cameraTime); }
+  if (!runtimeMode && controllingDrone && cameraTime - pilotStatusTime >= 250) {
+    pilotStatusTime = cameraTime;
+    setCommandMessage(drone?.collisionBlocked
+      ? "No safe path found. Steer away or climb to continue."
+      : drone?.avoidanceActive
+        ? "Obstacle detected: autopilot is routing around it."
+        : collisionWarning(viewer) ?? "Pilot active · WASD move · Q/E turn · R/F altitude · Esc release");
+  }
   const surveys = [...fleet.drones.values()].filter(member => member.droneType === "survey");
   if (surveys.length) surveys[surveyUpdateIndex++ % surveys.length].updateSurvey(cameraTime);
 });
