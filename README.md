@@ -157,6 +157,10 @@ lands - piece 3); the webcam still covers the active operator, or use
 `python scripts/mock_phone_feed.py --port 9870 --phones 3` fakes three phones
 walking a circle, and `--script` makes phone 1 run a gesture timeline.
 
+**What's left** (on-phone gesture recognition, Mac build steps, field
+calibration) is a step-by-step runbook in
+[`docs/phone-gestures-REMAINING.md`](docs/phone-gestures-REMAINING.md).
+
 **Testing gestures safely.** `--check-gestures` is the safe way to rehearse hand
 poses and combos: it shows the recognized gesture, hold bar, partial-combo hint,
 and a log of what *would* fire, without moving the (simulated) drone or touching
