@@ -36,7 +36,7 @@ struct PhoneHandPose {
 }
 
 /// V-H-V-H detector equivalent to `src/finger_swing.py`. Points are from an
-/// upright rear-camera image, so negative x is left in the preview.
+/// upright mirrored selfie image, so negative x is left in the preview.
 struct PhoneFingerSwing {
     private(set) var history:[(String,Double)]=[]
     private var raw:String?; private var rawSince=0.0; private var confirmed:String?
@@ -88,17 +88,17 @@ final class GestureCamera:NSObject,ObservableObject,AVCaptureVideoDataOutputSamp
     private func startAuthorized(){ queue.async{[weak self] in
         guard let self else{return}
         if !configured { do { try configure() } catch { publish("None",0,"Camera unavailable: \(error.localizedDescription)"); return } }
-        guard !session.isRunning else{return}; session.startRunning(); publish("None",0,"Rear camera starting")
+        guard !session.isRunning else{return}; session.startRunning(); publish("None",0,"Front camera starting")
     }}
     private func configure() throws {
-        guard let camera=AVCaptureDevice.default(.builtInWideAngleCamera,for:.video,position:.back) else { throw NSError(domain:"GestureCamera",code:1,userInfo:[NSLocalizedDescriptionKey:"Rear camera not found"]) }
+        guard let camera=AVCaptureDevice.default(.builtInWideAngleCamera,for:.video,position:.front) else { throw NSError(domain:"GestureCamera",code:1,userInfo:[NSLocalizedDescriptionKey:"Front camera not found"]) }
         session.beginConfiguration(); defer{session.commitConfiguration()}; session.sessionPreset = .medium
         let input=try AVCaptureDeviceInput(device:camera); guard session.canAddInput(input) else{throw NSError(domain:"GestureCamera",code:2)}; session.addInput(input)
         let output=AVCaptureVideoDataOutput(); output.alwaysDiscardsLateVideoFrames=true
         output.videoSettings=[kCVPixelBufferPixelFormatTypeKey as String:kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
         output.setSampleBufferDelegate(self,queue:queue); guard session.canAddOutput(output) else{throw NSError(domain:"GestureCamera",code:3)}; session.addOutput(output)
         if let connection=output.connection(with:.video) {
-            if connection.isVideoMirroringSupported { connection.isVideoMirrored=false }
+            if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false; connection.isVideoMirrored=true }
             // This app is portrait-only. Rotate buffers once, then give Vision upright pixels.
             if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle=90; imageOrientation = .up }
         }
@@ -110,10 +110,10 @@ final class GestureCamera:NSObject,ObservableObject,AVCaptureVideoDataOutputSamp
         DispatchQueue.main.async { [weak self] in self?.processedFrames += 1 }
         do {
             try VNImageRequestHandler(cmSampleBuffer:sampleBuffer,orientation:imageOrientation).perform([request])
-            guard let observation=request.results?.first,let pose=try makePose(observation),pose.confidence>=0.45 else{_=swing.update(pose:nil,at:now);publish("None",0,"Rear camera live · show your whole hand");return}
+            guard let observation=request.results?.first,let pose=try makePose(observation),pose.confidence>=0.45 else{_=swing.update(pose:nil,at:now);publish("None",0,"Front camera live · show your whole hand");return}
             if let dash=swing.update(pose:pose,at:now){pulse=(dash,now+0.65)}
             let label=pulse.flatMap{now<=$0.until ? $0.label:nil} ?? pose.cannedLabel();if pulse != nil && now>pulse!.until{pulse=nil}
-            let score=label=="None" ? 0:pose.confidence;publish(score>=0.55 ? label:"None",score,score>=0.55 ? "Rear camera · recognizing locally":"Rear camera · low-confidence hand")
+            let score=label=="None" ? 0:pose.confidence;publish(score>=0.55 ? label:"None",score,score>=0.55 ? "Front camera · recognizing locally":"Front camera · low-confidence hand")
         }catch{publish("None",0,"Recognition error")}
     }
     private func makePose(_ observation:VNHumanHandPoseObservation)throws->PhoneHandPose?{

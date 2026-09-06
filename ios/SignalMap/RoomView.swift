@@ -74,8 +74,8 @@ struct RoomView: View {
             }.buttonStyle(.borderedProminent).foregroundStyle(roomBackground)
             VStack(alignment: .leading, spacing: 12) {
                 eyebrow("HAVE A ROOM CODE?")
-                TextField("ABCD EFGH JKLM NPQR", text: $enteredCode)
-                    .font(.system(size: 17, design: .monospaced)).textInputAutocapitalization(.characters)
+                TextField("6-digit room code", text: $enteredCode)
+                    .font(.system(size: 17, design: .monospaced)).keyboardType(.numberPad)
                     .autocorrectionDisabled().submitLabel(.join)
                     .padding(14).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
                     .onSubmit { room.join(enteredCode) }
@@ -207,11 +207,11 @@ private struct GestureStatus: View {
     @ObservedObject var camera: GestureCamera
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("REAR CAMERA · \(camera.processedFrames) frames processed")
+            Text("FRONT CAMERA · \(camera.processedFrames) frames processed")
                 .font(.caption2.monospaced()).foregroundStyle(roomMint)
             GesturePreview(session: camera.session)
                 .frame(height: 220).clipShape(RoundedRectangle(cornerRadius: 10))
-            Text("Hold the phone upright. Put your whole hand in this rear-camera view; start with an open palm.")
+            Text("Hold the phone upright. Put your whole hand in this selfie view; start with an open palm.")
                 .font(.caption2).foregroundStyle(roomMuted)
         HStack(spacing: 10) {
             Image(systemName: camera.gesture == "None" ? "hand.raised.slash" : "hand.raised.fill")
@@ -238,7 +238,7 @@ private struct GesturePreview: UIViewRepresentable {
             super.layoutSubviews()
             if let connection=preview.connection {
                 if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle=90 }
-                if connection.isVideoMirroringSupported { connection.isVideoMirrored=false }
+                if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false; connection.isVideoMirrored=true }
             }
         }
     }

@@ -157,7 +157,7 @@ final class RoomSession: ObservableObject {
     func create() { join(RoomTransport.newCode(threePhone:threePhoneMode,twoPhone:twoPhoneMode)) }
     func join(_ enteredCode: String) {
         let clean = RoomTransport.normalized(enteredCode)
-        guard RoomTransport.validCode(clean) else { status="Enter all 16 letters/numbers from the room code."; return }
+        guard RoomTransport.validCode(clean) else { status="Enter the 6-digit room code."; return }
         leave()
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         displayName = name.isEmpty ? "Phone \(localID.prefix(4))" : String(name.prefix(24))

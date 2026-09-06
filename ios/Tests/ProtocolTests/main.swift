@@ -1,6 +1,17 @@
 import Foundation
 
 func fail(_ message:String) -> Never { print("FAIL: \(message)"); exit(1) }
+for mode in [2,3,5] {
+    for _ in 0..<100 {
+        let generated=RoomTransport.newCode(threePhone:mode==3,twoPhone:mode==2)
+        guard generated.count==6, generated.first==Character(String(mode)), generated.utf8.allSatisfy({ (48...57).contains($0) }), RoomTransport.validCode(generated), RoomTransport.displayCode(generated)==generated else { fail("six-digit room generation or mode") }
+    }
+}
+guard RoomTransport.validCode("200001"), RoomTransport.validCode(RoomTransport.normalized(" 200-001 ")), RoomTransport.validCode("2ABCDEFGHJKLMNPQ") else { fail("room code normalization or legacy compatibility") }
+for invalid in ["", "12345", "1234567", "12345A", "１２３４５６"] {
+    guard !RoomTransport.validCode(invalid) else { fail("accepted invalid room code") }
+}
+print("PASS: six-digit room codes, modes, validation, and legacy compatibility")
 let ids=(1...5).map { String(format:"00000000-0000-4000-8000-%012d",$0) }
 let coords=[Vector3(x:0,y:0,z:0),Vector3(x:4,y:0,z:0),Vector3(x:1,y:3,z:0),Vector3(x:0.5,y:1,z:2),Vector3(x:3,y:2,z:1.2)]
 RoomRanging.points=Dictionary(uniqueKeysWithValues:zip(ids,coords))

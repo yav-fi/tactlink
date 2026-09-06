@@ -2,6 +2,8 @@
 
 A native SwiftUI app that coordinates nearby iPhones, rotates UWB ranging pairs, and shares a relative group map. No GPS or internet connection is used. Network.framework carries encrypted coordination and measurements; Nearby Interaction supplies UWB distances. One optional, off-by-default feature (**Visualizer bridge**, below) sends this phone's own position, facing, and locally recognized gesture to an external simulator. Its front-camera frames remain on the phone.
 
+New rooms use **six numeric digits**, with a numeric keypad for joining. The first digit selects the initial two-, three-, or five-phone mode. Update every participating phone before creating a short-code room; the updated app can still join an existing 16-character room by pasting its code. Short codes are intended for nearby demo sessions, not strong access secrets.
+
 ## Three-phone test
 
 1. Install the current build on all three physical phones. Older builds do not understand the new group messages.
