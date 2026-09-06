@@ -1414,3 +1414,48 @@ footer p {
     gap: 14px;
   }
 }
+.intent-preview {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 32px;
+  min-width: 0;
+}
+.intent-preview h2 {
+  font-size: clamp(28px, 3vw, 40px);
+  margin: 22px 0;
+}
+.intent-preview > div {
+  border-top: 1px solid var(--line);
+  padding-top: 22px;
+  margin-top: 22px;
+}
+.intent-preview .mono {
+  color: var(--lime);
+  font-size: 11px;
+}
+.intent-preview h3 {
+  font-size: 20px;
+  margin: 12px 0;
+}
+.intent-preview p,
+.supporting-tech > p {
+  color: var(--muted);
+  line-height: 1.7;
+}
+.supporting-tech > h3 {
+  margin: 18px 0;
+}
+.supporting-tech summary {
+  cursor: pointer;
+  color: var(--lime);
+  padding: 22px 0;
+}
+.supporting-tech details > .wrap {
+  padding-inline: 0;
+}
+.supporting-tech details .section-heading h2 {
+  font-size: 32px;
+}
+.supporting-metrics {
+  padding-top: 40px;
+}

@@ -486,7 +486,7 @@ export default function Home() {
         <nav aria-label="Main navigation">
           <a href="#squadmate">The idea</a>
           <a href="#prototype">The prototype</a>
-          <a href="#positioning">The technology</a>
+          <a href="#architecture">The interaction</a>
         </nav>
         <a className="header-link" href="#performance">
           What comes next <ArrowUpRight size={15} />
@@ -506,7 +506,7 @@ export default function Home() {
             <p className="hero-description">
               Plan the mission. Signal changes as the squad moves.
               <br />
-              TactLink brings shared spatial awareness and human intent
+              TactLink brings gestures, spoken commands, and shared control
               together, with a vision of a drone that works alongside the team
               as another squadmate.
             </p>
@@ -527,7 +527,31 @@ export default function Home() {
               </span>
             </div>
           </div>
-          <Geometry compact />
+          <div className="intent-preview">
+            <Tag>ONE TEAM. TWO WAYS TO COMMUNICATE.</Tag>
+            <h2>
+              Signal the change.
+              <br />
+              Say what comes next.
+            </h2>
+            <div>
+              <span className="mono">GESTURES</span>
+              <h3>Call it over. Adjust its height.</h3>
+              <p>
+                Direct the virtual drone with hand signals and pass control to
+                another teammate.
+              </p>
+            </div>
+            <div>
+              <span className="mono">NATURAL LANGUAGE</span>
+              <h3>Give it a route. Change the plan.</h3>
+              <p>
+                Use spoken commands to break from a preplanned route in our
+                simulation test environment.
+              </p>
+            </div>
+            <p className="fine">Human intent → simulated drone response</p>
+          </div>
         </section>
         <div className="spec-strip wrap">
           <div>
@@ -652,222 +676,10 @@ export default function Home() {
             </div>
           </div>
         </section>
-        <section className="section wrap" id="positioning">
-          <div className="section-heading">
-            <div>
-              <Tag>02 / SHARED SPATIAL AWARENESS</Tag>
-              <h2>
-                Teamwork starts with
-                <br />
-                a sense of where.
-              </h2>
-            </div>
-            <p>
-              The interaction needs spatial context.
-              <br />
-              Radio ranging gives the prototype a relative map.
-            </p>
-          </div>
-          <div className="position-grid">
-            <Geometry />
-            <div className="position-explainer">
-              <div className="technical-label">
-                <Radio size={20} />
-                <span>ULTRA-WIDEBAND / UWB</span>
-              </div>
-              <h3>A shared frame of reference.</h3>
-              <p>
-                Knowing where teammates are gives a command context: who is
-                calling, and where are they relative to the group? The prototype
-                uses ultra-wideband radio to estimate distances between devices
-                without camera images or GPS. Those measurements support the
-                shared representation of the squad.
-              </p>
-              <div className="equation">
-                <span>distance ≈ propagation time × c</span>
-                <small>Ranging accounts for the reply delay.</small>
-              </div>
-              <h4>From ranges to a relative map</h4>
-              <p>
-                Each distance constrains a position to a sphere. Intersections
-                explain the geometry; the implementation reconstructs all peers
-                together from the complete distance matrix using
-                multidimensional scaling.
-              </p>
-              <p className="fine">
-                The illustration uses five range shells to explain an unknown
-                point. The five-phone system instead solves 10 mutual distances.
-                Global position, orientation, and reflection are not determined
-                by distances alone.
-              </p>
-              <div className="source-row">
-                <Source path="ios/SignalMap/RangeGeometry.swift">
-                  Geometry implementation
-                </Source>
-                <a
-                  className="source"
-                  href="https://www.nxp.com/docs/en/training-presentation/TP-TD24-EUF-AUT-T4768.pdf"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  UWB reference <ArrowUpRight size={13} />
-                </a>
-              </div>
-            </div>
-          </div>
-          <div className="math-flow">
-            <span>
-              PAIR DISTANCES <b>D²</b>
-            </span>
-            <ChevronRight />
-            <span>
-              CENTERED GRAM MATRIX <b>−½ JD²J</b>
-            </span>
-            <ChevronRight />
-            <span>
-              TOP 3 EIGENVECTORS <b>X = V₃Λ₃½</b>
-            </span>
-            <ChevronRight />
-            <span>
-              RELATIVE GROUP SHAPE <Crosshair />
-            </span>
-          </div>
-        </section>
-        <section className="network-band">
-          <div className="wrap network-inner">
-            <div>
-              <Tag>COORDINATION WITHIN THE GROUP</Tag>
-              <h2>
-                A shared picture,
-                <br />
-                built by the team.
-              </h2>
-              <p>
-                The positioning prototype connects nearby phones over
-                authenticated, encrypted peer links. They share measurements and
-                build a relative map without installed anchors or a cloud
-                positioning service. A separate computer hosts the drone
-                simulation.
-              </p>
-              <p className="fine">
-                A deterministically elected peer schedules ranging and shares
-                the map. The role can move to another peer; the current
-                prototype is peer-coordinated, not leaderless.
-              </p>
-              <Source path="ios/SignalMap/RoomSession.swift">
-                Coordination & recovery
-              </Source>
-            </div>
-            <div
-              className="network-diagram"
-              aria-label="Local peer network: five phones connected to one another, one elected coordinator, no external service"
-            >
-              <div className="mesh-top">
-                LOCAL PEER NETWORK <span>NO CLOUD DEPENDENCY</span>
-              </div>
-              <svg
-                viewBox="0 0 560 290"
-                role="img"
-                aria-label="Five interconnected peers; A is the current elected coordinator"
-              >
-                <g stroke="#4c5c43">
-                  {[
-                    [85, 150],
-                    [240, 60],
-                    [450, 100],
-                    [405, 235],
-                    [200, 235],
-                  ].flatMap(([x, y], i, arr) =>
-                    arr
-                      .slice(i + 1)
-                      .map(([xx, yy], j) => (
-                        <line key={`${i}${j}`} x1={x} y1={y} x2={xx} y2={yy} />
-                      )),
-                  )}
-                </g>
-                {[
-                  [85, 150],
-                  [240, 60],
-                  [450, 100],
-                  [405, 235],
-                  [200, 235],
-                ].map(([x, y], i) => (
-                  <g key={i}>
-                    <circle
-                      cx={x}
-                      cy={y}
-                      r="23"
-                      stroke={i === 0 ? '#b4ef74' : '#77836c'}
-                      fill="#141e12"
-                    />
-                    <text
-                      x={x}
-                      y={y + 5}
-                      textAnchor="middle"
-                      fill="#dce9d3"
-                      fontFamily="monospace"
-                      fontSize="15"
-                    >
-                      {letters[i]}
-                    </text>
-                    {i === 0 && (
-                      <text x={x - 47} y={y + 43} fill="#b4ef74" fontSize="12">
-                        COORDINATOR
-                      </text>
-                    )}
-                  </g>
-                ))}
-              </svg>
-              <div className="mesh-bottom">
-                <span>
-                  <i className="status-dot" /> UWB · DISTANCE
-                </span>
-                <span>PEER TRANSPORT · COORDINATION</span>
-              </div>
-            </div>
-          </div>
-        </section>
-        <section className="section wrap" id="protocol">
-          <div className="section-heading">
-            <div>
-              <Tag>03 / HOW THE PROTOTYPE SHARES A RADIO</Tag>
-              <h2>
-                One group.
-                <br />A coordinated rhythm.
-              </h2>
-            </div>
-            <p>
-              The five-peer design shares radio time.
-              <br />
-              Each pairing adds to the group’s relative map.
-            </p>
-          </div>
-          <RoundRobin />
-          <div className="protocol-lifecycle">
-            <span>Prepare fresh session</span>
-            <ChevronRight />
-            <span>Exchange tokens</span>
-            <ChevronRight />
-            <span>Collect 4 valid readings</span>
-            <ChevronRight />
-            <span>250 ms grace</span>
-            <ChevronRight />
-            <span>Release + 300 ms handoff</span>
-          </div>
-          <div className="section-foot">
-            <p>
-              Failed attempts back off. Local leases release a stuck radio.
-              Incomplete cycles stay out of complete-cycle statistics.
-            </p>
-            <Source path="ios/SignalMap/RoomTypes.swift">
-              Round-robin implementation
-            </Source>
-          </div>
-        </section>
         <section className="section architecture wrap" id="architecture">
           <div className="section-heading">
             <div>
-              <Tag>04 / FROM HUMAN INTENT TO ACTION</Tag>
+              <Tag>02 / FROM HUMAN INTENT TO ACTION</Tag>
               <h2>
                 Know who is calling.
                 <br />
@@ -972,7 +784,7 @@ export default function Home() {
         <section className="section performance wrap" id="performance">
           <div className="section-heading">
             <div>
-              <Tag>05 / THE PATH TO A DRONE TEAMMATE</Tag>
+              <Tag>03 / THE PATH TO A DRONE TEAMMATE</Tag>
               <h2>
                 A working prototype.
                 <br />
@@ -1006,93 +818,340 @@ export default function Home() {
             <div>
               <h4>Add another way to communicate</h4>
               <p>
-                Spoken commands are in development. The longer-term goal is to
-                combine gestures and speech so people can express intent in the
-                way that fits the moment.
+                Our simulation test environment supports spoken route commands.
+                The next step is to combine gestures and speech so people can
+                express intent in the way that fits the moment.
               </p>
             </div>
           </div>
-          <div className="detail-heading">
-            <div>
-              <Tag>UNDER THE HOOD / POSITIONING PROTOTYPE</Tag>
-              <h3>Targets and measurements stay distinct.</h3>
+        </section>
+        <section className="section wrap supporting-tech" id="supporting-tech">
+          <Tag>SUPPORTING INFRASTRUCTURE</Tag>
+          <h3>Spatial context keeps the team connected.</h3>
+          <p>
+            Radio positioning gives the prototype a relative picture of the
+            group. Peer coordination and recovery mechanisms support that shared
+            context while gestures and spoken commands express what people want
+            the drone to do.
+          </p>
+          <details>
+            <summary>
+              Explore positioning, coordination, and recovery details
+            </summary>
+            <section className="section wrap" id="positioning">
+              <div className="section-heading">
+                <div>
+                  <Tag>02 / SHARED SPATIAL AWARENESS</Tag>
+                  <h2>
+                    Teamwork starts with
+                    <br />
+                    a sense of where.
+                  </h2>
+                </div>
+                <p>
+                  The interaction needs spatial context.
+                  <br />
+                  Radio ranging gives the prototype a relative map.
+                </p>
+              </div>
+              <div className="position-grid">
+                <Geometry />
+                <div className="position-explainer">
+                  <div className="technical-label">
+                    <Radio size={20} />
+                    <span>ULTRA-WIDEBAND / UWB</span>
+                  </div>
+                  <h3>A shared frame of reference.</h3>
+                  <p>
+                    Knowing where teammates are gives a command context: who is
+                    calling, and where are they relative to the group? The
+                    prototype uses ultra-wideband radio to estimate distances
+                    between devices without camera images or GPS. Those
+                    measurements support the shared representation of the squad.
+                  </p>
+                  <div className="equation">
+                    <span>distance ≈ propagation time × c</span>
+                    <small>Ranging accounts for the reply delay.</small>
+                  </div>
+                  <h4>From ranges to a relative map</h4>
+                  <p>
+                    Each distance constrains a position to a sphere.
+                    Intersections explain the geometry; the implementation
+                    reconstructs all peers together from the complete distance
+                    matrix using multidimensional scaling.
+                  </p>
+                  <p className="fine">
+                    The illustration uses five range shells to explain an
+                    unknown point. The five-phone system instead solves 10
+                    mutual distances. Global position, orientation, and
+                    reflection are not determined by distances alone.
+                  </p>
+                  <div className="source-row">
+                    <Source path="ios/SignalMap/RangeGeometry.swift">
+                      Geometry implementation
+                    </Source>
+                    <a
+                      className="source"
+                      href="https://www.nxp.com/docs/en/training-presentation/TP-TD24-EUF-AUT-T4768.pdf"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      UWB reference <ArrowUpRight size={13} />
+                    </a>
+                  </div>
+                </div>
+              </div>
+              <div className="math-flow">
+                <span>
+                  PAIR DISTANCES <b>D²</b>
+                </span>
+                <ChevronRight />
+                <span>
+                  CENTERED GRAM MATRIX <b>−½ JD²J</b>
+                </span>
+                <ChevronRight />
+                <span>
+                  TOP 3 EIGENVECTORS <b>X = V₃Λ₃½</b>
+                </span>
+                <ChevronRight />
+                <span>
+                  RELATIVE GROUP SHAPE <Crosshair />
+                </span>
+              </div>
+            </section>
+            <section className="network-band">
+              <div className="wrap network-inner">
+                <div>
+                  <Tag>COORDINATION WITHIN THE GROUP</Tag>
+                  <h2>
+                    A shared picture,
+                    <br />
+                    built by the team.
+                  </h2>
+                  <p>
+                    The positioning prototype connects nearby phones over
+                    authenticated, encrypted peer links. They share measurements
+                    and build a relative map without installed anchors or a
+                    cloud positioning service. A separate computer hosts the
+                    drone simulation.
+                  </p>
+                  <p className="fine">
+                    A deterministically elected peer schedules ranging and
+                    shares the map. The role can move to another peer; the
+                    current prototype is peer-coordinated, not leaderless.
+                  </p>
+                  <Source path="ios/SignalMap/RoomSession.swift">
+                    Coordination & recovery
+                  </Source>
+                </div>
+                <div
+                  className="network-diagram"
+                  aria-label="Local peer network: five phones connected to one another, one elected coordinator, no external service"
+                >
+                  <div className="mesh-top">
+                    LOCAL PEER NETWORK <span>NO CLOUD DEPENDENCY</span>
+                  </div>
+                  <svg
+                    viewBox="0 0 560 290"
+                    role="img"
+                    aria-label="Five interconnected peers; A is the current elected coordinator"
+                  >
+                    <g stroke="#4c5c43">
+                      {[
+                        [85, 150],
+                        [240, 60],
+                        [450, 100],
+                        [405, 235],
+                        [200, 235],
+                      ].flatMap(([x, y], i, arr) =>
+                        arr
+                          .slice(i + 1)
+                          .map(([xx, yy], j) => (
+                            <line
+                              key={`${i}${j}`}
+                              x1={x}
+                              y1={y}
+                              x2={xx}
+                              y2={yy}
+                            />
+                          )),
+                      )}
+                    </g>
+                    {[
+                      [85, 150],
+                      [240, 60],
+                      [450, 100],
+                      [405, 235],
+                      [200, 235],
+                    ].map(([x, y], i) => (
+                      <g key={i}>
+                        <circle
+                          cx={x}
+                          cy={y}
+                          r="23"
+                          stroke={i === 0 ? '#b4ef74' : '#77836c'}
+                          fill="#141e12"
+                        />
+                        <text
+                          x={x}
+                          y={y + 5}
+                          textAnchor="middle"
+                          fill="#dce9d3"
+                          fontFamily="monospace"
+                          fontSize="15"
+                        >
+                          {letters[i]}
+                        </text>
+                        {i === 0 && (
+                          <text
+                            x={x - 47}
+                            y={y + 43}
+                            fill="#b4ef74"
+                            fontSize="12"
+                          >
+                            COORDINATOR
+                          </text>
+                        )}
+                      </g>
+                    ))}
+                  </svg>
+                  <div className="mesh-bottom">
+                    <span>
+                      <i className="status-dot" /> UWB · DISTANCE
+                    </span>
+                    <span>PEER TRANSPORT · COORDINATION</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+            <section className="section wrap" id="protocol">
+              <div className="section-heading">
+                <div>
+                  <Tag>03 / HOW THE PROTOTYPE SHARES A RADIO</Tag>
+                  <h2>
+                    One group.
+                    <br />A coordinated rhythm.
+                  </h2>
+                </div>
+                <p>
+                  The five-peer design shares radio time.
+                  <br />
+                  Each pairing adds to the group’s relative map.
+                </p>
+              </div>
+              <RoundRobin />
+              <div className="protocol-lifecycle">
+                <span>Prepare fresh session</span>
+                <ChevronRight />
+                <span>Exchange tokens</span>
+                <ChevronRight />
+                <span>Collect 4 valid readings</span>
+                <ChevronRight />
+                <span>250 ms grace</span>
+                <ChevronRight />
+                <span>Release + 300 ms handoff</span>
+              </div>
+              <div className="section-foot">
+                <p>
+                  Failed attempts back off. Local leases release a stuck radio.
+                  Incomplete cycles stay out of complete-cycle statistics.
+                </p>
+                <Source path="ios/SignalMap/RoomTypes.swift">
+                  Round-robin implementation
+                </Source>
+              </div>
+            </section>
+            <div className="supporting-metrics">
+              {' '}
+              <div className="detail-heading">
+                <div>
+                  <Tag>UNDER THE HOOD / POSITIONING PROTOTYPE</Tag>
+                  <h3>Targets and measurements stay distinct.</h3>
+                </div>
+              </div>
+              <div className="metric-cards">
+                <article className="target-card">
+                  <Tag>01 / DESIGN TARGET</Tag>
+                  <strong>
+                    &lt; 5<span>s</span>
+                  </strong>
+                  <h3>Complete ranging cycle</h3>
+                  <p>
+                    Target for all 10 pair distances across a five-phone group.
+                    Device setup, radio conditions, and retries determine actual
+                    cycle time.
+                  </p>
+                  <span className="metric-status">
+                    HARDWARE BENCHMARK PENDING
+                  </span>
+                </article>
+                <article>
+                  <Tag>02 / PROTOCOL CONSTANT</Tag>
+                  <strong>4</strong>
+                  <h3>Valid readings per attempt</h3>
+                  <p>
+                    The completion milestone before peer grace and teardown.
+                    Four samples are a collection threshold, not an accuracy
+                    guarantee.
+                  </p>
+                  <span className="metric-status">IMPLEMENTED</span>
+                </article>
+                <article>
+                  <Tag>03 / FAILURE BOUND</Tag>
+                  <strong>
+                    4<span>s</span>
+                  </strong>
+                  <h3>Measurement deadline</h3>
+                  <p>
+                    Default per-attempt measurement window. A separate local
+                    lease adds five seconds to release the radio if coordination
+                    stalls.
+                  </p>
+                  <span className="metric-status">IMPLEMENTED</span>
+                </article>
+              </div>
+              <div className="timing-note">
+                <div>
+                  <span className="mono">WHAT A “TICK” MEANS</span>
+                  <h4>A complete cycle is a fresh map.</h4>
+                </div>
+                <p>
+                  The coordinator checks work every 100 ms. Bridge packets
+                  arrive at roughly 10 Hz. Neither means a new position was
+                  measured: fresh geometry requires a complete set of ranges.
+                  Profiling reports complete-cycle p50/p95, fit residual, and
+                  measurement age.
+                </p>
+              </div>
+              <div className="engineering-notes">
+                <div>
+                  <h4>Relative, not geographic</h4>
+                  <p>
+                    No latitude, longitude, or gravity-aligned height. Nearly
+                    planar layouts leave the third axis uncertain.
+                  </p>
+                </div>
+                <div>
+                  <h4>Freshness is explicit</h4>
+                  <p>
+                    Motion during a cycle can deform the estimate. The prototype
+                    expires positions after eight seconds.
+                  </p>
+                </div>
+                <div>
+                  <h4>Evidence stays inspectable</h4>
+                  <p>
+                    Per-attempt timing, failures, and full-cycle statistics
+                    export as JSONL. Field navigation performance is not yet
+                    validated.
+                  </p>
+                </div>
+              </div>
+              <Source path="ios/README.md">
+                Read protocol details & profiling methodology
+              </Source>
             </div>
-          </div>
-          <div className="metric-cards">
-            <article className="target-card">
-              <Tag>01 / DESIGN TARGET</Tag>
-              <strong>
-                &lt; 5<span>s</span>
-              </strong>
-              <h3>Complete ranging cycle</h3>
-              <p>
-                Target for all 10 pair distances across a five-phone group.
-                Device setup, radio conditions, and retries determine actual
-                cycle time.
-              </p>
-              <span className="metric-status">HARDWARE BENCHMARK PENDING</span>
-            </article>
-            <article>
-              <Tag>02 / PROTOCOL CONSTANT</Tag>
-              <strong>4</strong>
-              <h3>Valid readings per attempt</h3>
-              <p>
-                The completion milestone before peer grace and teardown. Four
-                samples are a collection threshold, not an accuracy guarantee.
-              </p>
-              <span className="metric-status">IMPLEMENTED</span>
-            </article>
-            <article>
-              <Tag>03 / FAILURE BOUND</Tag>
-              <strong>
-                4<span>s</span>
-              </strong>
-              <h3>Measurement deadline</h3>
-              <p>
-                Default per-attempt measurement window. A separate local lease
-                adds five seconds to release the radio if coordination stalls.
-              </p>
-              <span className="metric-status">IMPLEMENTED</span>
-            </article>
-          </div>
-          <div className="timing-note">
-            <div>
-              <span className="mono">WHAT A “TICK” MEANS</span>
-              <h4>A complete cycle is a fresh map.</h4>
-            </div>
-            <p>
-              The coordinator checks work every 100 ms. Bridge packets arrive at
-              roughly 10 Hz. Neither means a new position was measured: fresh
-              geometry requires a complete set of ranges. Profiling reports
-              complete-cycle p50/p95, fit residual, and measurement age.
-            </p>
-          </div>
-          <div className="engineering-notes">
-            <div>
-              <h4>Relative, not geographic</h4>
-              <p>
-                No latitude, longitude, or gravity-aligned height. Nearly planar
-                layouts leave the third axis uncertain.
-              </p>
-            </div>
-            <div>
-              <h4>Freshness is explicit</h4>
-              <p>
-                Motion during a cycle can deform the estimate. The prototype
-                expires positions after eight seconds.
-              </p>
-            </div>
-            <div>
-              <h4>Evidence stays inspectable</h4>
-              <p>
-                Per-attempt timing, failures, and full-cycle statistics export
-                as JSONL. Field navigation performance is not yet validated.
-              </p>
-            </div>
-          </div>
-          <Source path="ios/README.md">
-            Read protocol details & profiling methodology
-          </Source>
+          </details>
         </section>
         <footer className="wrap">
           <div>
