@@ -13,7 +13,7 @@ import Network
 ///     {"v":1,"id":...,"name":...,"room":...,"t":...,"cycle":...,
 ///      "pos":[x,y],"z":...,"heading":...,"moving":...,"speed":...,
 ///      "headingReady":...,"compass":...,"compassValid":...,
-///      "gesture":"None","flat":...}
+///      "gesture":...,"gestureConfidence":...,"gestureSource":"vision","flat":...}
 ///
 /// consumed by `src/phone_feed.py` on the simulator side. `heading` is the
 /// motion-derived heading in the UWB frame (walking only); `compass` is the
@@ -34,7 +34,9 @@ final class RoomBridge {
         var headingReady: Bool
         var compass: Double      // degrees clockwise from magnetic north
         var compassValid: Bool
-        var gesture: String      // reserved; "None" until phones classify on-device
+        var gesture: String
+        var gestureConfidence: Double
+        var gestureSource: String
         var flat: Bool
     }
 
@@ -86,7 +88,8 @@ final class RoomBridge {
 
     func send(id: String, name: String, room: String, cycle: Int,
               position: Vector3, heading: RelativeMotionHeading,
-              compassDegrees: Double?, flat: Bool) {
+              compassDegrees: Double?, gesture: String,
+              gestureConfidence: Double, flat: Bool) {
         queue.async { [weak self] in
             guard let self, let connection = self.connection, position.finite else { return }
             let now = ProcessInfo.processInfo.systemUptime
@@ -98,7 +101,9 @@ final class RoomBridge {
                                 heading: heading.angle, moving: heading.moving,
                                 speed: heading.speed, headingReady: heading.available,
                                 compass: compassOK ? compassDegrees! : 0, compassValid: compassOK,
-                                gesture: "None", flat: flat)
+                                gesture: gesture.isEmpty ? "None" : String(gesture.prefix(32)),
+                                gestureConfidence: gestureConfidence.isFinite ? max(0, min(1, gestureConfidence)) : 0,
+                                gestureSource: gesture == "None" ? "none" : "vision", flat: flat)
             guard let data = try? self.encoder.encode(sample) else { return }
             connection.send(content: data, completion: .idempotent)
         }

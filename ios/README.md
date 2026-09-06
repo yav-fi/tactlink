@@ -1,6 +1,6 @@
 # TactLink iOS Team Positioning
 
-A native SwiftUI app that coordinates nearby iPhones, rotates UWB ranging pairs, and shares a relative group map. No camera, GPS, or internet connection is used. Network.framework carries encrypted coordination and measurements; Nearby Interaction supplies UWB distances. One optional, off-by-default feature (**Visualizer bridge**, below) sends this phone's own position over the local network to an external simulator.
+A native SwiftUI app that coordinates nearby iPhones, rotates UWB ranging pairs, and shares a relative group map. No GPS or internet connection is used. Network.framework carries encrypted coordination and measurements; Nearby Interaction supplies UWB distances. One optional, off-by-default feature (**Visualizer bridge**, below) sends this phone's own position, facing, and locally recognized gesture to an external simulator. Its front-camera frames remain on the phone.
 
 ## Three-phone test
 
@@ -35,10 +35,9 @@ Logs live in `Documents/RoomBench/latest.txt`, `attempts.jsonl`, and `events.jso
 
 Open `SignalMap.xcodeproj`, choose your development team, pair/trust the physical iPhone, enable Developer Mode, and run the SignalMap scheme. A new phone must be included in the development provisioning profile. If iOS reports **Untrusted Developer**, trust the development profile in **Settings → General → VPN & Device Management**.
 
-Local Xcode 26.3 is at `/Applications/Xcode 26.3.app`. The target can be built with its installed SDK even when scheme builds report a missing downloadable platform:
+Use the active Xcode selected by `xcode-select` (Xcode 26.3 was used for the latest verification). The target can be built with its installed SDK even when scheme builds report a missing downloadable platform:
 
 ```sh
-DEVELOPER_DIR='/Applications/Xcode 26.3.app/Contents/Developer' \
 xcodebuild -project SignalMap.xcodeproj -target SignalMap -sdk iphoneos \
   -configuration Debug -allowProvisioningUpdates \
   CONFIGURATION_BUILD_DIR=/tmp/SignalMap-room-products \
@@ -60,7 +59,9 @@ Source: `RoomTransport.swift` handles data links, `RoomSession.swift` coordinate
 
 ## Visualizer bridge
 
-`RoomBridge.swift` streams this phone's own group-frame position and heading over **UDP to a host on the same Wi-Fi**, about ten times a second, for an external drone simulator (`../src/phone_feed.py`). It is one-way (never receives), off unless a host is set, and carries no room code, NI tokens, or other phones' data. The datagram is small JSON: `id`, `name`, `room` fingerprint, `pos` `[x, y]`, `z`, `heading`, `moving`, `speed`, `cycle`, `compass`, `compassValid`, and a reserved `gesture` field (always `"None"` — the app does not classify hand poses).
+`RoomBridge.swift` streams this phone's own group-frame position and heading over **UDP to a host on the same Wi-Fi**, about ten times a second, for an external drone simulator (`../src/phone_feed.py`). It is one-way (never receives), off unless a host is set, and carries no room code, NI tokens, other phones' data, or camera frames. The datagram is small JSON: `id`, `name`, `room` fingerprint, `pos` `[x, y]`, `z`, `heading`, `moving`, `speed`, `cycle`, `compass`, `compassValid`, `gesture`, `gestureConfidence`, and `gestureSource`.
+
+`GestureCamera.swift` uses Apple's on-device Vision hand landmarks at up to 15 fps. It emits the same canned labels consumed by `config/gesture_actions.json`, plus `Dash_Left`, `Dash_Right`, and `Three_Finger_Forward`. The front-camera input is normalized as an upright mirrored selfie: left/right are the wearer's left/right. All three directional labels are resolved relative to the controlling operator's compass facing by the Python simulator. Losing the hand, dropping below confidence, leaving the room, or backgrounding immediately returns the label to `None`.
 
 Two headings are sent. `heading` is `RelativeMotionHeading` — derived from how the group centroid-relative position changes, so it is only meaningful while walking. `compass` (`HeadingSource.swift`) is an absolute **magnetic** bearing in degrees clockwise from north, from Core Motion's `.xMagneticNorthZVertical` device-motion fusion — no location permission, no GPS. The simulator prefers `compass` when `compassValid`, else falls back to `heading`. Magnetic (not true) north is fine: every phone in one place shares the reference, and declination plus any mount-angle offset is one constant on the sim side (`--phone-frame-rot`). It assumes the phone is worn upright, screen facing forward; a near-flat phone reports `compassValid: false`.
 

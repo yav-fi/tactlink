@@ -1,4 +1,4 @@
-# Phone-controlled drone: what's left to do
+# Phone-controlled drone: implementation and field verification
 
 **Audience:** a teammate (or their coding agent) picking up the iPhone ↔ simulator
 integration. Every step below is a concrete command or file edit with an
@@ -28,10 +28,14 @@ have control).
 | `src/main.py` flags `--phone-feed`, `--phone-frame-rot`, `--no-camera` | done, tested |
 | `scripts/mock_phone_feed.py` — fake phones (`--script`, `--still`, `--no-compass`) | done, tested |
 
-**Not done:** the phones do not recognise gestures yet. `RoomBridge` always
-sends `"gesture": "None"`. Task 3 fills that in. Everything downstream of the
-`gesture` field already works end to end (proven with `mock_phone_feed.py
---script`).
+**Implemented September 6, 2026:** phones now recognize hand landmarks locally
+with Apple Vision and send `gesture`, `gestureConfidence`, and `gestureSource`.
+The dependency-free implementation preserves the existing Xcode project and
+deployment scripts. It also recognizes the geometric `Dash_Left`, `Dash_Right`,
+and `Three_Finger_Forward` labels required beyond canned gestures. Mac builds,
+native geometry tests, local Network.framework protocol tests, and the full
+three-phone UDP mock path pass. Three-real-phone camera, compass, UWB, and
+thermal validation remains blocked until three phones are reachable.
 
 ---
 
@@ -153,7 +157,12 @@ If it's off by a **constant** (mount tilt): leave the Swift alone, use
 
 ---
 
-## TASK 3 — On-phone gesture recognition (Mac) — the remaining work
+## TASK 3 — On-phone gesture recognition (implemented with Apple Vision)
+
+The MediaPipe/CocoaPods instructions below are retained as historical design
+notes. The completed implementation uses `VNDetectHumanHandPoseRequest` instead:
+it supplies the same normalized joint geometry without changing the build
+system, and makes the required two-/three-finger detectors directly testable.
 
 Add a front-camera hand-gesture recognizer to each phone and put the label in
 `RoomBridge`'s `gesture` field.

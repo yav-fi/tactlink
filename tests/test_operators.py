@@ -52,6 +52,18 @@ def test_forward_bearing_is_active_operator_heading():
     assert abs(pool.resolve_forward_bearing() - math.radians(90)) < 1e-6
 
 
+def test_phone_relative_dashes_follow_active_operator_facing():
+    pool = OperatorPool(1)
+    pool.active_op.heading = math.radians(90)  # facing north
+    forward = float(pool.resolve_relative_event("fly_forward").split(":")[1])
+    left = float(pool.resolve_relative_event("fly_left").split(":")[1])
+    right = float(pool.resolve_relative_event("fly_right").split(":")[1])
+    assert abs(forward - math.pi / 2) < 1e-4
+    assert abs(left - math.pi) < 1e-4
+    assert abs(right) < 1e-4
+    assert pool.resolve_relative_event("halt") == "halt"
+
+
 def test_wander_moves_and_stays_bounded():
     op = Operator("t", (0.0, 0.0), 0.0)
     for _ in range(600):

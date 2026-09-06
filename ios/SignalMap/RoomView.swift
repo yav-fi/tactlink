@@ -24,7 +24,7 @@ struct RoomView: View {
                         .background(roomMint.opacity(0.12), in: Capsule()).foregroundStyle(roomMint)
                 }.padding(.top, 12)
                 if room.joined { sessionContent } else { lobby }
-                Text("No GPS · No internet · No camera")
+                Text("No GPS · Camera gestures stay on this phone")
                     .font(.system(size: 10, design: .monospaced)).foregroundStyle(roomMuted)
                     .frame(maxWidth: .infinity).padding(.bottom, 14)
             }.padding(.horizontal, 22)
@@ -139,6 +139,7 @@ struct RoomView: View {
                 }
             }
             RoomMap(room: room)
+            GestureStatus(camera: room.gestureCamera)
             HStack(spacing: 12) {
                 stat("CYCLE", String(room.cycle))
                 stat("PAIR RANGES", "\(room.availableRanges.count)/\(max(1,room.participantCount*(room.participantCount-1)/2))")
@@ -196,6 +197,24 @@ struct RoomView: View {
             Text(title).font(.system(size: 8, weight: .medium, design: .monospaced)).foregroundStyle(roomMuted)
             Text(value).font(.system(size: 23, weight: .medium, design: .rounded)).monospacedDigit()
         }.frame(maxWidth: .infinity, alignment: .leading).padding(12).background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+private struct GestureStatus: View {
+    @ObservedObject var camera: GestureCamera
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: camera.gesture == "None" ? "hand.raised.slash" : "hand.raised.fill")
+                .foregroundStyle(camera.gesture == "None" ? roomMuted : roomMint)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("GESTURE · \(camera.gesture)")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                Text(camera.status).font(.caption2).foregroundStyle(roomMuted)
+            }
+            Spacer()
+            Text(camera.gesture == "None" ? "—" : String(format: "%.0f%%", camera.confidence * 100))
+                .font(.system(size: 13, weight: .medium, design: .monospaced)).foregroundStyle(roomMint)
+        }.padding(14).background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
     }
 }
 

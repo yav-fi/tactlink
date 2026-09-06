@@ -131,3 +131,11 @@ class OperatorPool:
         if not self.operators:
             return 0.0
         return self.active_op.heading
+
+    def resolve_relative_event(self, event: str) -> str:
+        """Resolve phone-relative dashes using the controlling operator's facing."""
+        offsets = {"fly_forward": 0.0, "fly_left": math.pi / 2,
+                   "fly_right": -math.pi / 2}
+        if event not in offsets:
+            return event
+        return f"fly_bearing:{self.resolve_forward_bearing() + offsets[event]:.4f}"

@@ -13,6 +13,7 @@ final class RoomSession: ObservableObject {
     let log: BenchLog
     let bridge = RoomBridge()
     let compass = HeadingSource()   // magnetic bearing, for the bridge only
+    let gestureCamera = GestureCamera()
     @Published var displayName: String
     /// Optional "host:port" of an external visualizer / drone simulator on the
     /// same Wi-Fi. Empty disables the outbound telemetry stream. Persisted.
@@ -20,6 +21,11 @@ final class RoomSession: ObservableObject {
         didSet {
             UserDefaults.standard.set(simBridge, forKey: "room.simBridge")
             bridge.configure(simBridge)
+            if joined && sceneActive && !simBridge.isEmpty {
+                compass.start(); gestureCamera.start()
+            } else if simBridge.isEmpty {
+                compass.stop(); gestureCamera.stop()
+            }
         }
     }
     @Published private(set) var code = ""
@@ -121,7 +127,7 @@ final class RoomSession: ObservableObject {
         }
         ranging.onUpdate = { [weak self] count, distance in self?.liveSamples=count; self?.liveDistance=distance }
         log.onError = { [weak self] error in self?.logError=error }
-        log.event("launch", "build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "?") · camera disabled")
+        log.event("launch", "build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "?") · local gesture camera available")
         let launchArgs = ProcessInfo.processInfo.arguments
         if let i = launchArgs.firstIndex(of: "--sim-bridge"), launchArgs.indices.contains(i + 1) {
             simBridge = launchArgs[i + 1]
@@ -163,7 +169,7 @@ final class RoomSession: ObservableObject {
         status="Waiting for \(targetCount) phones. Share this room code with the group."
         transport.start(code: clean)
         bridge.configure(simBridge)
-        if !simBridge.isEmpty { compass.start() }
+        if !simBridge.isEmpty { compass.start(); gestureCamera.start() }
         UIApplication.shared.isIdleTimerDisabled = true
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.tick() }
         log.event("room-joined", transport.room)
@@ -177,6 +183,7 @@ final class RoomSession: ObservableObject {
         transport.stop()
         bridge.stop()
         compass.stop()
+        gestureCamera.stop()
         joined=false; running=false; members=[]; known=[:]; clocks=[:]
         jobs=[:]; offered=[:]; pending=[]; cycleStarted=nil
         geometry=nil; geometryUpdated=nil; liveDistance=nil; liveSamples=0
@@ -194,6 +201,7 @@ final class RoomSession: ObservableObject {
         gate.release()
         transport.stop()
         compass.stop()
+        gestureCamera.stop()
         timer?.invalidate(); timer=nil
         running=false; geometry=nil; geometryUpdated=nil
         log.event("background", "Local NI lease released; networking stopped")
@@ -207,7 +215,7 @@ final class RoomSession: ObservableObject {
         known=[:]; members=[]; jobs=[:]; pending=[]; topology=""; cycleStarted=nil
         ranges=[:]; geometry=nil; geometryCycle = -1
         transport.start(code: code)
-        if !simBridge.isEmpty { compass.start() }
+        if !simBridge.isEmpty { compass.start(); gestureCamera.start() }
         UIApplication.shared.isIdleTimerDisabled=true
         timer=Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.tick() }
         status="Rejoining the room…"
@@ -477,7 +485,9 @@ final class RoomSession: ObservableObject {
         if let mine=geometry?.positions[localID] {
             bridge.send(id:localID,name:displayName,room:transport.room,cycle:cycle,
                         position:mine,heading:motionHeading,
-                        compassDegrees:compass.compassDegrees,flat:threePhoneMode)
+                        compassDegrees:compass.compassDegrees,
+                        gesture:gestureCamera.gesture,
+                        gestureConfidence:gestureCamera.confidence,flat:threePhoneMode)
         }
     }
 
@@ -612,7 +622,8 @@ final class RoomSession: ObservableObject {
         Run: \(log.runID)
         Room fingerprint: \(transport.room)
         Local: \(displayName) [\(localID)]
-        Camera: not used; no AR session
+        Gesture camera: \(gestureCamera.status); label=\(gestureCamera.gesture); confidence=\(String(format:"%.2f",gestureCamera.confidence)); frames remain on-device
+        NI camera assistance: not used; no AR session
         Transport: Network framework, peer-to-peer enabled, AES-GCM room encryption, no cellular
         Members: \(participantCount)/\(targetCount); direct links: \(transport.peers.count)
         Coordinator: \(leader.map(name) ?? "none")

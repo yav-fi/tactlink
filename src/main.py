@@ -266,11 +266,7 @@ def run(args: argparse.Namespace) -> int:
                 gstate.events.append(kbd_event)
                 kbd_event = None
             # "forward" is relative to the operator who gestured.
-            gstate.events = [
-                f"fly_bearing:{operators.resolve_forward_bearing():.4f}"
-                if e == "fly_forward" else e
-                for e in gstate.events
-            ]
+            gstate.events = [operators.resolve_relative_event(e) for e in gstate.events]
             if mission_adapter and mission_client:
                 for event in gstate.events:
                     mission = mission_adapter.event_to_command(event)

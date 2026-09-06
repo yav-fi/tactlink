@@ -30,6 +30,8 @@
 	<array>
 		<string>_signal-room._tcp</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>TactLink recognizes your hand gestures on this phone to control the simulated drone. Camera frames stay on this device.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIApplicationSceneManifest</key>

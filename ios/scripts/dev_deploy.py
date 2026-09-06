@@ -20,7 +20,9 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 STATE = ROOT / 'build' / 'dev-deploy'
 BUNDLE = 'com.arulandu.SignalMap'
-XCODE = os.environ.get('DEVELOPER_DIR', '/Applications/Xcode 26.3.app/Contents/Developer')
+XCODE = os.environ.get('DEVELOPER_DIR') or subprocess.check_output(
+    ['xcode-select', '-p'], text=True
+).strip()
 ENV = dict(os.environ, DEVELOPER_DIR=XCODE)
 
 
