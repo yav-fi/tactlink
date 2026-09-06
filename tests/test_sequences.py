@@ -108,9 +108,10 @@ def test_shipped_action_config():
 
     assert _ACTION.get("Thumb_Up") == "takeoff"
     assert _ACTION.get("Thumb_Down") == "land"
+    assert _ACTION.get("Open_Palm") == "halt"
     # disabled via null in config/gesture_actions.json
-    assert "Open_Palm" not in _ACTION
     assert "Closed_Fist" not in _ACTION
+    assert "Victory" not in _ACTION
 
 
 def test_non_combo_gesture_is_not_delayed():

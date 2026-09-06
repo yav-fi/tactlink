@@ -11,15 +11,16 @@ Default gesture map (override in config/gesture_actions.json)
 -----------------------------------------------------------
 Thumb_Up     -> take off / arm, then step altitude up
 Thumb_Down   -> land / disarm
-Pointing_Up  -> orbit the origin
-ILoveYou     -> return to the start point and hover
+Pointing_Up  -> orbit the controlling operator
+ILoveYou     -> return to the controlling operator and hover
+Open_Palm    -> halt: cancel the current routine and hover in place
 
-Open_Palm, Closed_Fist, and Victory are disabled by the default config because
-they were prone to false-positive actions. A custom config may remap them.
+Closed_Fist and Victory are disabled by the default config because they were
+prone to false-positive actions. A custom config may remap them.
 
-Recognized actions: takeoff, land, cycle_mode, speed_up, speed_down, spin360,
-return_home, estop. Map any gesture name (canned or your own custom label) to one
-of these in config/gesture_actions.json - it is merged over the defaults.
+Recognized actions: takeoff, land, halt, cycle_mode, speed_up, speed_down,
+spin360, return_home, estop. Map any gesture name (canned or your own custom
+label) to one of these in config/gesture_actions.json - merged over the defaults.
 
 Ordered combos (config/gesture_sequences.json, see :mod:`sequences`) fire when
 several gestures happen in order inside a time window, e.g. open -> fist -> open.
@@ -45,6 +46,7 @@ _DEFAULT_ACTION = {
     "Thumb_Down": "land",      # descend + disarm
     "Pointing_Up": "orbit",
     "ILoveYou": "return_home",
+    "Open_Palm": "halt",       # cancel the current routine, hover in place
 }
 _CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),

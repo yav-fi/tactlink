@@ -52,12 +52,13 @@ def _load_mission_integration():
 _DEMO_GESTURES = [
     (1.5, 2.5, "Thumb_Up"),       # arm + takeoff
     (4.0, 5.0, "Thumb_Up"),       # airborne: step altitude up
-    (7.0, 8.3, "Pointing_Up"),    # orbit the origin (until the next command)
-    (17.5, 18.5, "ILoveYou"),     # return home + hover
-    (22.0, 23.5, "Thumb_Down"),   # disarm + land
+    (7.0, 8.3, "Pointing_Up"),    # orbit the operator
+    (10.0, 10.8, "Open_Palm"),    # halt: stop orbiting, hover in place
+    (18.5, 19.5, "ILoveYou"),     # return to the operator + hover
+    (23.0, 24.5, "Thumb_Down"),   # disarm + land
 ]
-_DEMO_SWING = (10.5, 14.0)        # two-finger wiper V-H-V-H -> fly east
-_DEMO_THREE = (15.5, 16.6)        # three fingers sideways -> forward (operator-relative)
+_DEMO_SWING = (12.0, 15.5)        # two-finger wiper V-H-V-H -> fly east
+_DEMO_THREE = (16.5, 17.6)        # three fingers -> forward (operator bearing = north)
 
 
 def _demo_hand(t: float) -> HandState:
@@ -165,11 +166,11 @@ def run(args: argparse.Namespace) -> int:
     swarm = None if (runtime_mode or check_mode) else Swarm(args.drones)
     viz = None if (runtime_mode or check_mode) else Visualizer()
     operators = OperatorPool(max(args.operators, 4) if args.demo else args.operators)
-    if args.demo:                        # deterministic: a line of people facing east
-        operators.wander_enabled = False
+    operators.wander_enabled = args.wander and not args.demo
+    if args.demo:                        # deterministic: a line of people facing north
         for i, op in enumerate(operators.operators):
-            op.pos[:] = [i * 6.0 - (operators.n - 1) * 3.0, 0.0]
-            op.heading = 0.0
+            op.pos[:] = [i * 12.0 - (operators.n - 1) * 6.0, 0.0]
+            op.heading = math.pi / 2
     event_log: list[str] = []
     mission_adapter = mission_client = mission_error_cls = None
     if runtime_mode:
@@ -322,6 +323,8 @@ def main() -> int:
                    help="squad size flown in formation (1 = single drone)")
     p.add_argument("--operators", type=int, default=1,
                    help="simulated people giving gestures (built for 5)")
+    p.add_argument("--wander", action="store_true",
+                   help="let the simulated operators walk around (default: they stand still)")
     p.add_argument("--demo", action="store_true",
                    help="run without a camera using a scripted hand path")
     p.add_argument("--headless", action="store_true",

@@ -110,7 +110,7 @@ highlight a drone.
 `--drones N` flies a squad. Drone 0 is the **leader** — every gesture drives it
 exactly like the single-drone app — and the rest hold a fixed ring formation
 around it, so the whole squad takes off, climbs, orbits, dashes and returns home
-together. Return-home recentres the formation on the origin. The HUD shows
+together (all relative to the controlling operator). The HUD shows
 `ARMED xN` and `sel #k`; `1`-`9` highlight a drone (per-drone "single-out"
 commanding is the next step — the hook is there, `Swarm.selected`).
 
@@ -118,16 +118,19 @@ commanding is the next step — the hook is there, `Swarm.selected`).
 
 The picture: **N people, each with a chest-mounted phone** running the gesture
 model, all in the scene; one virtual drone flies **above** them. `--operators N`
-(`src/operators.py`) simulates the people — position, facing, wander.
+(`src/operators.py`) simulates the people — position + facing. They stand still
+by default (real phone positions will drive them); `--wander` makes them walk.
 
 - **Control = proximity.** The drone obeys whichever operator it is currently
-  **nearest** to (recomputed every frame). The HUD shows `CTRL opN`, and that
-  operator is cyan in the 3D view.
-- **Idle = follow.** With no command running, the drone gently trails the
-  operator it is nearest to, staying at altitude above them.
-- **Direction is operator-relative.** The three-finger "forward" dash flies along
-  the *controlling operator's* facing (their chest camera points where they
-  face).
+  **nearest** to (with hysteresis so it doesn't flicker mid-pass). The HUD shows
+  `CTRL opN`, and that operator is cyan in the 3D view.
+- **Anchored to the controlling operator.** Right after **take off** (or
+  **return-home**) the drone trails them ("leashed"); `orbit` circles them;
+  `return_home` flies back to them. Operators face **north** by default, so the
+  three-finger "forward" dash goes north.
+- **A dash leaves the drone where it lands.** `fly_east` / `fly_west` /
+  three-finger forward drop the leash — the drone hovers at the new spot instead
+  of drifting back. `return_home` re-leashes it.
 - **Handoff is emergent.** Dash the drone toward someone else; when it arrives it
   is nearest to them, so they take control. No dedicated handoff gesture.
 
@@ -160,10 +163,11 @@ Hold a sign steady for ~0.4 s to fire it; relax before repeating.
 | --- | --- |
 | 👍 Thumb up | **Arm + take off** (to ~3 m, above the operators); each one after that **steps the altitude up ~1.5 m** (to 9 m) |
 | 👎 Thumb down | **Land + disarm** |
-| ☝️ Pointing up | Orbit: fly out to a 10 m radius and circle the origin, nose kept pointed inward — point again to stop |
-| 🤟 ILoveYou | Return to the start point and hover |
-| **Three fingers held sideways** (index+middle+ring) | Dash ~5 m **forward** — along the bearing the gesturing operator faces (`ThreeFingerForward`) |
-| ✋ Open palm · ✊ Closed fist · ✌️ Victory | *no action* |
+| ✋ Open palm | **Halt** — cancel whatever it's doing and hover right where it is |
+| ☝️ Pointing up | Orbit: circle the **controlling operator** at ~6 m, nose kept pointed inward — point again to stop |
+| 🤟 ILoveYou | Fly back to the **controlling operator** and hover |
+| **Three fingers** (index+middle+ring, pinky curled), held ~0.45 s | Dash ~5 m **forward** — along the bearing the controlling operator faces (`ThreeFingerForward`). Any hand orientation. |
+| ✊ Closed fist · ✌️ Victory | *no action* |
 
 Take off, land, orbit, return-home (and the `fly_*` dashes) run as autopilot
 routines that take over until they finish (`MODE` turns red in the HUD). Orbit

@@ -32,6 +32,7 @@ def _armed_at(ctl, sim, alt=2.0):
     """Put the drone in the air the way a `takeoff` event would."""
     ctl._armed = True
     ctl._alt_target = alt
+    ctl._leashed = True
     sim.state.armed = True
     sim.state.pos[2] = alt
 
@@ -131,6 +132,90 @@ def test_fly_bearing_dashes_along_the_given_angle():
     ang = math.atan2(moved[1], moved[0])
     assert abs((ang - bearing + math.pi) % (2 * math.pi) - math.pi) < 0.3
     assert ctl.maneuver == ""
+
+
+def test_orbit_circles_the_anchor_not_the_origin():
+    ctl = GestureController()
+    sim = QuadSimulator()
+    _armed_at(ctl, sim, alt=3.0)
+    anchor = (12.0, -8.0)
+    for i in range(int(25 / (1 / 60))):
+        ev = ["orbit"] if i == 0 else []
+        cmd = ctl.update(HandState(present=False),
+                         GestureState(events=ev, follow_pos=anchor), sim.state)
+        sim.step(cmd, 1 / 60)
+    r = float(np.linalg.norm(np.array(sim.state.pos[:2]) - anchor))
+    assert abs(r - _ORBIT_RADIUS) < 1.5, r
+    assert np.linalg.norm(sim.state.pos[:2]) > 5.0    # nowhere near the origin
+
+
+def test_return_home_goes_to_the_anchor():
+    ctl = GestureController()
+    sim = QuadSimulator()
+    _armed_at(ctl, sim, alt=3.0)
+    sim.state.pos[:2] = [0.0, 0.0]
+    anchor = (9.0, 4.0)
+    for i in range(int(12 / (1 / 60))):
+        ev = ["return_home"] if i == 0 else []
+        cmd = ctl.update(HandState(present=False),
+                         GestureState(events=ev, follow_pos=anchor), sim.state)
+        sim.step(cmd, 1 / 60)
+    assert np.linalg.norm(np.array(sim.state.pos[:2]) - anchor) < 1.2, sim.state.pos
+
+
+def test_drone_holds_position_after_a_dash_not_returning_to_anchor():
+    ctl = GestureController()
+    sim = QuadSimulator()
+    _armed_at(ctl, sim, alt=3.0)
+    sim.state.pos[:2] = [0.0, 0.0]
+    anchor = (0.0, 0.0)
+    for i in range(int(10 / (1 / 60))):          # dash east, then keep running
+        ev = ["fly_east"] if i == 0 else []
+        cmd = ctl.update(HandState(present=False),
+                         GestureState(events=ev, follow_pos=anchor), sim.state)
+        sim.step(cmd, 1 / 60)
+    # 4 s after the dash finished it should still be out east, not back at anchor
+    assert sim.state.pos[0] > 3.5, sim.state.pos
+    assert float(np.linalg.norm(sim.state.vel[:2])) < 0.5    # hovering, not drifting home
+
+
+def test_return_home_re_leashes_the_drone():
+    ctl = GestureController()
+    sim = QuadSimulator()
+    _armed_at(ctl, sim, alt=3.0)
+    sim.state.pos[:2] = [6.0, 0.0]
+    ctl._leashed = False                         # as if just finished a dash
+    anchor = (0.0, 0.0)
+    for i in range(int(10 / (1 / 60))):
+        ev = ["return_home"] if i == 0 else []
+        cmd = ctl.update(HandState(present=False),
+                         GestureState(events=ev, follow_pos=anchor), sim.state)
+        sim.step(cmd, 1 / 60)
+    assert np.linalg.norm(sim.state.pos[:2]) < 1.2, sim.state.pos
+    assert ctl._leashed
+
+
+def test_halt_cancels_a_maneuver_and_holds_position():
+    ctl = GestureController()
+    sim = QuadSimulator()
+    _armed_at(ctl, sim, alt=3.0)
+    sim.state.pos[:2] = [1.0, 0.0]
+    anchor = (0.0, 0.0)
+    # orbit for a bit, then halt
+    for i in range(600):
+        ev = ["orbit"] if i == 0 else (["halt"] if i == 300 else [])
+        cmd = ctl.update(HandState(present=False),
+                         GestureState(events=ev, follow_pos=anchor), sim.state)
+        sim.step(cmd, 1 / 60)
+    assert ctl.maneuver == ""
+    here = np.array(sim.state.pos[:2])
+    # keep running - it must stay put, not resume orbit or drift to the anchor
+    for _ in range(300):
+        cmd = ctl.update(HandState(present=False),
+                         GestureState(follow_pos=anchor), sim.state)
+        sim.step(cmd, 1 / 60)
+    assert np.linalg.norm(np.array(sim.state.pos[:2]) - here) < 0.8, sim.state.pos
+    assert abs(sim.state.pos[2] - 3.0) < 0.4
 
 
 def test_idle_drone_follows_the_given_point():
