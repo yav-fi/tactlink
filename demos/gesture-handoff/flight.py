@@ -20,6 +20,11 @@ ORBIT_SPEED = 2.2         # m/s tangential
 ARRIVE_RADIUS = 1.0       # within this of the anchor, a return/hand-off is "done"
 MAX_SPEED = 4.5           # m/s horizontal cruise cap
 DRAG = 1.6                # 1/s, frame-rate independent
+DASH_DISTANCE = 5.0       # metres the wiper nudges the drone sideways
+AIM_DWELL = 1.4           # seconds of steady pointing before a targeted hand-off
+_AIM_LOST = 0.5
+_AIM_MIN_POINT = 0.55     # |finger vector| that counts as a deliberate point
+_AIM_MIN_ALIGN = 0.35     # dot with an operator's on-screen direction
 
 
 def _ang_to(cur: float, target: float) -> float:
@@ -35,6 +40,9 @@ class Operators:
         self.pos = _scatter(self.n, radius, min_sep, self.rng)
         self.names = [f"OP{i + 1}" for i in range(self.n)]
         self.anchor = 0               # operator the drone belongs to
+        self.target = None            # operator being pointed at for a targeted hand-off
+        self._aim_since = None
+        self._aim_seen = 0.0
 
     def anchor_pos(self) -> np.ndarray:
         return self.pos[self.anchor]
@@ -44,6 +52,53 @@ class Operators:
         choices = [i for i in range(self.n) if i != self.anchor]
         self.anchor = int(self.rng.choice(choices))
         return self.anchor
+
+    def aim_from_point(self, point_dir, drone_xy):
+        """Finger direction (image space) -> the operator most in that direction
+        from the drone, or None. Point the way you want the drone to go."""
+        dx, dy = point_dir
+        if (dx * dx + dy * dy) ** 0.5 < _AIM_MIN_POINT:
+            return None
+        want = np.array([dx, -dy])                    # screen up (-y) == world +y
+        want = want / (np.linalg.norm(want) + 1e-9)
+        drone_xy = np.asarray(drone_xy, float)
+        best, best_score = None, _AIM_MIN_ALIGN
+        for i in range(self.n):
+            if i == self.anchor:
+                continue
+            v = self.pos[i] - drone_xy
+            d = np.linalg.norm(v)
+            if d < 0.5:
+                continue
+            score = float(np.dot(v / d, want))
+            if score > best_score:
+                best, best_score = i, score
+        return best
+
+    def aim(self, target, now: float) -> None:
+        """Feed the aimed operator each frame; hold-to-send progress is tracked."""
+        if target is not None and target != self.anchor:
+            if target != self.target:
+                self.target = int(target)
+                self._aim_since = now
+            self._aim_seen = now
+        elif self.target is not None and now - self._aim_seen > _AIM_LOST:
+            self.target = None
+            self._aim_since = None
+
+    def aim_progress(self, now: float) -> float:
+        if self.target is None or self._aim_since is None:
+            return 0.0
+        return min(1.0, (now - self._aim_since) / AIM_DWELL)
+
+    def commit_aim(self):
+        """Move the anchor to the aimed operator. Returns the new anchor, or None."""
+        if self.target is not None and self.target != self.anchor:
+            self.anchor = self.target
+            self.target = None
+            self._aim_since = None
+            return self.anchor
+        return None
 
 
 class Quad:
@@ -81,6 +136,7 @@ class Autopilot:
         self._orbit_on = False
         self._orbit_phase = 0.0
         self._halt_xy = None
+        self._dash_goal = None
 
     def command(self, cmd: str, quad: Quad, now: float) -> str:
         """Apply a fired gesture command. Returns a short note for the HUD."""
@@ -114,8 +170,21 @@ class Autopilot:
             self.mode = "return"
             self._orbit_on = False
             return f"return to {self.ops.names[self.ops.anchor]}"
-        if cmd == "handoff":
+        if cmd in ("dash_east", "dash_west"):
+            d = DASH_DISTANCE if cmd == "dash_east" else -DASH_DISTANCE
+            self._dash_goal = quad.pos[:2] + np.array([d, 0.0])
+            self._orbit_on = False
+            self.mode = "dash"
+            return f"dash {'right' if d > 0 else 'left'}"
+        if cmd == "handoff_random":
             new_anchor = self.ops.random_handoff()
+            self.mode = "handoff"
+            self._orbit_on = False
+            return f"hand off -> {self.ops.names[new_anchor]}"
+        if cmd == "handoff_aim":
+            new_anchor = self.ops.commit_aim()
+            if new_anchor is None:
+                return ""
             self.mode = "handoff"
             self._orbit_on = False
             return f"hand off -> {self.ops.names[new_anchor]}"
@@ -139,6 +208,12 @@ class Autopilot:
 
         if self.mode == "halt":
             goal = self._halt_xy
+        elif self.mode == "dash":
+            goal = self._dash_goal
+            if np.linalg.norm(quad.pos[:2] - self._dash_goal) < ARRIVE_RADIUS:
+                self.mode = "halt"                    # then hold at the new spot
+                self._halt_xy = np.asarray(self._dash_goal, float).copy()
+                self.alt_target = float(quad.pos[2])
         elif self.mode == "orbit":
             self._orbit_phase += (ORBIT_SPEED / ORBIT_RADIUS) * dt
             goal = anchor + ORBIT_RADIUS * np.array(

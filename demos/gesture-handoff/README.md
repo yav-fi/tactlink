@@ -1,10 +1,9 @@
 # Gesture control demo — drone hand-off
 
-Operator 1 flies one drone with webcam hand signals, among **N static operators**
-(4 by default, scattered at random through the scene each run), and hands the
-drone to a random other operator by holding a Victory sign. One window: the
-webcam with the tracked hand on the left, a 3D view of the operators and the
-drone on the right.
+Operator 1 flies one drone with webcam hand signals among **N static operators**
+(4 by default, scattered at random through the scene each run), hands the drone
+between them, and dashes it left/right. One window: the webcam with the tracked
+hand on the left, a 3D view of the operators and the drone on the right.
 
 Standalone: this folder imports nothing from `src/`. It runs on the repo's
 dependencies (`mediapipe`, `opencv`, `numpy` from `requirements.txt`), so no
@@ -32,16 +31,24 @@ Escape quits.
 | Open palm | ~0.4 s | Halt — cancel the current move and hover in place |
 | Point up (index finger) | ~0.4 s | Orbit the controlling operator; point up again to stop |
 | I-love-you sign | ~0.4 s | Fly back to the controlling operator and hover |
-| **Victory sign** | **~2 s** | **Hand off** — send the drone to a random other operator |
+| **Point at an operator** | **~1.4 s** | **Hand off** to *that* operator (orange ring fills as you hold) |
+| **Victory sign** | **~2 s** | **Hand off** to a *random* other operator |
+| **Two-finger wiper** | — | **Dash** the drone left/right |
 
-The Victory bar at the bottom of the scene fills while you hold the sign (brief
-recognizer dropouts don't reset it); when it completes the drone flies to a
-random operator and is now theirs (`CTRL -> OPn`, gold). Only operator 1 has a
-camera — a hand-off just moves which operator the drone orbits, returns to, and
-hovers above. The drone's nose always turns to face the nearest operator.
+**Hand-off, two ways.** Point your finger toward an operator (relative to the
+drone) and hold — an orange ring fills, and when it completes the drone flies to
+that one. Or hold a Victory sign ~2 s to send it to a random operator. Only
+operator 1 has a camera; a hand-off just moves which operator the drone orbits,
+returns to, and hovers above (`CTRL -> OPn`, gold).
 
-If the webcam panel shows e.g. `Victory? 42%`, the model sees the pose but below
-the accept threshold — hold it more squarely, or pass `--threshold 0.4`.
+**Wiper dash.** Hold index + middle out and swing them vertical → horizontal →
+vertical → horizontal within a few seconds. On the last swing the drone dashes
+~5 m the way the fingers point and holds there (it does not spring back).
+
+The drone's nose always turns to face the nearest operator. Brief recognizer
+dropouts don't reset a hold. If the webcam panel shows e.g. `Victory? 42%`, the
+model sees the pose but below the accept threshold — hold it more squarely, or
+pass `--threshold 0.4`.
 
 ## Options
 
@@ -59,10 +66,10 @@ the accept threshold — hold it more squarely, or pass `--threshold 0.4`.
 | File | Role |
 | --- | --- |
 | `gesture_demo.py` | entry point: webcam loop, MediaPipe recognizer, compositing, `--demo` |
-| `gestures.py` | `GestureGate` — dropout-tolerant hold-to-fire debounce |
-| `flight.py` | `Quad` physics, `Operators` (random scatter + random hand-off), `Autopilot` |
+| `gestures.py` | `GestureGate` (dropout-tolerant hold), `FingerSwingDetector` (wiper), landmark helpers |
+| `flight.py` | `Quad` physics, `Operators` (random scatter, targeted + random hand-off, aim), `Autopilot` |
 | `scene.py` | pinhole-camera 3D render of the grid, operators, drone + HUD |
-| `test_gesture_demo.py` | `python -m unittest` from this folder — 11 tests |
+| `test_gesture_demo.py` | `python -m unittest` from this folder — 14 tests |
 
 The 3D view is a hand-rolled pinhole projection (no game engine); the model reads
 static hand poses, not motion. The scene is a visualization, not a calibrated
