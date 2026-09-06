@@ -161,7 +161,7 @@ test("close camera and drone model use physical metres without screen-size enlar
   const render = new Cesium.Event();
   let cameraRange;
   const viewer = { entities: new Cesium.EntityCollection(), scene: { preRender: render },
-    canvas: { addEventListener() {}, removeEventListener() {} },
+    canvas: { style: {}, addEventListener() {}, removeEventListener() {} },
     camera: { lookAt(center, offset) { cameraRange = offset.range; }, lookAtTransform() {} } };
   const drone = new Fleet(viewer).deploy({ latitude: 38.889, longitude: -77.036, altitude: 83.5 });
   const scene = startPhoneScene(viewer, drone, frame);
@@ -236,4 +236,36 @@ test("follow flies above the selected person, settles, and tracks a changed mapp
   assert(Math.hypot(end.x - owner.position.x, end.y - owner.position.y) < 0.2);
   const stopped = drone.snapshot(); drone.update(1 / 60);
   assert.deepEqual(drone.snapshot(), stopped);
+});
+
+
+test("drag rotates the close phone camera without changing range or jumping back to the monument", () => {
+  const { GeoFrame } = loadSource("runtime/frame");
+  const { startPhoneScene } = loadSource("phone-scene");
+  const frame = new GeoFrame(); frame.update(38.889, -77.036, 80);
+  const render = new Cesium.Event(), events = new Map();
+  let pose, captured;
+  const canvas = { style: { touchAction: "auto" }, clientHeight: 800,
+    addEventListener(name, handler) { events.set(name, handler); }, removeEventListener(name) { events.delete(name); },
+    setPointerCapture(id) { captured = id; }, hasPointerCapture(id) { return captured === id; }, releasePointerCapture() { captured = undefined; } };
+  const viewer = { entities: new Cesium.EntityCollection(), scene: { preRender: render }, canvas,
+    camera: { lookAt(center, offset) { pose = { center: Cesium.Cartesian3.clone(center), ...offset }; }, lookAtTransform() {} } };
+  const drone = new Fleet(viewer).deploy({ latitude: 38.889, longitude: -77.036, altitude: 83.5 });
+  const scene = startPhoneScene(viewer, drone, frame);
+  render.raiseEvent(); const before = pose;
+  const event = { pointerId: 1, button: 0, clientX: 100, clientY: 100, preventDefault() {} };
+  events.get("pointerdown")(event);
+  events.get("pointermove")({ ...event, clientX: 180, clientY: 125 });
+  render.raiseEvent();
+  assert.equal(pose.range, before.range);
+  assert.deepEqual(pose.center, before.center);
+  assert.notEqual(pose.heading, before.heading);
+  assert(pose.range < 20);
+  events.get("pointerup")(event);
+  const afterDrag = pose;
+  events.get("pointermove")({ ...event, clientX: 400 }); render.raiseEvent();
+  assert.equal(pose.heading, afterDrag.heading);
+  events.get("wheel")({ deltaMode: 0, deltaY: -100, preventDefault() {} }); render.raiseEvent();
+  assert(pose.range < afterDrag.range); assert.deepEqual(pose.center, afterDrag.center);
+  scene.dispose(); assert.equal(events.size, 0); assert.equal(canvas.style.touchAction, "auto");
 });

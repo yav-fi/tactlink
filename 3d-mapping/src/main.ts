@@ -237,10 +237,11 @@ function flyToFreeCameraOverview(): void {
   refreshFleet();
 }
 
-cameraHandler.setInputAction(() => { isOrbitDragging = cameraMode === "auto"; steering = controllingDrone; }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+cameraHandler.setInputAction(() => { if (phoneMode) return; isOrbitDragging = cameraMode === "auto"; steering = controllingDrone; }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
 cameraHandler.setInputAction(() => { isOrbitDragging = false; steering = false; }, Cesium.ScreenSpaceEventType.LEFT_UP);
 window.addEventListener("pointerup", () => { steering = false; isOrbitDragging = false; });
 cameraHandler.setInputAction((movement: { startPosition: Cesium.Cartesian2; endPosition: Cesium.Cartesian2 }) => {
+  if (phoneMode) return;
   if (controllingDrone && steering) {
     pilotView.heading += (movement.endPosition.x - movement.startPosition.x) * 0.005;
     return;
@@ -251,6 +252,7 @@ cameraHandler.setInputAction((movement: { startPosition: Cesium.Cartesian2; endP
   applyOrbitCamera();
 }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 cameraHandler.setInputAction((delta: number) => {
+  if (phoneMode) return;
   if (controllingDrone) return;
   if (cameraMode !== "auto" || fleet.drones.size > 0) return;
   orbitCamera.range = Cesium.Math.clamp(orbitCamera.range + delta * 0.22, 80, 4_000);
