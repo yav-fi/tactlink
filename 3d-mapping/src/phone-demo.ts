@@ -1,6 +1,8 @@
 import * as Cesium from "cesium";
 import type { DroneController } from "./drone-controller";
 import type { Coordinates } from "./mission";
+import { OperatorRelocation } from "./operator-relocation";
+import type { RuntimeOperator } from "./runtime/types";
 import { startPhoneScene } from "./phone-scene";
 import { applyPhoneAction, phoneFlightBand } from "./phone-flight";
 import { GeoFrame } from "./runtime/frame";
@@ -13,6 +15,8 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
   frame.update(home.latitude, home.longitude, home.altitude);
   const controller = new PhoneControl();
   const receiver = new NearestOperatorTarget();
+  const relocation = new OperatorRelocation();
+  let latestPeople: RuntimeOperator[] = [];
   const alignment = { anchor: "", rotation: 0, mirror: false, spacingScale: 10 };
   let room = "", closed = false, busy = false, lastMode = 0;
   const panel = document.createElement("section");
@@ -23,16 +27,21 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
     <label>Live room <select id="phone-room"></select></label>
     <div class="phone-view-controls"><button id="phone-closer" title="Zoom in">＋</button><button id="phone-wider" title="Zoom out">−</button><button id="phone-frame">Frame group</button></div>
     <p class="phone-scale">1 square = 1 simulated m · people 1.75 m · drone 0.8 m rotor envelope</p>
-    <p class="phone-help">* Operator spacing is displayed at 10× measured UWB distance (1 real m = 10 simulated m). Raw phone measurements are unchanged.</p>
+    <p class="phone-help">* Operator spacing is displayed at 10× measured UWB distance (1 real m = 10 simulated m). Raw phone measurements are unchanged. Manual player placements add local offsets.</p>
     <p id="phone-height"></p>
     <p id="phone-action-status" class="phone-help" role="status"></p>
     <p id="phone-owner">Waiting for the group</p><div id="phone-members"></div>
     <button id="phone-stop" type="button">Stop drone</button>
+    <details><summary>Move players on map</summary>
+      <label>Player <select id="phone-relocate-player"><option value="*">Whole group</option></select></label>
+      <div class="phone-view-controls"><button id="phone-relocate" type="button">Place on map</button><button id="phone-relocate-reset" type="button">Reset placements</button></div>
+      <p id="phone-relocate-status" class="phone-help" role="status">Choose a player or the whole group, then click open ground. This changes PC positions only; UWB motion continues from the new location.</p>
+    </details>
     <details><summary>Group alignment</summary>
       <label>Stationary anchor <select id="phone-anchor"></select></label>
       <label>Rotate group <input id="phone-rotation" type="range" min="-180" max="180" value="0" step="1"></label>
       <label><input id="phone-mirror" type="checkbox"> Mirror group</label>
-      <p>Operator offsets come from UWB and are enlarged 10× for this demo. The anchor stays 5 m north of the drone’s starting point. Keep it still and align the group to the map. Two-phone mode assumes a vertical map line, X = Z = 0, using real UWB distance. Three-phone mode sets Z = 0.<!-- Legacy: Five-phone mode preserves relative XYZ; its third axis is not gravity height. --></p>
+      <p>Operator offsets come from UWB and are enlarged 10× for this demo. The anchor initially starts 5 m north of the drone’s starting point; manual placement can move it. Keep it still and align the group to the map. Two-phone mode assumes a vertical map line, X = Z = 0, using real UWB distance. Three-phone mode sets Z = 0.<!-- Legacy: Five-phone mode preserves relative XYZ; its third axis is not gravity height. --></p>
     </details>
     <p class="phone-help">The gold person controls the drone. Anyone can hold a fist to follow, an index finger to orbit, or an open palm to hover above themselves. Drag the map to look around; Frame group restores the close view.</p>`;
   document.body.append(panel);
@@ -64,11 +73,70 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
   const reset = () => { halt(); controller.reset(); receiver.reset(); };
   let paused = false;
   const stopButton = panel.querySelector<HTMLButtonElement>("#phone-stop")!;
-  stopButton.onclick = () => { paused = !paused; reset(); stopButton.textContent = paused ? "Resume phone control" : "Stop drone"; };
-  roomSelect.onchange = () => { room = roomSelect.value; alignment.anchor = ""; reset(); };
-  anchorSelect.onchange = () => { alignment.anchor = anchorSelect.value; reset(); };
-  panel.querySelector<HTMLInputElement>("#phone-rotation")!.oninput = event => { alignment.rotation = Number((event.target as HTMLInputElement).value); reset(); };
-  panel.querySelector<HTMLInputElement>("#phone-mirror")!.onchange = event => { alignment.mirror = (event.target as HTMLInputElement).checked; reset(); };
+  stopButton.onclick = () => { endPlacement(); paused = !paused; reset(); stopButton.textContent = paused ? "Resume phone control" : "Stop drone"; };
+  const playerSelect = panel.querySelector<HTMLSelectElement>("#phone-relocate-player")!;
+  const placeButton = panel.querySelector<HTMLButtonElement>("#phone-relocate")!;
+  let placing = false, placementID = "*", oldCursor = "", suppressClick = false;
+  let pointerStart: { x: number; y: number } | undefined;
+  const endPlacement = () => {
+    if (placing) viewer.canvas.style.cursor = oldCursor;
+    placing = false; pointerStart = undefined; placeButton.textContent = "Place on map";
+  };
+  const clearPlacements = () => { endPlacement(); relocation.reset(); latestPeople = []; };
+  const pauseForPlacement = () => { paused = true; reset(); stopButton.textContent = "Resume phone control"; };
+  placeButton.onclick = () => {
+    if (placing) { endPlacement(); text("phone-relocate-status", "Placement cancelled. Resume phone control when ready."); return; }
+    if (!latestPeople.length) { text("phone-relocate-status", "Wait for fresh operator positions before placing players."); return; }
+    pauseForPlacement(); placing = true; placementID = playerSelect.value;
+    oldCursor = viewer.canvas.style.cursor; viewer.canvas.style.cursor = "crosshair";
+    placeButton.textContent = "Cancel placement";
+    text("phone-relocate-status", "Click open ground to place the player’s feet (group center for Whole group). Esc cancels. Phone control is paused.");
+  };
+  panel.querySelector<HTMLButtonElement>("#phone-relocate-reset")!.onclick = () => {
+    pauseForPlacement(); clearPlacements();
+    text("phone-relocate-status", "Original UWB placement restored. Resume phone control when ready.");
+  };
+  const placementDown = (event: PointerEvent) => {
+    if (!placing || event.button !== 0) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    pointerStart = { x: event.clientX, y: event.clientY };
+  };
+  const placementUp = (event: PointerEvent) => {
+    if (!placing || event.button !== 0) return;
+    event.preventDefault(); event.stopImmediatePropagation(); suppressClick = true;
+    if (!pointerStart || Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 6) { pointerStart = undefined; return; }
+    pointerStart = undefined;
+    const rect = viewer.canvas.getBoundingClientRect();
+    const pixel = new Cesium.Cartesian2(event.clientX - rect.left, event.clientY - rect.top);
+    try {
+      const hit = viewer.scene.pick(pixel);
+      if (hit?.id instanceof Cesium.Entity) { text("phone-relocate-status", "Click map ground rather than a player, drone or grid line."); return; }
+      let picked = viewer.scene.pickPositionSupported ? viewer.scene.pickPosition(pixel) : undefined;
+      if (!picked) { const ray = viewer.camera.getPickRay(pixel); if (ray) picked = viewer.scene.globe.pick(ray, viewer.scene); }
+      if (!picked || !relocation.move(placementID, frame.toLocal(picked), latestPeople)) {
+        text("phone-relocate-status", "Choose visible ground with a fresh player position; sky cannot be used."); return;
+      }
+      endPlacement(); reset(); scene.focus();
+      text("phone-relocate-status", "Player placement updated. UWB movement continues from here. Press Resume phone control when ready.");
+    } catch {
+      text("phone-relocate-status", "Could not pick this surface. Try another visible patch of ground.");
+    }
+  };
+  const placementClick = (event: MouseEvent) => {
+    if (!placing && !suppressClick) return;
+    suppressClick = false; event.preventDefault(); event.stopImmediatePropagation();
+  };
+  const placementKey = (event: KeyboardEvent) => {
+    if (placing && event.key === "Escape") { event.preventDefault(); endPlacement(); text("phone-relocate-status", "Placement cancelled. Resume phone control when ready."); }
+  };
+  viewer.canvas.addEventListener("pointerdown", placementDown, true);
+  viewer.canvas.addEventListener("pointerup", placementUp, true);
+  viewer.canvas.addEventListener("click", placementClick, true);
+  document.addEventListener("keydown", placementKey);
+  roomSelect.onchange = () => { room = roomSelect.value; alignment.anchor = ""; clearPlacements(); reset(); };
+  anchorSelect.onchange = () => { alignment.anchor = anchorSelect.value; clearPlacements(); reset(); };
+  panel.querySelector<HTMLInputElement>("#phone-rotation")!.oninput = event => { alignment.rotation = Number((event.target as HTMLInputElement).value); clearPlacements(); reset(); };
+  panel.querySelector<HTMLInputElement>("#phone-mirror")!.onchange = event => { alignment.mirror = (event.target as HTMLInputElement).checked; clearPlacements(); reset(); };
   const updateOptions = (select: HTMLSelectElement, entries: [string, string][], value: string) => {
     if (JSON.stringify(entries) !== select.dataset.entries) {
       select.replaceChildren(...entries.map(([id, name]) => new Option(name, id)));
@@ -92,7 +160,7 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       if (!rooms.includes(room)) {
         room = rooms[0] ?? "";
         alignment.anchor = "";
-        reset();
+        clearPlacements(); reset();
       }
       updateOptions(roomSelect, rooms.map(id => [id, `${id.slice(0, 8)}${id === "mock" ? " (synthetic)" : ""}`]), room);
       const phones = all.filter(phone => phone.room === room);
@@ -100,10 +168,13 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       updateOptions(anchorSelect, phones.map(phone => [phone.id, phone.name]), alignment.anchor);
       const flat = phones[0]?.flat;
       const mode = phones[0]?.twoPhone ? 2 : flat ? 3 : 5;
-      if (mode !== lastMode) { reset(); lastMode = mode; }
-      const operators = placePhones(phones, alignment);
+      if (mode !== lastMode) { clearPlacements(); reset(); lastMode = mode; }
+      const operators = relocation.apply(placePhones(phones, alignment));
       const live = phones.filter(phone => phone.age <= PHONE_TIMEOUT);
       const tracked = operators.filter(operator => operator.age <= PHONE_TIMEOUT);
+      latestPeople = tracked;
+      const playerID = playerSelect.value;
+      updateOptions(playerSelect, [["*", "Whole group"], ...tracked.map(p => [p.operator_id, p.name] as [string, string])], tracked.some(p => p.operator_id === playerID) ? playerID : "*");
       const actual = frame.toLocal(fixedPosition());
       if (paused || document.hidden || mode === 5) controller.reset();
       const control = controller.update(paused || document.hidden || mode === 5 ? [] : tracked, actual, performance.now());
@@ -174,7 +245,7 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       document.querySelector<HTMLElement>("#gesture-action")!.textContent = `${owner.name.toUpperCase()} · ${action.replaceAll("_", " ").toUpperCase()}`;
     } catch (error) {
       if (closed) return;
-      reset(); layer.update({ operators: [] }); scene.update([]);
+      latestPeople = []; reset(); layer.update({ operators: [] }); scene.update([]);
       text("phone-status", error instanceof Error ? error.message : "Phone receiver disconnected");
       text("phone-owner", "Drone holding — no live phone feed");
       text("phone-action-status", "Connection lost. Check the receiver, Wi-Fi and Visualizer host; movement has stopped.");
@@ -185,5 +256,10 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
   document.addEventListener("visibilitychange", visibility);
   const interval = window.setInterval(() => { void tick(); }, 100);
   void tick();
-  return () => { closed = true; window.clearInterval(interval); reset(); layer.update({ operators: [] }); scene.update([]); panel.remove(); guide.remove(); scene.dispose(); document.removeEventListener("visibilitychange", visibility); };
+  return () => { endPlacement();
+    viewer.canvas.removeEventListener("pointerdown", placementDown, true);
+    viewer.canvas.removeEventListener("pointerup", placementUp, true);
+    viewer.canvas.removeEventListener("click", placementClick, true);
+    document.removeEventListener("keydown", placementKey);
+    closed = true; window.clearInterval(interval); reset(); layer.update({ operators: [] }); scene.update([]); panel.remove(); guide.remove(); scene.dispose(); document.removeEventListener("visibilitychange", visibility); };
 }

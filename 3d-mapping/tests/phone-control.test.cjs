@@ -440,3 +440,32 @@ test("demo spacing multiplies operator separation by ten without changing raw me
   assert.equal(JSON.stringify(phones), before);
   assert.deepEqual(placePhones([phone(0, { pos: null })], { ...alignment, spacingScale: 10 }), []);
 });
+
+
+test("player teleport persists across UWB updates, leaves others/raw data alone and resets", () => {
+  const { OperatorRelocation } = loadSource("operator-relocation");
+  const reloc = new OperatorRelocation();
+  const raw = placePhones([phone(0), phone(1)], alignment);
+  const before = JSON.stringify(raw);
+  assert(reloc.move("1", { x: 100, y: 200, z: 2 }, reloc.apply(raw)));
+  let placed = reloc.apply(raw);
+  assert.deepEqual(placed[1].position, { x: 100, y: 200, z: 2 });
+  assert.deepEqual(placed[0].position, raw[0].position); assert.equal(JSON.stringify(raw), before);
+  raw[1].position.x += 4;
+  assert.equal(reloc.apply(raw)[1].position.x, 104);
+  assert(!reloc.move("missing", { x: 1, y: 2, z: 3 }, placed));
+  assert(!reloc.move("1", { x: NaN, y: 2, z: 3 }, placed));
+  reloc.reset(); assert.deepEqual(reloc.apply(raw), raw);
+});
+test("whole group teleport preserves spacing and individual offsets", () => {
+  const { OperatorRelocation } = loadSource("operator-relocation");
+  const reloc = new OperatorRelocation();
+  const raw = placePhones([phone(0), phone(1)], alignment);
+  reloc.move("1", { x: 20, y: 5, z: 0 }, reloc.apply(raw));
+  reloc.move("*", { x: 100, y: 100, z: 10 }, reloc.apply(raw));
+  const placed = reloc.apply(raw);
+  assert.equal((placed[0].position.x + placed[1].position.x) / 2, 100);
+  assert.equal(placed[1].position.x - placed[0].position.x, 20);
+  assert.equal(placed[0].position.z, 10);
+  assert.deepEqual(reloc.apply([]), []);
+});
