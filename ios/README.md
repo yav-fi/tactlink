@@ -1,4 +1,4 @@
-# Signal Map
+# TactLink iOS Team Positioning
 
 A native SwiftUI app that coordinates nearby iPhones, rotates UWB ranging pairs, and shares a relative group map. No camera, GPS, or internet connection is used. Network.framework carries encrypted coordination and measurements; Nearby Interaction supplies UWB distances. One optional, off-by-default feature (**Visualizer bridge**, below) sends this phone's own position over the local network to an external simulator.
 

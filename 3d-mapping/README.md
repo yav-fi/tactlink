@@ -1,6 +1,6 @@
-# 3D mapping
+# TactLink 3D Mission Control
 
-CesiumJS operator interface for the DNHacks distributed runtime, with the
+CesiumJS operator interface for the TactLink distributed runtime, with the
 original deterministic browser simulator preserved as a separate local mode.
 
 ## Run it

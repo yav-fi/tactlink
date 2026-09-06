@@ -1,4 +1,4 @@
-# planning — autonomous behaviour and motion/mission planning engine
+# TactLink Planning — Autonomous Mission and Motion Engine
 
 Converts a structured mission task plus one drone's *local* world knowledge into
 safe, executable actions. Fully local and deterministic: no network, no model,

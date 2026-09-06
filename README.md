@@ -1,4 +1,12 @@
-# dnhacks26
+# TactLink
+
+**Mission:** Give American teams a faster, safer way to conduct reconnaissance
+and protect the people beside them. TactLink turns natural finger gestures into
+coordinated drone commands, so operators can keep their eyes on the mission and
+their hands free from conventional flight controls.
+
+When there is no time to command a drone stick by stick, point, signal, and let
+TactLink translate intent into action.
 
 Clone:
 
@@ -9,7 +17,7 @@ git clone https://github.com/yav-fi/dnhacks26.git
 Yavin added `AGENTS.md` and `CLAUDE.md` to keep coding-agent instructions
 consistent across tools.
 
-This repo hosts six hackathon workstreams:
+TactLink brings together six hackathon workstreams:
 
 - **[iOS UWB group positioning](ios/README.md)** — native iPhone room joining, rotating UWB pairs, relative maps, and profiling (`ios/`).
 - **[Local LLM chat + benchmark](#local-llm-chat--benchmark)** — fast on-device
