@@ -24,6 +24,13 @@ export class GestureHoldInterpreter {
   private fired = "";
   private restSince: number | undefined;
 
+  /**
+   * Let the pose being held right now fire again. Without this, a command that
+   * was released while its pose never changed can only be restarted by lowering
+   * the hand and raising it again, because `fired` clears only after a rest.
+   */
+  rearm(): void { this.fired = ""; }
+
   update(gesture: string, nowMs: number): GestureHoldState {
     if (gesture === "None" && this.held !== "None" && nowMs - this.lastSeen <= GESTURE_DROPOUT_GRACE_MS) {
       return { progress: Math.min(1, Math.max(0, nowMs - this.heldSince) / GESTURE_HOLD_MS) };

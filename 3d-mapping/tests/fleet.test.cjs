@@ -80,6 +80,44 @@ test("held motion gestures repeat and release into one explicit stop", () => {
   assert.deepEqual(repeats.update(undefined, 20_440), ["gesture_stop"]);
 });
 
+test("a hand still in frame keeps its held command through unclassified frames", () => {
+  const repeats = new GestureCommandRepeater();
+  repeats.start("takeoff", "Thumb_Up", 0);
+  // Classification drops out while the hand is plainly still there.
+  assert.deepEqual(repeats.update(undefined, 300, true), []);
+  assert.deepEqual(repeats.update(undefined, 900, true), []);
+  // Recovering keeps the same command running rather than restarting it.
+  assert.deepEqual(repeats.update("Thumb_Up", 1_000, true), ["takeoff"]);
+  // A hand that actually leaves still stops the drone on the short grace.
+  assert.deepEqual(repeats.update(undefined, 1_100, false), []);
+  assert.deepEqual(repeats.update(undefined, 1_400, false), ["gesture_stop"]);
+
+  // A different pose is a deliberate change, so it stops promptly even in frame.
+  const swap = new GestureCommandRepeater();
+  swap.start("takeoff", "Thumb_Up", 0);
+  assert.deepEqual(swap.update("Open_Palm", 100, true), []);
+  assert.deepEqual(swap.update("Open_Palm", 400, true), ["gesture_stop"]);
+
+  // An unclassified hand cannot hold a command open forever.
+  const stale = new GestureCommandRepeater();
+  stale.start("takeoff", "Thumb_Up", 0);
+  assert.deepEqual(stale.update(undefined, 100, true), []);
+  assert.deepEqual(stale.update(undefined, 1_200, true), []);
+  assert.deepEqual(stale.update(undefined, 1_400, true), ["gesture_stop"]);
+});
+
+test("a released command can be re-held without lowering the hand", () => {
+  const gestures = new GestureHoldInterpreter();
+  assert.equal(gestures.update("Thumb_Up", 0).progress, 0);
+  assert.equal(gestures.update("Thumb_Up", 400).action, "takeoff");
+  // The pose never changes, so the interpreter would otherwise stay latched.
+  assert.equal(gestures.update("Thumb_Up", 800).action, undefined);
+  // Re-arming resumes the pose already being held, so recovery costs nothing.
+  gestures.rearm();
+  assert.equal(gestures.update("Thumb_Up", 900).action, "takeoff");
+  assert.equal(gestures.update("Thumb_Up", 1_000).action, undefined);
+});
+
 test("automatic camera keeps a restrained side-to-side drift", () => {
   assert.equal(idleCameraDriftRate(0), 0.012);
   assert(idleCameraDriftRate(Math.PI / 0.55) < 0);

@@ -83,7 +83,12 @@ export async function startGestureCamera(
       onAction(action);
       repeater.start(action, motion.label ?? classified.gesture, now);
     }
-    for (const action of repeater.update(source, now)) onAction(action);
+    for (const action of repeater.update(source, now, result.landmarks.length > 0)) {
+      // A pose that is still being held must be able to command again without
+      // the operator lowering their hand first.
+      if (action === "gesture_stop") interpreter.rearm();
+      onAction(action);
+    }
   };
 
   const fail = (message: string): void => {
