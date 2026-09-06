@@ -51,20 +51,19 @@ class GestureGateTests(unittest.TestCase):
         self.assertEqual(fired, 'orbit')
         self.assertLess(t, 1.7)
 
-    def test_closed_fist_hands_off_after_a_short_hold(self):
-        gate = GestureGate()
-        self.assertIsNone(gate.update('Closed_Fist', 0.0)[0])
-        self.assertIsNone(gate.update('Closed_Fist', 0.4)[0])       # hold is ~0.7 s
-        self.assertEqual(gate.update('Closed_Fist', 0.8)[0], 'handoff_random')
-
-    def test_victory_does_nothing(self):
+    def test_victory_and_fist_do_nothing_in_the_gate(self):
         gate = GestureGate()
         for t in range(20):
             self.assertIsNone(gate.update('Victory', t * 0.2)[0])
+            self.assertIsNone(gate.update('Closed_Fist', t * 0.2)[0])
+
+
+FIST = (False, False, False, False, False)
 
 
 class ClassifyPoseTests(unittest.TestCase):
     def test_finger_counts_and_directions(self):
+        self.assertEqual(classify_pose(_hand(FIST)), 'handoff_random')         # fist
         self.assertEqual(classify_pose(_hand(THREE, dy=-1.0)), 'dash_forward')
         self.assertEqual(classify_pose(_hand(THREE, dx=1.0)), 'dash_forward')  # any orientation
         self.assertEqual(classify_pose(_hand(ONE, dx=1.0)), 'dash_east')
@@ -78,7 +77,7 @@ class ClassifyPoseTests(unittest.TestCase):
 
     def test_a_canned_command_is_not_re_read_as_a_pose(self):
         self.assertIsNone(classify_pose(_hand(THREE, dy=-1.0), 'Open_Palm'))
-        self.assertIsNone(classify_pose(_hand(THREE, dy=-1.0), 'Closed_Fist'))
+        self.assertIsNone(classify_pose(_hand(FIST), 'Pointing_Up'))
 
 
 class HeldPoseTests(unittest.TestCase):

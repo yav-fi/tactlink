@@ -117,10 +117,10 @@ _DEMO = [
     (12.5, 13.5, 'None', 'dash_east'),            # index right -> dash right
     (16.0, 17.0, 'None', 'dash_west'),            # index left -> dash left
     (19.5, 20.5, 'None', 'dash_forward'),         # three fingers -> dash forward
-    (23.0, 24.5, 'Closed_Fist', None),            # closed fist -> hand off (random)
+    (23.0, 24.5, 'None', 'handoff_random'),       # closed fist -> hand off (random)
     (28.0, 29.5, 'Pointing_Up', None),            # orbit the new operator
     (32.0, 33.0, 'ILoveYou', None),               # return to them
-    (35.5, 37.0, 'Closed_Fist', None),            # hand off again
+    (35.5, 37.0, 'None', 'handoff_random'),       # hand off again
     (40.0, 41.2, 'Thumb_Down', None),             # land
 ]
 
@@ -148,9 +148,10 @@ def _webcam_panel(cv2, np, frame, hands, stable_label, score, progress, raw_hint
     if stable_label not in ('Unknown', 'Settling...'):
         cv2.putText(panel, f'{score:.0%}', (PANEL_W - 90, PANEL_H - 28),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (220, 220, 220), 1, cv2.LINE_AA)
-    if raw_hint:                                # what the model sees, every frame
-        cv2.putText(panel, raw_hint, (14, 24), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5, (150, 200, 255), 1, cv2.LINE_AA)
+    if raw_hint:                                # what the model / finger-count sees
+        cv2.rectangle(panel, (0, 0), (PANEL_W, 30), (24, 20, 17), -1)
+        cv2.putText(panel, raw_hint, (10, 21), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55, (170, 230, 90), 1, cv2.LINE_AA)
     cv2.rectangle(panel, (14, PANEL_H - 16), (PANEL_W - 14, PANEL_H - 10), (60, 60, 60), -1)
     cv2.rectangle(panel, (14, PANEL_H - 16),
                   (14 + int((PANEL_W - 28) * progress), PANEL_H - 10),
@@ -231,7 +232,9 @@ def run_live(args):
 
     options = mp.tasks.vision.GestureRecognizerOptions(
         base_options=mp.tasks.BaseOptions(model_asset_path=str(model)),
-        running_mode=mp.tasks.vision.RunningMode.VIDEO, num_hands=1)
+        running_mode=mp.tasks.vision.RunningMode.VIDEO, num_hands=1,
+        min_hand_detection_confidence=0.3, min_hand_presence_confidence=0.3,
+        min_tracking_confidence=0.3)
     with mp.tasks.vision.GestureRecognizer.create_from_options(options) as recognizer:
         if args.check:
             blank = mp.Image(image_format=mp.ImageFormat.SRGB,
@@ -280,11 +283,13 @@ def run_live(args):
                 hand = hand_from_landmarks(hands[0]) if hands else None
                 sim.advance(raw, hand, dt if dt > 0 else 1 / 60, now)
 
-                fs = ''.join('TIMRP'[k] if hand and hand.fingers[k] else '-'
-                             for k in range(5)) if hand else '-----'
                 pose = classify_pose(hand, raw)
-                readout = f'model {top_name} {top_score:.0%}  fingers {fs}' + \
-                          (f'  -> {pose}' if pose else '')
+                if hand is None:
+                    readout = 'no hand detected'
+                else:
+                    fs = ''.join('TIMRP'[k] if hand.fingers[k] else '-' for k in range(5))
+                    readout = f'model {top_name} {top_score:.0%}  {fs} ({hand.up_count} up)' + \
+                              (f'  -> {pose}' if pose else '')
                 if args.diag and int(now * 4) != int((now - dt) * 4):
                     pd = hand.point_dir if hand else (0, 0)
                     print(f'{readout}  point ({pd[0]:+.2f},{pd[1]:+.2f})', flush=True)

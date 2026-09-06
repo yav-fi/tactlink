@@ -31,17 +31,20 @@ Escape quits.
 | Open palm | ~0.4 s | Halt — cancel the current move and hover in place |
 | Point up (index finger) | ~0.4 s | Orbit the controlling operator; point up again to stop |
 | I-love-you sign | ~0.4 s | Fly back to the controlling operator and hover |
-| **Closed fist** | **~0.7 s** | **Hand off** — send the drone to a random other operator |
+| **Closed fist** (0 fingers) | **~0.5 s** | **Hand off** — send the drone to a random other operator |
 | **Three fingers up** | **~0.6 s** | **Dash forward** ~5 m (away from the camera) |
 | **Index finger held left / right** | **~0.5 s** | **Dash** the drone that way ~5 m |
 
-Take-off / land / halt / orbit / return / hand-off use MediaPipe's built-in
-recogniser (closed fist is one of its most reliable). The two dashes are
-**counted from the finger positions** — hold the shape until the bar at the
-bottom of the scene fills; point *up* is orbit, so it never collides. The webcam
-panel always shows what's detected
-(`model Pointing_Up 80%  fingers -IMR-  -> dash_forward`); if a gesture won't
-fire, read that line or run **`--diag`** to print it every frame.
+Only take-off / land / halt / orbit / return use MediaPipe's gesture labels. The
+**hand-off (fist) and the dashes are counted from the finger positions** — hold
+the shape until the bar at the bottom of the scene fills. `0 fingers = fist`,
+`3+ = dash forward`, `1-2 held sideways = dash L/R`; point *up* is orbit.
+
+The top of the webcam panel always shows what's detected, e.g.
+`model Pointing_Up 80%  -IMR- (3 up)  -> dash_forward` or `no hand detected`.
+**If a gesture won't fire, run `--diag`** — it prints that line to the console
+every frame; the `(N up)` count tells you whether the fingers are being read
+right.
 
 The drone's nose always turns to face the nearest operator. Brief recogniser
 dropouts don't reset a hold. Only operator 1 has a camera; a hand-off just moves
@@ -64,10 +67,10 @@ which operator the drone orbits, returns to, and hovers above.
 | File | Role |
 | --- | --- |
 | `gesture_demo.py` | entry point: webcam loop, MediaPipe recognizer, compositing, `--demo` |
-| `gestures.py` | `GestureGate` (canned), `HeldPose` + `classify_pose` (finger-counted poses), landmark helpers |
+| `gestures.py` | `GestureGate` (5 canned), `classify_pose` + `HeldPose` (fist & dash, finger-counted), landmark helpers |
 | `flight.py` | `Quad` physics, `Operators` (random scatter), `Autopilot` |
 | `scene.py` | pinhole-camera 3D render of the grid, operators, drone + HUD |
-| `test_gesture_demo.py` | `python -m unittest` from this folder — 15 tests |
+| `test_gesture_demo.py` | `python -m unittest` from this folder — 14 tests |
 
 The 3D view is a hand-rolled pinhole projection (no game engine); the model reads
 static hand poses, not motion. The scene is a visualization, not a calibrated

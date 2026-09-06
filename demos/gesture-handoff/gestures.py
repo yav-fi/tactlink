@@ -15,20 +15,20 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-# Canned MediaPipe gesture name -> demo command (the ones the model does well).
+# Canned MediaPipe gesture -> command. Only the five the model is reliable at;
+# the hand-off (fist) and dashes are counted from finger positions instead.
 ACTIONS = {
-    "Thumb_Up": "takeoff",         # arm + take off; again while flying = climb a step
-    "Thumb_Down": "land",          # descend + disarm
-    "Open_Palm": "halt",           # cancel the routine, hover in place
-    "Pointing_Up": "orbit",        # circle the controlling operator (toggle)
-    "ILoveYou": "return",          # fly back to the controlling operator
-    "Closed_Fist": "handoff_random",  # hand off the drone to a random operator
+    "Thumb_Up": "takeoff",     # arm + take off; again while flying = climb a step
+    "Thumb_Down": "land",      # descend + disarm
+    "Open_Palm": "halt",       # cancel the routine, hover in place
+    "Pointing_Up": "orbit",    # circle the controlling operator (toggle)
+    "ILoveYou": "return",      # fly back to the controlling operator
 }
 
 HOLD_SEC = 0.40
 RELEASE_SEC = 0.25
 GAP_SEC = 0.5             # a recognizer dropout shorter than this does not break a hold
-HOLDS = {"Closed_Fist": 0.7}   # per-gesture hold overrides
+HOLDS = {}
 
 
 class GestureGate:
@@ -119,17 +119,19 @@ def hand_from_landmarks(pts) -> Hand:
 
 # --- geometric held poses ----------------------------------------------
 
-_POSE_HOLD = {"dash_forward": 0.55, "dash_east": 0.5, "dash_west": 0.5}
-_POSE_LABEL = {"dash_forward": "dash forward (3 fingers)",
+_POSE_HOLD = {"handoff_random": 0.5, "dash_forward": 0.55,
+              "dash_east": 0.5, "dash_west": 0.5}
+_POSE_LABEL = {"handoff_random": "hand off (fist)",
+               "dash_forward": "dash forward (3 fingers)",
                "dash_east": "dash right", "dash_west": "dash left"}
 _SIDE_DX = 0.45
-# canned gestures that ARE a command, so they should not also be read as a pose
-_CANNED_COMMANDS = {"Open_Palm", "Thumb_Up", "Thumb_Down", "Closed_Fist", "ILoveYou"}
+# canned gestures that ARE a command, so the hand must not also read as a pose
+_CANNED_COMMANDS = {"Open_Palm", "Thumb_Up", "Thumb_Down", "Pointing_Up", "ILoveYou"}
 
 
 def classify_pose(hand: Hand | None, canned: str = "None") -> str | None:
-    """Which held-pose command the hand is making, or None. Three-ish fingers up
-    = dash forward; index held sideways = dash left/right."""
+    """Which held finger-pose command the hand is making, or None. Fist = hand
+    off, three-ish fingers up = dash forward, index held sideways = dash L/R."""
     if canned in _CANNED_COMMANDS:
         return None
     if hand is None or not hand.present:
@@ -138,6 +140,8 @@ def classify_pose(hand: Hand | None, canned: str = "None") -> str | None:
     dx, dy = hand.point_dir
     sideways = abs(dx) >= _SIDE_DX and abs(dx) >= abs(dy) * 1.2
 
+    if up == 0:                                      # closed fist
+        return "handoff_random"
     if up >= 3:                                      # three (or four) fingers up
         return "dash_forward"
     if up in (1, 2) and sideways:                    # one/two fingers held sideways
