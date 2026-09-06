@@ -1382,6 +1382,19 @@ footer p {
 #prototype .metric-cards h3 {
   margin-top: 18px;
 }
+.custom-training-story {
+  padding-bottom: 24px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--line);
+  max-width: 850px;
+}
+.custom-training-story h3 {
+  margin: 14px 0 18px;
+}
+.custom-training-story p:not(.fine) {
+  font-size: 18px;
+  line-height: 1.7;
+}
 #prototype .metric-cards p,
 .roadmap p {
   font-size: 16px;
