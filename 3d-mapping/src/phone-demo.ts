@@ -12,7 +12,7 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
   frame.update(home.latitude, home.longitude, home.altitude);
   const controller = new PhoneControl();
   const alignment = { anchor: "", rotation: 0, mirror: false };
-  let room = "", closed = false, busy = false, lastMode: boolean | undefined;
+  let room = "", closed = false, busy = false, lastMode = 0;
   const panel = document.createElement("section");
   panel.id = "phone-panel";
   panel.innerHTML = `<strong>PHONE CONTROL · ONE DRONE</strong>
@@ -24,9 +24,9 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       <label>Stationary anchor <select id="phone-anchor"></select></label>
       <label>Rotate group <input id="phone-rotation" type="range" min="-180" max="180" value="0" step="1"></label>
       <label><input id="phone-mirror" type="checkbox"> Mirror group</label>
-      <p>Metres are measured by UWB. The anchor stays 5 m north of the drone’s starting point. Keep it still and align the group to the map. Three-phone mode sets Z = 0. Five-phone mode preserves relative XYZ; its third axis is not gravity height.</p>
+      <p>Metres are measured by UWB. The anchor stays 5 m north of the drone’s starting point. Keep it still and align the group to the map. Two-phone mode assumes a vertical map line, X = Z = 0, using real UWB distance. Three-phone mode sets Z = 0. Five-phone mode preserves relative XYZ; its third axis is not gravity height.</p>
     </details>
-    <p class="phone-help">3-phone flat and 5-phone rooms supported. Hold a gesture for 0.4 s. Release to stop motion. ↑ climb · ↓ descend · palm stop · point orbit · three fingers forward · fist turn · 🤟 home.</p>`;
+    <p class="phone-help">2-phone assumed-axis, 3-phone flat and 5-phone rooms supported. Hold a gesture for 0.4 s. Release to stop motion. ↑ climb · ↓ descend · palm stop · point orbit · three fingers forward · fist turn · 🤟 home.</p>`;
   document.body.append(panel);
   const text = (id: string, value: string) => { panel.querySelector<HTMLElement>(`#${id}`)!.textContent = value; };
   const roomSelect = panel.querySelector<HTMLSelectElement>("#phone-room")!;
@@ -68,7 +68,8 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       if (!alignment.anchor) alignment.anchor = phones.find(phone => phone.pos && phone.age <= PHONE_TIMEOUT)?.id ?? "";
       updateOptions(anchorSelect, phones.map(phone => [phone.id, phone.name]), alignment.anchor);
       const flat = phones[0]?.flat;
-      if (flat !== lastMode) { reset(); lastMode = flat; }
+      const mode = phones[0]?.twoPhone ? 2 : flat ? 3 : 5;
+      if (mode !== lastMode) { reset(); lastMode = mode; }
       const operators = placePhones(phones, alignment);
       const live = phones.filter(phone => phone.age <= PHONE_TIMEOUT);
       const tracked = operators.filter(operator => operator.age <= PHONE_TIMEOUT);
@@ -85,7 +86,7 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
         row.textContent = `${phone.name}${phone.id === owner?.operator_id ? " · controlling" : ""} — ${health}`;
         return row;
       }));
-      text("phone-status", `${live.length}/${flat ? 3 : 5} phones connected · ${tracked.length} positioned · ${flat ? "3-phone flat (Z = 0)" : "5-phone"}`);
+      text("phone-status", `${live.length}/${mode} phones connected · ${tracked.length} positioned · ${mode === 2 ? "2-phone test · axis assumed" : flat ? "3-phone flat (Z = 0)" : "5-phone"}`);
       text("phone-owner", paused ? "Phone control paused" : owner ? `${owner.name} controls ${target.id.replace("_", " ")} · ${owner.gesture.replaceAll("_", " ")}` : "Waiting for fresh UWB positions");
       const hud = document.querySelector<HTMLElement>("#gesture-connection");
       if (hud) hud.textContent = live.length ? `PHONE CAMERAS · ${live.length} CONNECTED` : "WAITING FOR PHONES";

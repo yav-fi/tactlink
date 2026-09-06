@@ -71,6 +71,8 @@ def main() -> None:
                 ang = phase + (0.0 if args.still else args.speed * t)
                 x = args.radius * math.cos(ang)
                 y = args.radius * math.sin(ang)
+                if args.phones == 2:
+                    x, y = 0.0, (-1 if i == 0 else 1) * args.radius
                 heading = ang + math.pi if args.still else ang + math.pi / 2
                 gesture = _scripted_gesture(t) if (args.script and i == 0) else "None"
                 # sim-frame facing (radians) -> compass degrees CW from north.
@@ -88,7 +90,8 @@ def main() -> None:
                     "gesture": gesture,
                     "gestureConfidence": 0.9 if gesture != "None" else 0.0,
                     "gestureSource": "mock" if gesture != "None" else "none",
-                    "flat": args.phones == 3,
+                    "flat": args.phones in (2, 3),
+                    "twoPhone": args.phones == 2,
                     "members": args.phones,
                     "geometryAge": 0.0,
                 }

@@ -95,3 +95,9 @@ The z-score is undefined with fewer than two readings or effectively zero standa
 ## Single-drone phone demo
 
 Run `./start` from the repository root. It now connects this app to the detailed browser flight simulator and one drone; the Mac camera is off. Three-phone flat mode and five-phone mode both use the same path. The console shows connected phones, position readiness, and the nearest controlling operator. Set Visualizer host on every phone or launch the installer with `./scripts/dev watch --room YOUR_ROOM_CODE --bridge MAC_WIFI_IP:9870`. After changing those installer arguments, the watcher relaunches already installed phones with the new configuration.
+
+## Two-phone gesture test
+
+Enable **2-phone gesture test** in the lobby or active room on either phone. It is mutually exclusive with the three-phone toggle and propagates through the room coordinator. A new two-phone room code starts with `2`; joining it selects the mode automatically. Use exactly two phones on the current build. The one UWB pair ranges repeatedly and supplies the measured separation. Sorted phone IDs are placed at `(0, -distance/2, 0)` and `(0, +distance/2, 0)`. This is an assumed vertical line on the map, not measured direction or physical altitude. No position is sent without a valid real range.
+
+The usual Visualizer host and camera gestures then drive the same one-drone demo. Both app and browser label the assumption. Switching modes clears prior geometry and waits for the new group size.

@@ -3,7 +3,7 @@ import type { RuntimeOperator } from "./runtime/types";
 export type PhoneSample = {
   id: string; name: string; room: string; pos: [number, number] | null; z: number;
   heading: number; compassValid: boolean; gesture: string; confidence: number;
-  flat: boolean; geometryAge: number; age: number; cycle: number; members: number;
+  flat: boolean; twoPhone?: boolean; geometryAge: number; age: number; cycle: number; members: number;
 };
 export type PhoneAlignment = { anchor: string; rotation: number; mirror: boolean };
 export const PHONE_TIMEOUT = 1.5;
@@ -13,7 +13,7 @@ export function placePhones(phones: PhoneSample[], alignment: PhoneAlignment): R
   const anchor = phones.find(phone => phone.id === alignment.anchor && phone.pos && phone.age <= PHONE_TIMEOUT && phone.geometryAge <= 8);
   if (!anchor?.pos) return [];
   const rotation = alignment.rotation * Math.PI / 180;
-  return phones.filter(phone => phone.room === anchor.room && phone.flat === anchor.flat && phone.pos && phone.geometryAge <= 8).map(phone => {
+  return phones.filter(phone => phone.room === anchor.room && phone.flat === anchor.flat && !!phone.twoPhone === !!anchor.twoPhone && phone.pos && phone.geometryAge <= 8).map(phone => {
     const x = phone.pos![0] - anchor.pos![0];
     const y = (phone.pos![1] - anchor.pos![1]) * (alignment.mirror ? -1 : 1);
     return {

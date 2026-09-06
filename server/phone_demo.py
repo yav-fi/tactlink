@@ -43,6 +43,7 @@ class PhoneFeed:
             "gesture": report.gesture if report else "None",
             "confidence": report.gesture_confidence if report else 0,
             "flat": sample.get("flat") is True,
+            "twoPhone": sample.get("twoPhone") is True,
             "geometryAge": max(0, finite("geometryAge", 0)),
             "cycle": max(0, int(finite("cycle", 0))),
             "members": max(0, min(5, int(finite("members", 0)))),

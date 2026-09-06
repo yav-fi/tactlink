@@ -36,6 +36,8 @@ final class RoomSession: ObservableObject {
     @Published private(set) var running = false
     @Published private(set) var benchAvailable = false
     @Published private(set) var threePhoneMode = false
+    @Published private(set) var twoPhoneMode = false
+    var flatMode: Bool { threePhoneMode || twoPhoneMode }
     @Published private(set) var motionHeading = RelativeMotionHeading()
     @Published private(set) var paused = false
     @Published private(set) var cycle = 0
@@ -140,7 +142,7 @@ final class RoomSession: ObservableObject {
     var leader: String? { onlineIDs.first }
     var isLeader: Bool { leader == localID }
     var participantCount: Int { onlineIDs.count }
-    var targetCount: Int { threePhoneMode ? 3 : 5 }
+    var targetCount: Int { twoPhoneMode ? 2 : threePhoneMode ? 3 : 5 }
     var roomCodeDisplay: String { RoomTransport.displayCode(code) }
     var allProfiles: [DeviceProfile] { ([profile()] + members.map(\.profile)).sorted { $0.id < $1.id } }
     var availableRanges: [ReceivedRange] {
@@ -152,7 +154,7 @@ final class RoomSession: ObservableObject {
     func aggregate(for id: String) -> AttemptAggregate { .init(reports: reports.filter { $0.device == id }) }
     func age(of range: ReceivedRange) -> Double { max(0,ProcessInfo.processInfo.systemUptime-range.measured) }
 
-    func create() { join(RoomTransport.newCode(threePhone:threePhoneMode)) }
+    func create() { join(RoomTransport.newCode(threePhone:threePhoneMode,twoPhone:twoPhoneMode)) }
     func join(_ enteredCode: String) {
         let clean = RoomTransport.normalized(enteredCode)
         guard RoomTransport.validCode(clean) else { status="Enter all 16 letters/numbers from the room code."; return }
@@ -161,7 +163,7 @@ final class RoomSession: ObservableObject {
         displayName = name.isEmpty ? "Phone \(localID.prefix(4))" : String(name.prefix(24))
         UserDefaults.standard.set(displayName, forKey: "room.displayName")
         code=clean; joined=true; paused=false; sceneActive=true
-        threePhoneMode=clean.first=="3"
+        threePhoneMode=clean.first=="3"; twoPhoneMode=clean.first=="2"
         running=false; everStarted=false; benchAvailable=false
         known=[:]; members=[]; ranges=[:]; geometry=nil; geometryCycle = -1
         reports=[]; reportCache=[:]; cycle=0; cycleTimes=[]; retries=[:]
@@ -225,8 +227,12 @@ final class RoomSession: ObservableObject {
     func requestResume() { request(.init(action: "resume")) }
     func requestBench() { request(.init(action: "bench", availableBench: true)) }
     func setThreePhoneMode(_ enabled: Bool) {
-        if joined { request(.init(action:"settings",threePhoneMode:enabled)) }
-        else { threePhoneMode=enabled }
+        if joined { request(.init(action:"settings",threePhoneMode:enabled,twoPhoneMode:false)) }
+        else { threePhoneMode=enabled; twoPhoneMode=false }
+    }
+    func setTwoPhoneMode(_ enabled: Bool) {
+        if joined { request(.init(action:"settings",threePhoneMode:false,twoPhoneMode:enabled)) }
+        else { twoPhoneMode=enabled; threePhoneMode=false }
     }
     func benchmarkWhenPeersJoin() { benchWhenReady = true }
     func requestSettings(seconds: Double, extended: Bool) {
@@ -251,7 +257,7 @@ final class RoomSession: ObservableObject {
                      extended: capabilities.supportsExtendedDistanceMeasurement, camera: capabilities.supportsCameraAssistance,
                      activeAttempt: gate.offer?.id, hasStarted: everStarted, paused: paused,
                      connected: transport.peers, thermal: thermal, battery: battery < 0 ? nil : Double(battery),
-                     txBytes: transport.sentBytes, rxBytes: transport.receivedBytes, reconnects: transport.reconnects,threePhoneMode:threePhoneMode)
+                     txBytes: transport.sentBytes, rxBytes: transport.receivedBytes, reconnects: transport.reconnects,threePhoneMode:threePhoneMode,twoPhoneMode:twoPhoneMode)
     }
     private func emit<T: Encodable>(_ kind: String, _ payload: T, target: String? = nil) {
         guard joined, let data = try? JSONEncoder().encode(payload) else { return }
@@ -265,7 +271,7 @@ final class RoomSession: ObservableObject {
         emit("profile", profile())
         if isLeader && controlRevision > 0 {
             emit("control",RoomControl(action:paused ? "pause" : everStarted ? "run" : "wait",revision:controlRevision,
-                                       availableBench:benchAvailable,measurementSeconds:measurementSeconds,extended:extended,threePhoneMode:threePhoneMode))
+                                       availableBench:benchAvailable,measurementSeconds:measurementSeconds,extended:extended,threePhoneMode:threePhoneMode,twoPhoneMode:twoPhoneMode))
         }
         if isLeader, let sharedSnapshot, ProcessInfo.processInfo.systemUptime-sharedSnapshot.created<8 {
             emit("snapshot",sharedSnapshot)
@@ -289,7 +295,7 @@ final class RoomSession: ObservableObject {
             }
             known[p.id]=RoomMember(profile:p,lastSeen:now)
             refreshMembers(now)
-            if p.hasStarted && p.threePhoneMode==threePhoneMode { everStarted=true }
+            if p.hasStarted && p.threePhoneMode==threePhoneMode && (p.twoPhoneMode ?? false)==twoPhoneMode { everStarted=true }
         case "request":
             guard isLeader, onlineIDs.contains(message.sender), let request=try? decoder.decode(RoomControl.self,from:message.payload) else { return }
             handleRequest(request)
@@ -352,7 +358,7 @@ final class RoomSession: ObservableObject {
             if reliable==expected { cycleTimes.append(seconds); cycleTimes=Array(cycleTimes.suffix(100)) }
         case "snapshot":
             guard message.sender==leader, let snapshot=try? decoder.decode(GroupRangeSnapshot.self,from:message.payload),
-                  snapshot.valid, snapshot.flat==threePhoneMode, Set(snapshot.positions.keys)==Set(onlineIDs), !paused else { return }
+                  snapshot.valid, snapshot.flat==flatMode, (snapshot.twoPhoneMode ?? false)==twoPhoneMode, Set(snapshot.positions.keys)==Set(onlineIDs), !paused else { return }
             if let sharedSnapshot, sharedSnapshot.epoch==snapshot.epoch && snapshot.cycle<=sharedSnapshot.cycle { return }
             let created:Double
             if message.sender==localID { created=snapshot.created }
@@ -363,7 +369,7 @@ final class RoomSession: ObservableObject {
             geometry = .init(positions:snapshot.positions,rms:snapshot.rms,heightResolved:snapshot.thirdAxisResolved)
             geometryCycle=snapshot.cycle; geometryUpdated=created; geometryAge=max(0,now-created)
             if let local=snapshot.positions[localID] { motionHeading.update(position:local,at:created) }
-            geometryStatus="Cycle \(snapshot.cycle) · \(String(format:"%.1f",snapshot.measurementSpan)) s span · fit \(String(format:"%.2f",snapshot.rms)) m · \(snapshot.flat ? "flat test · Z assumed equal" : snapshot.thirdAxisResolved ? "3D shape" : "nearly flat; Z uncertain")"
+            geometryStatus="Cycle \(snapshot.cycle) · \(String(format:"%.1f",snapshot.measurementSpan)) s span · fit \(String(format:"%.2f",snapshot.rms)) m · \(snapshot.twoPhoneMode == true ? "2-phone test · axis assumed, distance measured" : snapshot.flat ? "flat test · Z assumed equal" : snapshot.thirdAxisResolved ? "3D shape" : "nearly flat; Z uncertain")"
         case "ping":
             guard message.sender != localID, let probe=try? decoder.decode(ClockProbe.self,from:message.payload), probe.sent.isFinite else { return }
             emit("pong",ClockProbe(id:probe.id,sent:probe.sent,remoteReceived:now,remoteSent:ProcessInfo.processInfo.systemUptime),target:message.sender)
@@ -389,7 +395,10 @@ final class RoomSession: ObservableObject {
         case "settings":
             if let seconds=request.measurementSeconds, seconds.isFinite { measurementSeconds=max(1,min(12,seconds)) }
             if let extended=request.extended { self.extended=extended }
-            if let test=request.threePhoneMode, test != threePhoneMode { changeMode(test) }
+            if request.threePhoneMode != nil || request.twoPhoneMode != nil {
+                let two=request.twoPhoneMode ?? false, three=request.threePhoneMode ?? false
+                if two != twoPhoneMode || three != threePhoneMode { changeMode(three,two:two) }
+            }
         default: return
         }
         broadcastControl()
@@ -397,10 +406,13 @@ final class RoomSession: ObservableObject {
     private func broadcastControl() {
         controlRevision += 1
         emit("control", RoomControl(action:paused ? "pause" : everStarted ? "run" : "wait",revision:controlRevision,
-                                    availableBench:benchAvailable,measurementSeconds:measurementSeconds,extended:extended,threePhoneMode:threePhoneMode))
+                                    availableBench:benchAvailable,measurementSeconds:measurementSeconds,extended:extended,threePhoneMode:threePhoneMode,twoPhoneMode:twoPhoneMode))
     }
     private func applyControl(_ control: RoomControl) {
-        if let test=control.threePhoneMode, test != threePhoneMode { changeMode(test) }
+        if control.threePhoneMode != nil || control.twoPhoneMode != nil {
+            let two=control.twoPhoneMode ?? false, three=control.threePhoneMode ?? false
+            if two != twoPhoneMode || three != threePhoneMode { changeMode(three,two:two) }
+        }
         if let seconds=control.measurementSeconds, seconds.isFinite { measurementSeconds=max(1,min(12,seconds)) }
         if let extended=control.extended { self.extended=extended }
         if let bench=control.availableBench { benchAvailable=bench }
@@ -419,15 +431,15 @@ final class RoomSession: ObservableObject {
         members=known.values.filter { now-$0.lastSeen<6 }.sorted { $0.id<$1.id }
         known=known.filter { now-$0.value.lastSeen<120 }
     }
-    private func changeMode(_ test:Bool) {
+    private func changeMode(_ test:Bool, two:Bool = false) {
         ranging.cancel(reason:"Group test mode changed")
         gate.release(); jobs=[:]; pending=[]; cycleStarted=nil
         ranges=[:]; geometry=nil; geometryUpdated=nil; sharedSnapshot=nil; geometryCycle = -1
-        motionHeading.reset(); threePhoneMode=test
+        motionHeading.reset(); threePhoneMode=test && !two; twoPhoneMode=two
         everStarted=false; benchAvailable=false; running=false; paused=false
         cycleTimes=[]; cycle=0; retries=[:]
         topologyChanged=ProcessInfo.processInfo.systemUptime; epoch=UUID().uuidString
-        log.event("mode",test ? "3-phone flat test" : "5-phone XYZ")
+        log.event("mode",two ? "2-phone assumed-axis test" : test ? "3-phone flat test" : "5-phone XYZ")
     }
     private func tick() {
         guard joined, sceneActive else { return }
@@ -461,7 +473,7 @@ final class RoomSession: ObservableObject {
             ranging.cancel(reason:"Coordinator changed"); gate.release()
         }
         if participantCount>targetCount {
-            status="This mode supports \(targetCount) phones. Switch off the three-phone test or have extra phones leave."
+            status="This mode supports \(targetCount) phones. Choose a larger group mode or have extra phones leave."
             running=false
         } else if allProfiles.contains(where:{ !$0.distance || (extended && !$0.extended) }) {
             status="A phone lacks the selected UWB capability. Try normal range in Profiling or remove that phone."
@@ -470,7 +482,7 @@ final class RoomSession: ObservableObject {
             if isLeader && !everStarted { everStarted=true; broadcastControl() }
             if everStarted {
                 running=true
-                status=threePhoneMode ? "3-phone flat test · rotating all three pairs" : benchAvailable && participantCount<5 ? "Benchmarking \(participantCount) phones · full group target is five" : "Coordinating \(participantCount) phones · UWB distance only"
+                status=twoPhoneMode ? "2-phone test · real distance, assumed map axis" : threePhoneMode ? "3-phone flat test · rotating all three pairs" : benchAvailable && participantCount<5 ? "Benchmarking \(participantCount) phones · full group target is five" : "Coordinating \(participantCount) phones · UWB distance only"
                 if isLeader { coordinate(now) }
             }
         } else if !paused {
@@ -487,8 +499,8 @@ final class RoomSession: ObservableObject {
                         position:geometry?.positions[localID],heading:motionHeading,
                         compassDegrees:compass.compassDegrees,
                         gesture:gestureCamera.gesture,
-                        gestureConfidence:gestureCamera.confidence,flat:threePhoneMode,
-                        geometryAge:geometryAge,members:participantCount)
+                        gestureConfidence:gestureCamera.confidence,flat:flatMode,
+                        geometryAge:geometryAge,members:participantCount,twoPhone:twoPhoneMode)
         }
     }
 
@@ -572,9 +584,9 @@ final class RoomSession: ObservableObject {
         }
     }
     private func updateGeometry(_ now: Double) {
-        guard onlineIDs.count >= (threePhoneMode ? 3 : 4), !paused else {
+        guard onlineIDs.count >= (twoPhoneMode ? 2 : threePhoneMode ? 3 : 4), !paused else {
             geometry=nil
-            geometryStatus=threePhoneMode ? "Waiting for three phones and all three pair distances." : "\(participantCount) phones joined. Four or five phones and a complete range graph are needed for XYZ."
+            geometryStatus=twoPhoneMode ? "Waiting for two phones and one measured distance." : threePhoneMode ? "Waiting for three phones and all three pair distances." : "\(participantCount) phones joined. Four or five phones and a complete range graph are needed for XYZ."
             return
         }
         let ids=onlineIDs
@@ -596,12 +608,12 @@ final class RoomSession: ObservableObject {
             return
         }
         let distances=Dictionary(uniqueKeysWithValues:edges.compactMap { edge in edge.report.distance.map { (edge.report.pair,$0) } })
-        guard let solution=RangeGeometry.solve(ids:ids,distances:distances,previous:geometry?.positions ?? [:],flat:threePhoneMode) else {
+        guard let solution=RangeGeometry.solve(ids:ids,distances:distances,previous:geometry?.positions ?? [:],flat:flatMode,line:twoPhoneMode) else {
             geometryStatus="Ranges do not fit a reliable shape. Hold the phones still for a fresh cycle."
             return
         }
         emit("snapshot",GroupRangeSnapshot(cycle:currentCycle,epoch:epoch,created:now,positions:solution.positions,
-                                            rms:solution.rms,thirdAxisResolved:solution.heightResolved,measurementSpan:span,flat:threePhoneMode))
+                                            rms:solution.rms,thirdAxisResolved:solution.heightResolved,measurementSpan:span,flat:flatMode,twoPhoneMode:twoPhoneMode))
         log.event("geometry",geometryStatus)
     }
 
@@ -628,7 +640,7 @@ final class RoomSession: ObservableObject {
         Transport: Network framework, peer-to-peer enabled, AES-GCM room encryption, no cellular
         Members: \(participantCount)/\(targetCount); direct links: \(transport.peers.count)
         Coordinator: \(leader.map(name) ?? "none")
-        Mode: \(threePhoneMode ? "three-phone flat test" : benchAvailable ? "available-device benchmark" : "five-person session")
+        Mode: \(twoPhoneMode ? "two-phone assumed-axis test" : threePhoneMode ? "three-phone flat test" : benchAvailable ? "available-device benchmark" : "five-person session")
         Status: \(status)
         NI: \(ranging.state); \(ranging.lastFields)
         Cycle: \(cycle); round priority: \(currentRound); active jobs: \(jobs.count)

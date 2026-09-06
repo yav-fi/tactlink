@@ -103,3 +103,15 @@ test("phone return-home gesture starts actual flight instead of only recording a
   for (let i = 0; i < 60; i++) drone.update(1 / 60);
   assert(drone.snapshot().longitude < start.longitude);
 });
+
+test("two-phone assumed-axis positions preserve the one distance and enter gesture control", () => {
+  const phones = [phone(0, { pos: [0, -2], z: 0, flat: true, twoPhone: true }), phone(1, { pos: [0, 2], z: 0, flat: true, twoPhone: true })];
+  const placed = placePhones(phones, alignment);
+  assert.equal(placed.length, 2);
+  assert.equal(placed[1].position.y - placed[0].position.y, 4);
+  assert(placed.every(p => p.position.x === 0 && p.position.z === 0));
+  const control = new PhoneControl();
+  control.update(placed, { x: 0, y: 0 }, 0);
+  assert.equal(control.update(placed, { x: 0, y: 0 }, 400).action, "takeoff");
+  assert.equal(placePhones([...phones, phone(2, { flat: true })], alignment).length, 2);
+});

@@ -158,4 +158,13 @@ let decodedDistribution=try! JSONDecoder().decode(DistanceStatistics.self,from:J
 check(decodedDistribution.valid && near(decodedDistribution.firstZScore!,distribution.firstZScore!), "distance statistics and z-score survive peer exchange and log export")
 var malformedDistribution=distribution; malformedDistribution.standardDeviation = -1
 check(!malformedDistribution.valid, "negative sample deviations from peers are rejected")
+let twoFit=RangeGeometry.solve(ids:["B","A"],distances:[.init("A","B"):4],line:true)
+check(twoFit != nil && near(twoFit!.positions["A"]!.y,-2) && near(twoFit!.positions["B"]!.y,2), "two-phone test uses a stable assumed vertical axis and real distance")
+check(twoFit!.positions.values.allSatisfy { $0.x==0 && $0.z==0 } && !twoFit!.heightResolved, "two-phone assumed geometry never claims measured direction or height")
+check(RangeGeometry.solve(ids:["A","B"],distances:[:],line:true)==nil, "two-phone test never invents a missing range")
+check(RangeGeometry.solve(ids:["A","B"],distances:[.init("A","B"):-1],line:true)==nil, "two-phone test rejects invalid distance")
+var twoSnapshot=GroupRangeSnapshot(cycle:1,epoch:"test",created:1,positions:twoFit!.positions,rms:0,thirdAxisResolved:false,measurementSpan:1,flat:true,twoPhoneMode:true)
+check(twoSnapshot.valid, "two-phone snapshot requires the explicit assumed-axis mode")
+twoSnapshot.twoPhoneMode=false
+check(!twoSnapshot.valid, "ordinary flat mode does not silently accept two-phone geometry")
 print("\(checks) room checks passed. These test protocol invariants and geometry, not real RF latency or accuracy.")

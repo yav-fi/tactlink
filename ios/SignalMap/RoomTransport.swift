@@ -10,7 +10,7 @@ final class RoomTransport {
 #endif
     static let serviceType = "_signal-room._tcp"
     static let alphabet = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
-    static func newCode(threePhone: Bool = false) -> String { (threePhone ? "3" : "5") + String((0..<15).map { _ in alphabet.randomElement()! }) }
+    static func newCode(threePhone: Bool = false, twoPhone: Bool = false) -> String { (twoPhone ? "2" : threePhone ? "3" : "5") + String((0..<15).map { _ in alphabet.randomElement()! }) }
     static func normalized(_ code: String) -> String { code.uppercased().filter { !$0.isWhitespace && $0 != "-" } }
     static func validCode(_ code: String) -> Bool { code.count == 16 && code.allSatisfy { alphabet.contains($0) } }
     static func displayCode(_ code: String) -> String {

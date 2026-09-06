@@ -50,7 +50,9 @@ the Mac camera and the separate distributed-drone simulation are not used.
 2. Install the current SignalMap build on every phone. Set **Visualizer host** to
    the address printed by `./start` (Mac Wi-Fi IP, port 9870).
 3. Create one room and join it from the others. Five-phone mode remains the default.
-   For a quicker test, enable **3-phone flat test** and use three phones; this sets Z = 0.
+   For two phones, enable **2-phone gesture test**: it uses real UWB distance but assumes
+   a fixed vertical map line (X = Z = 0). For three, enable **3-phone flat test** (Z = 0).
+   Keep exactly the selected number of phones in the room, all on the current build.
 4. Keep the app open and accept Local Network, Nearby Interaction and Camera permissions.
    The console distinguishes phones connected from phones with a completed UWB position.
 5. Once positions appear, the nearest phone controls the single drone. Hold gestures
@@ -61,7 +63,7 @@ the Mac camera and the separate distributed-drone simulation are not used.
 
 The **Group alignment** controls choose a stationary anchor, rotation and mirror.
 UWB preserves relative metre offsets, not global location or compass alignment.
-Keep the anchor still. Three-phone mode is flat; five-phone mode preserves relative
+Keep the anchor still. Two-phone mode assumes direction and measures only separation; three-phone mode is flat; five-phone mode preserves relative
 XYZ, whose third axis is not gravity height. Camera/compass processing stays on
 phones; frames are never uploaded. Phone motion is 2 m/s, descent 1 m/s, and climb
 is capped at 10 m above the starting point for this close-range demo.

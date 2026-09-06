@@ -40,6 +40,7 @@ final class RoomBridge {
         var flat: Bool
         var geometryAge: Double
         var members: Int
+        var twoPhone: Bool
     }
 
     /// Minimum gap between datagrams (~15 Hz). `tick()` runs at 10 Hz, so in
@@ -91,7 +92,7 @@ final class RoomBridge {
     func send(id: String, name: String, room: String, cycle: Int,
               position: Vector3?, heading: RelativeMotionHeading,
               compassDegrees: Double?, gesture: String,
-              gestureConfidence: Double, flat: Bool, geometryAge: Double = 0, members: Int = 0) {
+              gestureConfidence: Double, flat: Bool, geometryAge: Double = 0, members: Int = 0, twoPhone: Bool = false) {
         queue.async { [weak self] in
             guard let self, let connection = self.connection else { return }
             let position = position.flatMap { $0.finite ? $0 : nil }
@@ -107,7 +108,7 @@ final class RoomBridge {
                                 gesture: gesture.isEmpty ? "None" : String(gesture.prefix(32)),
                                 gestureConfidence: gestureConfidence.isFinite ? max(0, min(1, gestureConfidence)) : 0,
                                 gestureSource: gesture == "None" ? "none" : "vision", flat: flat,
-                                geometryAge: geometryAge.isFinite ? max(0, geometryAge) : 0, members: members)
+                                geometryAge: geometryAge.isFinite ? max(0, geometryAge) : 0, members: members, twoPhone: twoPhone)
             guard let data = try? self.encoder.encode(sample) else { return }
             connection.send(content: data, completion: .idempotent)
         }

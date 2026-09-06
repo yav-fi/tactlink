@@ -37,7 +37,7 @@ struct RoomView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("A shared sense\nof where you are.")
                     .font(.system(size: 34, weight: .medium, design: .rounded)).tracking(-1)
-                Text(room.threePhoneMode ? "Join three phones. Rotate every pair. Test a flat map." : "Join five phones. Measure between pairs. See the group around you.")
+                Text(room.twoPhoneMode ? "Test gestures with two phones. Distance is measured; map direction is assumed." : room.threePhoneMode ? "Join three phones. Rotate every pair. Test a flat map." : "Join five phones. Measure between pairs. See the group around you.")
                     .font(.subheadline).foregroundStyle(roomMuted).lineSpacing(4)
             }.padding(.top, 12)
             HStack(spacing: 12) {
@@ -186,9 +186,11 @@ struct RoomView: View {
     }
     private var testModeToggle: some View {
         VStack(alignment:.leading,spacing:7) {
+            Toggle("2-phone gesture test",isOn:Binding(get:{room.twoPhoneMode},set:{room.setTwoPhoneMode($0)}))
+                .font(.subheadline.weight(.medium))
             Toggle("3-phone flat test",isOn:Binding(get:{room.threePhoneMode},set:{room.setThreePhoneMode($0)}))
                 .font(.subheadline.weight(.medium))
-            Text(room.threePhoneMode ? "Starts at three. All phones share Z = 0; one mirror layout is chosen and kept consistent." : "Full mode starts at five and estimates a 3D group shape.")
+            Text(room.twoPhoneMode ? "Starts at two. One real UWB distance places phones on a fixed vertical map line, X = Z = 0. Direction is assumed, not measured." : room.threePhoneMode ? "Starts at three. All phones share Z = 0; one mirror layout is chosen and kept consistent." : "Full mode starts at five and estimates a 3D group shape.")
                 .font(.caption2).foregroundStyle(roomMuted).lineSpacing(2)
         }.padding(14).background(.white.opacity(0.035),in:RoundedRectangle(cornerRadius:14))
     }

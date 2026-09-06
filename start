@@ -72,7 +72,7 @@ fi
 URL="http://127.0.0.1:5173/?mode=local"
 echo "Ready: $URL"
 echo "Phone demo: one drone; gestures are processed on the iPhones."
-echo "Join one room (5 phones, or enable the 3-phone flat test)."
+echo "Join one room: 5 phones, 3-phone flat test, or 2-phone gesture test."
 LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || true)"
 echo "Set each phone's Visualizer host to ${LAN_IP:-MAC_WIFI_IP}:${PHONE_FEED_PORT:-9870}."
 echo "Phones and this computer need the same trusted Wi-Fi network."

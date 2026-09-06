@@ -10,15 +10,16 @@ let nodes=ids.enumerated().map { i,id -> RoomSession in
     node.displayName="TEST \(i+1)"
     return node
 }
-let code=RoomTransport.newCode()
+let twoOnly=ProcessInfo.processInfo.environment["ROOM_TWO_PHONE_ONLY"]=="1"
+let code=RoomTransport.newCode(twoPhone:twoOnly)
 var lostMessage: String?
 RoomTransport.testShouldSend = { message,_ in
     if message.kind=="prepared" && message.sender==ids[3] && lostMessage==nil { lostMessage=message.id }
     return message.id != lostMessage
 }
-for node in nodes { node.join(code) }
+for node in nodes.prefix(twoOnly ? 2 : 5) { node.join(code) }
 let started=ProcessInfo.processInfo.systemUptime
-var stage=0, stageAt=started, initialReportCount=0
+var stage=twoOnly ? 8 : 0, stageAt=started, initialReportCount=0
 var testTimer: Timer?
 testTimer=Timer.scheduledTimer(withTimeInterval:0.5,repeats:true) { _ in
     let now=ProcessInfo.processInfo.systemUptime
@@ -87,7 +88,25 @@ testTimer=Timer.scheduledTimer(withTimeInterval:0.5,repeats:true) { _ in
             guard nodes.prefix(3).allSatisfy({ !$0.threePhoneMode && !$0.running && $0.geometry==nil }) else { fail("switching to five-phone mode did not reset and wait") }
             print("PASS: group mode toggle releases radios and waits for five phones")
             for node in nodes { node.leave() }
-            print("Protocol integration passed. Real Network.framework links; SYNTHETIC UWB only. Logs: \(folder.path)")
+            let twoCode=RoomTransport.newCode(twoPhone:true)
+            for node in nodes.prefix(2) { node.join(twoCode) }
+            stage=8; stageAt=now
+        }
+    case 8:
+        if nodes.prefix(2).allSatisfy({ $0.participantCount==2 && $0.twoPhoneMode && $0.running && $0.geometry != nil }) {
+            let reference=nodes[0].geometry!.positions
+            guard reference.count==2, reference.values.allSatisfy({ abs($0.x)<0.001 && abs($0.z)<0.001 }),
+                  abs(reference[ids[0]]!.distance(to:reference[ids[1]]!)-4)<0.01,
+                  nodes.prefix(2).allSatisfy({ n in reference.allSatisfy { id,p in n.geometry!.positions[id]!.distance(to:p)<0.001 } }) else { fail("two-phone shared axis/distance incorrect") }
+            print("PASS: two production peer transports range, start automatically, and share an explicitly assumed-axis map with the real distance")
+            nodes[1].setThreePhoneMode(true); stage=9; stageAt=now
+        }
+    case 9:
+        if now-stageAt>3 {
+            guard nodes.prefix(2).allSatisfy({ !$0.twoPhoneMode && $0.threePhoneMode && !$0.running && $0.geometry==nil }) else { fail("two-to-three mode change must clear geometry and wait") }
+            for node in nodes { node.leave() }
+            print("PASS: leaving two-phone mode clears assumed geometry and waits for the larger group")
+            print("Protocol integration passed. Real Network.framework links; SYNTHETIC UWB only.")
             testTimer?.invalidate(); exit(0)
         }
     default: break
