@@ -30,7 +30,7 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       <label><input id="phone-mirror" type="checkbox"> Mirror group</label>
       <p>Metres are measured by UWB. The anchor stays 5 m north of the drone’s starting point. Keep it still and align the group to the map. Two-phone mode assumes a vertical map line, X = Z = 0, using real UWB distance. Three-phone mode sets Z = 0. Five-phone mode preserves relative XYZ; its third axis is not gravity height.</p>
     </details>
-    <p class="phone-help">The gold person controls the drone. Other people observe. Drag the map to look around; Frame group restores the close view.</p>`;
+    <p class="phone-help">The gold person controls the drone. Anyone can hold a fist to become the follow target. Drag the map to look around; Frame group restores the close view.</p>`;
   document.body.append(panel);
   const guide = document.createElement("section");
   guide.id = "phone-guide";
@@ -42,11 +42,11 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       <div data-gesture="Open_Palm"><dt>✋ Open palm</dt><dd>Four fingers extended. Stop and hover.</dd></div>
       <div data-gesture="Three_Finger_Forward"><dt>Three fingers</dt><dd>Index + middle + ring extended; pinky and thumb folded. Fly forward at 2 m/s in the phone’s compass direction.</dd></div>
       <div data-gesture="Pointing_Up"><dt>☝️ Index finger only</dt><dd>Other fingers curled. Circle the controlling person counterclockwise from above, aiming for a 2 m radius, while held.</dd></div>
-      <div data-gesture="Closed_Fist"><dt>✊ Closed fist</dt><dd>All fingers and thumb curled. Turn the drone 90° clockwise once. Release and repeat for another turn.</dd></div>
+      <div data-gesture="Closed_Fist"><dt>✊ Closed fist</dt><dd>All fingers and thumb curled; hold 0.4 s. Fly above you, then follow your mapped position at up to 2 m/s, about 3.5 m above your base. You can lower your hand. Another person’s held fist switches follow to them. Open palm stops following.</dd></div>
       <div data-gesture="ILoveYou"><dt>🤟 Thumb + index + pinky</dt><dd>Middle and ring curled. Fly to the starting location at 2 m/s, holding altitude. Keep the pose until arrival; release stops the trip.</dd></div>
       <div data-gesture="Dash_Left Dash_Right"><dt>✌️ Two-finger swing</dt><dd>Index + middle extended. Turn them vertical → horizontal → vertical → horizontal within 4 seconds. Finish pointing left or right in the selfie preview and hold briefly: short movement at 2 m/s to that side of the phone’s compass direction. A still V sign does nothing.</dd></div>
     </dl>
-    <p><b>Release your hand to stop.</b> The closest person to the drone in the horizontal plane takes control, with a fresh 0.4 s hold after handoff. Keep the phone aimed in the direction you mean by forward.</p>`;
+    <p><b>Release to stop ordinary movement; fist-follow stays on.</b> Hold an open palm for 0.4 s on either phone to stop follow. Other controls use the closest person; during follow, that person stays in control. Follow uses the mapped UWB position, so keep the stationary anchor still. Keep the phone aimed in the direction you mean by forward.</p>`;
   document.body.append(guide);
   const text = (id: string, value: string) => { panel.querySelector<HTMLElement>(`#${id}`)!.textContent = value; };
   const roomSelect = panel.querySelector<HTMLSelectElement>("#phone-room")!;
@@ -103,7 +103,8 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       const live = phones.filter(phone => phone.age <= PHONE_TIMEOUT);
       const tracked = operators.filter(operator => operator.age <= PHONE_TIMEOUT);
       const actual = frame.toLocal(fixedPosition());
-      const control = controller.update(tracked, actual, performance.now());
+      if (paused || document.hidden) controller.reset();
+      const control = controller.update(paused || document.hidden ? [] : tracked, actual, performance.now());
       if (control.stop || paused || document.hidden) halt();
       const owner = control.operator;
       if (owner && !paused && !document.hidden) owner.controls = [target.id];
@@ -122,10 +123,10 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
       text("phone-status", all.length === 0
         ? "No phone telemetry. Set Visualizer host on each phone to this Mac’s Wi-Fi IP:9870, connect to the same Wi-Fi, and keep the app open."
         : `${live.length}/${mode} phones connected · ${tracked.length} positioned · ${mode === 2 ? "2-phone test · axis assumed" : flat ? "3-phone flat (Z = 0)" : "5-phone"}`);
-      text("phone-owner", paused ? "Phone control paused" : owner ? `${owner.name} controls ${target.id.replace("_", " ")} · ${owner.gesture.replaceAll("_", " ")}` : "Waiting for fresh UWB positions");
+      text("phone-owner", paused ? "Phone control paused" : owner ? control.following ? `Following ${owner.name} · open palm to stop` : `${owner.name} controls ${target.id.replace("_", " ")} · ${owner.gesture.replaceAll("_", " ")}` : "Waiting for fresh UWB positions");
       const hud = document.querySelector<HTMLElement>("#gesture-connection");
       if (hud) hud.textContent = live.length ? `PHONE CAMERAS · ${live.length} CONNECTED` : "WAITING FOR PHONES";
-      document.querySelector<HTMLElement>("#gesture-name")!.textContent = owner?.gesture.replaceAll("_", " ") ?? "NO CONTROLLER";
+      document.querySelector<HTMLElement>("#gesture-name")!.textContent = control.following ? `FOLLOWING ${owner!.name}` : owner?.gesture.replaceAll("_", " ") ?? "NO CONTROLLER";
       document.querySelector<HTMLElement>("#gesture-confidence")!.textContent = owner ? `${owner.name} · ${Math.round(owner.gesture_confidence * 100)}%` : "Join one room and wait for its UWB map";
       document.querySelector<HTMLElement>("#gesture-progress-fill")!.style.width = `${control.progress * 100}%`;
       const action = control.action;
