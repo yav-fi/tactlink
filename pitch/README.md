@@ -1,6 +1,14 @@
 # TactLink pitch
 
-Technical pitch site for the existing TactLink prototype. Source is isolated in `pitch/`; no flight, iOS, or simulator behavior changes.
+Product pitch for TactLink: add the drone to the squad through shared spatial awareness, mission planning, and human-directed interaction. The opening narrative combines the supplied Tactlink_DNHacks_White_v7 deck with the existing technical explanation. Source is isolated in `pitch/`; no flight, iOS, or simulator behavior changes.
+
+## Narrative and prototype
+
+- Lead with the squadmate vision and the value of planning, signaling, and sharing control.
+- Explain connected phones as the prototype sensing platform and the shared 3D simulation as the stand-in for an aircraft. No physical drone hardware or flight validation is claimed.
+- Describe the latest recorded phone demo: fist claims/follows, one finger climbs, two fingers descend, and a second person's fist transfers control. The older deck's orbit/move/return/open-palm command list is not presented as the current phone mapping.
+- Keep onboard vision and spoken commands in the roadmap, and distinguish GPS-independent relative positioning from physical drone navigation.
+- Preserve the interactive geometry, schedule, and training/inference explanation as supporting technical material. The supplied PDF and recording are not published or embedded.
 
 ## Run
 
