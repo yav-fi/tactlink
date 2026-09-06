@@ -45,15 +45,17 @@ Open <http://127.0.0.1:5173/?mode=local> for the original browser simulator.
 The hidden browser camera supports the five static signs from the root gesture
 guide plus both geometric motion controls from the original Python tracker:
 hold index + middle + ring with the pinky curled for 0.45 seconds to dash
-forward, or hold index + middle and swing vertical → horizontal → vertical →
-horizontal within four seconds to dash north/east/west based on the final point.
+forward continuously, or hold index + middle and swing vertical → horizontal →
+vertical → horizontal within four seconds to fly north/east/west based on the final point.
 The bottom command dock shows the current guess, confidence, three-finger hold,
-and each confirmed V/H swing stage. A held closed fist smoothly rotates the
-selected drone's heading 90 degrees clockwise.
+and each confirmed V/H swing stage. Thumb-up climbs and the W/pointing motions
+fly only while their poses remain visible. A held closed fist smoothly rotates
+the selected drone's heading 90 degrees clockwise, pauses for one second, and
+repeats. Losing the active pose stops these momentary controls.
 
 The cinematic camera begins by circling the Washington Monument. Once drones exist, it smoothly follows their collective center and adjusts its range to keep the full fleet visible. When flight stops, it maintains a restrained side-to-side drift while keeping its subject centered. First-person remains available as an advanced pilot option.
 
-Live flight markers and playback bodies use the bundled modern quadcopter model: a rounded graphite shell, smoked-black canopy, exposed carbon arms, motor pods, landing rails, slim crossed blades, and a red nose stripe. Automatic framing stays close for one drone, expands with fleet spread, and includes playback bodies. Movement leaves a sparse trail of red light particles that fades fully in 2.8 seconds; the continuous route line is hidden and complete route history remains internal for replay. Start/release markers remain available for route operations.
+Live flight markers and playback bodies use the bundled modern quadcopter model: a rounded graphite shell, smoked-black canopy, exposed carbon arms, motor pods, landing rails, slim crossed blades, and a red nose stripe. Its four propellers are separate animated GLB nodes, with adjacent rotors spinning in opposite directions while the body remains stable. Automatic framing stays close for one drone, expands with fleet spread, and includes playback bodies. Movement sprays up to 72 small red light particles around the flight path; they fade fully in 2.8 seconds, while the continuous route line stays hidden and complete route history remains internal for replay. Start/release markers remain available for route operations.
 
 Survey visuals weaken with distance: full base opacity through 100 m, 60% through 250 m, 30% through 500 m and 12% beyond that. Cone faces are split into those range bands. Coverage triangles use their farthest sampled vertex's range when recorded, and keep that strength through group color changes and undo. This is visual attenuation, not a calibrated detection probability.
 
@@ -77,9 +79,9 @@ Use **Deploy a new drone** for one drone or **Deploy a batch** for a grid (defau
 
 **Run all paths** replays the manually recorded trails with colored prisms, launching every routed drone together at its currently assigned mph. The elapsed counter stops at the last arrival; drones without a recorded route stay parked. Playback preserves routes and release markers, and can be repeated. Speeds and route-editing controls are locked during playback; automatic framing follows every playback body. Text-only previews must be flown/recorded before they are included in this recorded-trail replay.
 
-Local mode starts with one graphite-and-black drone already flying from the base of the Washington Monument. Enter `/deploy` (or “deploy a drone”), then click one visible map surface to add another at the safe 20 m default height. `/deploy 5 survey` places a five-drone survey batch with one map click. Enter `/fly 1` to pilot drone 1. Colors cycle through eight accent choices while the black airframe panels remain visible; `/reset all` removes the fleet and its routes. Release markers are prisms.
+Local mode ground-samples one graphite-and-black drone onto the plaza immediately south of the Washington Monument. It remains parked until commanded. Enter `/deploy` (or “deploy a drone”), then click one visible map surface to add another at the safe 20 m default height. `/deploy 5 survey` places a five-drone survey batch with one map click. Enter `/fly 1` to pilot drone 1. Colors cycle through eight accent choices while the black airframe panels remain visible; `/reset all` removes the fleet and its routes. Release markers are prisms.
 
-Each drone starts at **60 mph (26.8224 m/s)**. Type a positive decimal into **Selected drone speed (mph)** to change its cruising speed. Manual movement uses local east/north/up meters on the globe with smooth acceleration and normalized diagonal inputs. Goto and return-home missions accelerate toward cruise speed and brake into their destination; an explicit `speed_mps` overrides the configured cruise speed. Orbits approach their ring smoothly and use tangential cruise speed. Altitudes are ellipsoid heights; placement adds the chosen height to the picked surface.
+Each drone starts at **60 mph (26.8224 m/s)**. Type a positive decimal into **Selected drone speed (mph)** to change its cruising speed. Manual and held-gesture movement use local east/north/up velocity with smooth acceleration and normalized diagonal inputs. Goto and return-home missions accelerate toward cruise speed, keep a persistent local avoidance waypoint instead of zig-zagging toward the destination every frame, smooth the displayed heading, and brake into arrival; an explicit `speed_mps` overrides the configured cruise speed. Orbits approach their ring smoothly and use tangential cruise speed. Altitudes are ellipsoid heights; placement adds the chosen height to the picked surface.
 
 Run `npm test` to verify fleet isolation, colors, cleanup and physical speed at multiple frame rates.
 

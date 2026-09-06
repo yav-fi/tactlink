@@ -283,6 +283,8 @@ export class DroneLayer {
         // Preserve the aircraft's graphite/black body; role color remains a
         // restrained tint and a strong silhouette instead of washing it out.
         colorBlendAmount: 0.18,
+        runAnimations: true,
+        clampAnimations: false,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_FAR_M),
         shadows: Cesium.ShadowMode.DISABLED,
       },

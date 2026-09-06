@@ -176,28 +176,38 @@ box([0.25, -0.39, 0.27], [0.31, -0.16, 0.33]);
 endPrimitive();
 
 beginPrimitive(MATERIAL_ROTOR);
-let rotorIndex = 0;
-for (const [ax, az] of [[0.78, 0.72], [0.78, -0.72], [-0.70, 0.72], [-0.70, -0.72]]) {
-  const angle = rotorIndex++ % 2 ? Math.PI / 4 : -Math.PI / 4;
-  rotatedBox([ax, 0.265, az], [0.52, 0.012, 0.035], angle);
-  rotatedBox([ax, 0.267, az], [0.52, 0.012, 0.035], angle + Math.PI / 2);
-}
+rotatedBox([0, 0, 0], [0.52, 0.012, 0.035], Math.PI / 4);
+rotatedBox([0, 0.002, 0], [0.52, 0.012, 0.035], Math.PI * 3 / 4);
 endPrimitive();
 
 // --- glTF assembly ----------------------------------------------------------
 const positionArray = new Float32Array(positions);
 const normalArray = new Float32Array(normals);
 const indexArray = new Uint32Array(indices);
+const animationFrames = 25;
+const animationTimes = new Float32Array(Array.from({ length: animationFrames }, (_, index) => index / (animationFrames - 1)));
+const rotorRotations = (direction) => new Float32Array(Array.from({ length: animationFrames }, (_, index) => {
+  const angle = direction * 6 * Math.PI * 2 * index / (animationFrames - 1);
+  return [0, Math.sin(angle / 2), 0, Math.cos(angle / 2)];
+}).flat());
+const clockwiseRotations = rotorRotations(1);
+const counterClockwiseRotations = rotorRotations(-1);
 const align4 = (value) => (value + 3) & ~3;
 
 const positionOffset = 0;
 const normalOffset = align4(positionOffset + positionArray.byteLength);
 const indexOffset = align4(normalOffset + normalArray.byteLength);
-const binaryLength = align4(indexOffset + indexArray.byteLength);
+const animationTimeOffset = align4(indexOffset + indexArray.byteLength);
+const clockwiseOffset = align4(animationTimeOffset + animationTimes.byteLength);
+const counterClockwiseOffset = align4(clockwiseOffset + clockwiseRotations.byteLength);
+const binaryLength = align4(counterClockwiseOffset + counterClockwiseRotations.byteLength);
 const binary = Buffer.alloc(binaryLength);
 Buffer.from(positionArray.buffer, positionArray.byteOffset, positionArray.byteLength).copy(binary, positionOffset);
 Buffer.from(normalArray.buffer, normalArray.byteOffset, normalArray.byteLength).copy(binary, normalOffset);
 Buffer.from(indexArray.buffer, indexArray.byteOffset, indexArray.byteLength).copy(binary, indexOffset);
+Buffer.from(animationTimes.buffer, animationTimes.byteOffset, animationTimes.byteLength).copy(binary, animationTimeOffset);
+Buffer.from(clockwiseRotations.buffer, clockwiseRotations.byteOffset, clockwiseRotations.byteLength).copy(binary, clockwiseOffset);
+Buffer.from(counterClockwiseRotations.buffer, counterClockwiseRotations.byteOffset, counterClockwiseRotations.byteLength).copy(binary, counterClockwiseOffset);
 
 const min = [Infinity, Infinity, Infinity];
 const max = [-Infinity, -Infinity, -Infinity];
@@ -223,17 +233,37 @@ const meshPrimitives = primitives.map((primitive) => {
   });
   return { attributes: { POSITION: 0, NORMAL: 1 }, indices: accessors.length - 1, material: primitive.material };
 });
+const rotorPrimitive = meshPrimitives.at(-1);
+const bodyPrimitives = meshPrimitives.slice(0, -1);
+const animationInputAccessor = accessors.push({ bufferView: 3, componentType: 5126, count: animationFrames, type: "SCALAR", min: [0], max: [1] }) - 1;
+const clockwiseAccessor = accessors.push({ bufferView: 4, componentType: 5126, count: animationFrames, type: "VEC4" }) - 1;
+const counterClockwiseAccessor = accessors.push({ bufferView: 5, componentType: 5126, count: animationFrames, type: "VEC4" }) - 1;
+const rotorCenters = [[0.78, 0.265, 0.72], [0.78, 0.265, -0.72], [-0.70, 0.265, 0.72], [-0.70, 0.265, -0.72]];
+const nodes = [
+  { mesh: 0, name: "uav_body" },
+  ...rotorCenters.map((center, index) => ({ mesh: 1, name: `rotor_${index + 1}`, translation: toExportFrame(center) })),
+];
+const animationSamplers = rotorCenters.map((_, index) => ({
+  input: animationInputAccessor,
+  output: index % 2 ? counterClockwiseAccessor : clockwiseAccessor,
+  interpolation: "LINEAR",
+}));
 
 const gltf = {
   asset: { version: "2.0", generator: "dnhacks26 generate-uav-glb" },
   scene: 0,
-  scenes: [{ nodes: [0] }],
-  nodes: [{ mesh: 0, name: "uav" }],
-  meshes: [{ name: "uav", primitives: meshPrimitives }],
+  scenes: [{ nodes: nodes.map((_, index) => index) }],
+  nodes,
+  meshes: [{ name: "uav_body", primitives: bodyPrimitives }, { name: "rotor_blades", primitives: [rotorPrimitive] }],
+  animations: [{
+    name: "spin_propellers",
+    samplers: animationSamplers,
+    channels: animationSamplers.map((_, index) => ({ sampler: index, target: { node: index + 1, path: "rotation" } })),
+  }],
   materials: [
     { name: "shell", pbrMetallicRoughness: { baseColorFactor: [0.075, 0.082, 0.095, 1], metallicFactor: 0.38, roughnessFactor: 0.48 } },
     { name: "accent", pbrMetallicRoughness: { baseColorFactor: [0.95, 0.012, 0.035, 1], metallicFactor: 0.3, roughnessFactor: 0.18 }, emissiveFactor: [0.8, 0.008, 0.018], doubleSided: true },
-    { name: "rotor", pbrMetallicRoughness: { baseColorFactor: [0.045, 0.05, 0.06, 1], metallicFactor: 0.5, roughnessFactor: 0.38 }, doubleSided: true },
+    { name: "rotor", pbrMetallicRoughness: { baseColorFactor: [0.025, 0.03, 0.038, 1], metallicFactor: 0.55, roughnessFactor: 0.32 }, doubleSided: true },
     { name: "dark", pbrMetallicRoughness: { baseColorFactor: [0.035, 0.04, 0.05, 1], metallicFactor: 0.82, roughnessFactor: 0.2 } },
     { name: "blackPanel", pbrMetallicRoughness: { baseColorFactor: [0.006, 0.008, 0.012, 1], metallicFactor: 0.62, roughnessFactor: 0.3 } },
   ],
@@ -241,6 +271,9 @@ const gltf = {
     { buffer: 0, byteOffset: positionOffset, byteLength: positionArray.byteLength, target: 34962 },
     { buffer: 0, byteOffset: normalOffset, byteLength: normalArray.byteLength, target: 34962 },
     { buffer: 0, byteOffset: indexOffset, byteLength: indexArray.byteLength, target: 34963 },
+    { buffer: 0, byteOffset: animationTimeOffset, byteLength: animationTimes.byteLength },
+    { buffer: 0, byteOffset: clockwiseOffset, byteLength: clockwiseRotations.byteLength },
+    { buffer: 0, byteOffset: counterClockwiseOffset, byteLength: counterClockwiseRotations.byteLength },
   ],
   accessors,
   buffers: [{ byteLength: binaryLength }],

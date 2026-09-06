@@ -145,7 +145,7 @@ export class FingerMotionInterpreter {
     const forward = this.three.update(input, nowMs);
     if (forward.action) actions.push(forward.action);
     if (threeFingers(input)) {
-      return { actions, hint: "Hold three-finger W to dash forward", label: "Three_Finger_Forward", progress: forward.progress };
+      return { actions, hint: "Hold three-finger W to keep flying forward", label: "Three_Finger_Forward", progress: forward.progress };
     }
     if (twoFingers(input)) {
       return { actions, hint: this.swing.hint ? `Two-finger swing ${this.swing.hint}` : "Swing two fingers vertical, then horizontal", label: "Two_Finger_Wiper", progress: this.swing.progress };

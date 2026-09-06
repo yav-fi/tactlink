@@ -25,6 +25,7 @@ const { resolveLandmark } = loadSource("landmarks");
 const { MOTION_TRACE_LIFETIME_MS, motionTraceAlpha } = loadSource("motion-trace");
 const { plannedFlightStep } = loadSource("flight-motion");
 const { GestureHoldInterpreter } = loadSource("gesture-hold");
+const { GestureCommandRepeater } = loadSource("gesture-repeat");
 const { deriveFingerMotionInput, FingerMotionInterpreter, resolvePointedDirection } = loadSource("finger-motion");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
 
@@ -63,6 +64,21 @@ test("browser canned gestures map to the primary flight actions", () => {
     interpreter.update(gesture, 0);
     assert.equal(interpreter.update(gesture, 400).action, action);
   }
+});
+
+test("held motion gestures repeat and release into one explicit stop", () => {
+  const repeats = new GestureCommandRepeater();
+  repeats.start("rotate_heading", "Closed_Fist", 0);
+  assert.deepEqual(repeats.update("Closed_Fist", 1_799), []);
+  assert.deepEqual(repeats.update("Closed_Fist", 1_800), ["rotate_heading"]);
+  assert.deepEqual(repeats.update(undefined, 2_000), []);
+  assert.deepEqual(repeats.update(undefined, 2_220), ["gesture_stop"]);
+  assert.deepEqual(repeats.update(undefined, 5_000), []);
+
+  repeats.start("orbit", "Pointing_Up", 6_000);
+  assert.deepEqual(repeats.update("Pointing_Up", 20_000), []);
+  assert.deepEqual(repeats.update(undefined, 20_220), []);
+  assert.deepEqual(repeats.update(undefined, 20_440), ["gesture_stop"]);
 });
 
 test("automatic camera keeps a restrained side-to-side drift", () => {
@@ -265,6 +281,7 @@ test("bundled aircraft model follows the controller during flight and playback",
   const drone = fleet.deploy(home);
   const aircraft = entities.getById(drone.id);
   assert.equal(aircraft.model.uri.getValue(), "/models/uav.glb");
+  assert.equal(aircraft.model.runAnimations.getValue(), true);
   assert.equal(aircraft.box, undefined);
   drone.setManualControl(true);
   for (let i = 0; i < 120; i++) drone.moveManually(1, 0, 0, 1 / 60, 1);
@@ -289,6 +306,9 @@ test("bundled aircraft keeps a black canopy and a red accent material", () => {
   assert(black.pbrMetallicRoughness.baseColorFactor.slice(0, 3).every(channel => channel < 0.02));
   assert(red.pbrMetallicRoughness.baseColorFactor[0] > 0.9);
   assert(gltf.meshes[0].primitives.some(primitive => primitive.material === gltf.materials.indexOf(black)));
+  assert.equal(gltf.animations[0].channels.length, 4);
+  assert.equal(gltf.nodes.filter(node => node.name.startsWith("rotor_")).length, 4);
+  assert.equal(gltf.meshes[1].name, "rotor_blades");
 });
 
 test("Survey effect weakens beyond 100, 250 and 500 meters", () => {
@@ -788,6 +808,26 @@ test("halt cancels an active mission and holds the current position", () => {
   assert.equal(stopped.state, "HOVERING");
 });
 
+test("held gesture motion accelerates continuously and stops on release", () => {
+  const entities = new Cesium.EntityCollection();
+  const drone = new Fleet({ entities }).deploy(home);
+  drone.startGestureMotion(0, 1, 0, 38);
+  const distances = [];
+  let previous = Cesium.Cartesian3.clone(entities.getById(drone.id).position.getValue());
+  for (let frame = 0; frame < 12; frame++) {
+    drone.update(0.1);
+    const current = Cesium.Cartesian3.clone(entities.getById(drone.id).position.getValue());
+    distances.push(Cesium.Cartesian3.distance(previous, current));
+    previous = current;
+  }
+  assert.equal(drone.snapshot().state, "GESTURE_CONTROL");
+  assert(distances[5] > distances[0]);
+  const released = drone.snapshot();
+  drone.stopCommand();
+  drone.update(1);
+  assert.deepEqual(drone.snapshot(), { ...released, state: "HOVERING", currentStep: 0, totalSteps: 0 });
+});
+
 test("closed-fist heading command turns in place with eased motion", () => {
   const entities = new Cesium.EntityCollection();
   const drone = new Fleet({ entities }).deploy(home);
@@ -821,6 +861,8 @@ test("empty startup, unique drone IDs and eight-color wraparound", () => {
     const trace = entities.getById(`${drone.id}_trace_0`);
     assert(trace.point);
     assert.equal(trace.polyline, undefined);
+    assert.equal(entities.values.filter(entity => entity.id.startsWith(`${drone.id}_trace_`)).length, 72);
+    assert(trace.point.pixelSize.getValue() <= 5);
   }
   assert.equal(fleet.drones.size, 9);
 });

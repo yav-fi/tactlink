@@ -3,6 +3,7 @@ import wasmLoaderPath from "@mediapipe/tasks-vision/vision_wasm_internal.js?url"
 import wasmBinaryPath from "@mediapipe/tasks-vision/vision_wasm_internal.wasm?url";
 import { GestureHoldInterpreter } from "./gesture-hold";
 import { deriveFingerMotionInput, FingerMotionInterpreter } from "./finger-motion";
+import { GestureCommandRepeater } from "./gesture-repeat";
 
 const MODEL_PATH = "/models/gesture_recognizer.task";
 const MIN_SCORE = 0.5;
@@ -67,6 +68,7 @@ export async function startGestureCamera(
 
   const interpreter = new GestureHoldInterpreter();
   const fingerMotion = new FingerMotionInterpreter();
+  const repeater = new GestureCommandRepeater();
   let stopped = false;
   let animationFrame = 0;
   let lastRun = -Infinity;
@@ -82,6 +84,7 @@ export async function startGestureCamera(
     const classified = topGesture(result);
     const held = interpreter.update(classified.gesture, now);
     const motion = fingerMotion.update(deriveFingerMotionInput(result.landmarks[0]), now);
+    const source = motion.label ?? (classified.gesture === "None" ? undefined : classified.gesture);
     onState({
       status: "active",
       present: result.landmarks.length > 0,
@@ -90,8 +93,15 @@ export async function startGestureCamera(
       holdProgress: Math.max(held.progress, motion.progress),
       message: motion.hint || undefined,
     });
-    if (held.action) onAction(held.action);
-    for (const action of motion.actions) onAction(action);
+    if (held.action) {
+      onAction(held.action);
+      repeater.start(held.action, classified.gesture, now);
+    }
+    for (const action of motion.actions) {
+      onAction(action);
+      repeater.start(action, motion.label ?? classified.gesture, now);
+    }
+    for (const action of repeater.update(source, now)) onAction(action);
   };
   animationFrame = requestAnimationFrame(update);
 

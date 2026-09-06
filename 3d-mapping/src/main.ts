@@ -16,7 +16,7 @@ import { startGestureCamera, type BrowserGestureState } from "./gesture-camera";
 const monument = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
 // The south side of the monument plaza: visibly at the base, but outside the
 // obelisk geometry so the collision layer can launch the aircraft safely.
-const home = { latitude: 38.88928, longitude: -77.0353, altitude: 80 };
+const home = { latitude: 38.88928, longitude: -77.0353, altitude: -24 };
 const token = import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined;
 const status = document.querySelector<HTMLParagraphElement>("#world-status")!;
 const commandStatus = document.querySelector<HTMLElement>("#command-status")!;
@@ -551,7 +551,21 @@ if (token) {
   status.textContent = "Offline grid globe active. No token needed to simulate; an ion token enables the 3D city.";
 }
 }
-void loadWorld();
+const worldReady = loadWorld();
+
+async function groundStartingHome(): Promise<void> {
+  const location = Cesium.Cartographic.fromDegrees(home.longitude, home.latitude, home.altitude);
+  let height: number | undefined;
+  if (token) {
+    try {
+      const [sampled] = await viewer.scene.sampleHeightMostDetailed([location], viewer.entities.values, 0.5);
+      height = sampled?.height;
+    } catch { /* Keep the surveyed DC ellipsoid-height fallback below. */ }
+  } else {
+    try { height = viewer.scene.globe.getHeight(location); } catch { /* Use fallback. */ }
+  }
+  if (Number.isFinite(height)) home.altitude = height! + 0.62;
+}
 
 document.querySelector<HTMLButtonElement>("#run-mission")!.addEventListener("click", () => {
   try {
@@ -639,14 +653,20 @@ function executeGestureAction(action: string): void {
   const target = drone ?? fleet.drones.values().next().value;
   if (!target) return;
   drone = target;
-  const position = target.snapshot();
+  if (action === "gesture_stop") {
+    target.stopCommand();
+    refreshFleet();
+    gestureHud.action.textContent = "GESTURE RELEASED · HOLDING";
+    setCommandMessage("Gesture released · drone holding position");
+    return;
+  }
   const offset = gestureOffset(action);
   if (offset) {
-    const destination = localOffset(target, offset.east, offset.north);
-    runLocalMission(target, { drone_id: target.id, mission: [{ action: "goto", ...destination, speed_mps: Math.max(38, target.speedMph * 0.44704) }] }, "gesture flight");
+    target.startGestureMotion(offset.east, offset.north, 0, Math.max(38, target.speedMph * 0.44704));
+    refreshFleet();
   } else if (action === "takeoff") {
-    const altitude = position.state === "IDLE" ? Math.max(position.altitude + 35, 115) : position.altitude + 20;
-    runLocalMission(target, { drone_id: target.id, mission: [{ action: "goto", latitude: position.latitude, longitude: position.longitude, altitude, speed_mps: 12 }] }, "gesture climb");
+    target.startGestureMotion(0, 0, 1, 18);
+    refreshFleet();
   } else if (action === "land" || action === "return_home") {
     runLocalMission(target, { drone_id: target.id, mission: [{ action: "return_home", speed_mps: 12 }] }, "gesture return");
   } else if (action === "orbit") {
@@ -971,13 +991,13 @@ document.addEventListener("focusin", clearInput);
 viewer.canvas.tabIndex = 0;
 viewer.canvas.addEventListener("pointerdown", () => viewer.canvas.focus());
 
-if (!runtimeMode) {
+if (!runtimeMode) void worldReady.then(async () => {
+  await groundStartingHome();
   drone = fleet.deploy(home);
   selectedIds.add(drone.id);
-  drone.run({ drone_id: drone.id, mission: [{ action: "orbit", radius_m: 45, duration_s: 3600, center: monument }] });
   refreshFleet();
-  commandStatus.textContent = "Drone 1 launched from the Washington Monument base · gesture camera connecting.";
-}
+  commandStatus.textContent = "Drone 1 grounded beside the Washington Monument · show a gesture to fly.";
+});
 
 function updateFreeCamera(deltaSeconds: number): void {
   if (controllingDrone && drone) {

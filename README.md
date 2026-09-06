@@ -381,8 +381,9 @@ VITE_RUNTIME_URL=http://127.0.0.1:8000 npm --prefix 3d-mapping run dev
 
 In the local Cesium control, the browser opens its hidden gesture camera,
 places the current gesture guess in the compact bottom command dock, and maps a
-held closed fist to a smooth 90-degree clockwise heading turn. The original
-two-finger V-H-V-H pointing motion and three-finger forward dash remain active.
+held closed fist to repeating smooth 90-degree clockwise heading turns. The
+original two-finger V-H-V-H pointing motion and three-finger forward control
+remain active while held; losing the active pose stops momentary gesture motion.
 
 Connected mode consumes `ws://127.0.0.1:8000/ws`, converts backend local
 coordinates as x=east, y=north, z=up metres from the snapshot origin, and shows
