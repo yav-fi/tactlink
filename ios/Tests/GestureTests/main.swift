@@ -58,4 +58,13 @@ check(filter.update(label:"Thumb_Down",score:0.99,at:1).0=="None","reset discard
 
 check(pose((true,false,false,false,false)).command(canned:"Thumb_Down",score:0.9).0=="Thumb_Down","thumbs down descends rather than calling follow")
 check(pose((true,false,false,false,false)).command(canned:"None",score:0).0=="None","uncertain thumb direction cannot call follow")
-print("Six-gesture and temporal filter tests passed")
+
+// A thumb across the knuckles can have straight joints despite a confident fist classification.
+check(pose((true,false,false,false,false)).command(canned:"Closed_Fist",score:0.9).0=="Closed_Fist","model fist survives straight thumb geometry")
+var uncertainThumb=pose((false,false,false,false,false))
+uncertainThumb.thumbTip=uncertainThumb.thumbIP
+check(uncertainThumb.command(canned:"Closed_Fist",score:0.9).0=="Closed_Fist","model fist survives occluded thumb")
+check(uncertainThumb.command(canned:"Closed_Fist",score:0.4).0=="None","weak fist model does not override uncertain geometry")
+check(pose((true,true,true,true,true)).command(canned:"Closed_Fist",score:0.9).0=="Open_Palm","model fist cannot override clearly extended fingers")
+
+print("Six-gesture and temporal filter tests passed, including fist regressions")

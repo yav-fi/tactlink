@@ -37,6 +37,13 @@ struct PhoneHandPose {
         // Rule scores are acceptance flags for the existing command transport,
         // not class probabilities. The UI exposes the actual raw model score separately.
         let thumb=state(thumbCMC,thumbIP,thumbTip)
+        // A thumb resting across knuckles may look straight or be occluded.
+        // Accept a confident model fist when the other fingers support it;
+        // thumb-up/down labels and clearly extended fingers cannot enter here.
+        if canned == "Closed_Fist", score >= 0.55,
+           !f.contains(.extended), f.filter({$0 == .curled}).count >= 3 {
+            return ("Closed_Fist",score)
+        }
         if f.allSatisfy({$0 == .curled}) {
             // Classify thumb direction before fist so thumbs never call the drone.
             if thumb == .extended {
@@ -205,8 +212,8 @@ final class GestureCamera:NSObject,ObservableObject,AVCaptureVideoDataOutputSamp
             let pose=PhoneHandPose(wrist:p(0),thumbCMC:p(1),thumbIP:p(3),thumbTip:p(4),
                 indexMCP:p(5),indexPIP:p(6),indexTip:p(8),middleMCP:p(9),middlePIP:p(10),middleTip:p(12),
                 ringMCP:p(13),ringPIP:p(14),ringTip:p(16),littleMCP:p(17),littlePIP:p(18),littleTip:p(20))
-            reportRaw(raw+"\n"+pose.fingerReadout,points:points,size:size)
             let candidate=pose.command(canned:rawLabel,score:rawScore)
+            reportRaw(raw+"\n"+pose.fingerReadout+"\nCommand candidate: \(candidate.0)",points:points,size:size)
             let stable=filter.update(label:candidate.0,score:candidate.1,at:now)
             publish(stable.0,stable.1,"MediaPipe · recognizing on this iPhone")
         }catch{
