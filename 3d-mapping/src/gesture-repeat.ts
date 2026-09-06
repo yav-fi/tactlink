@@ -2,12 +2,12 @@ const RELEASE_GRACE_MS = 220;
 
 const repeatCadence = (action: string): number | undefined => {
   if (action === "rotate_heading") return 1_800;
-  if (action === "takeoff") return 750;
+  if (action === "takeoff" || action === "descend") return 750;
   if (action.startsWith("fly_")) return 700;
 };
 
 export function isMomentaryGestureAction(action: string): boolean {
-  return action === "takeoff" || action === "orbit" || action === "rotate_heading" || action.startsWith("fly_");
+  return action === "takeoff" || action === "descend" || action === "orbit" || action === "rotate_heading" || action.startsWith("fly_");
 }
 
 /** Keeps held flight gestures active and emits one stop when their pose leaves. */

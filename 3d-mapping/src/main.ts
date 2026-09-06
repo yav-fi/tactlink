@@ -686,6 +686,9 @@ function executeGestureAction(action: string): void {
   } else if (action === "takeoff") {
     target.startGestureMotion(0, 0, 1, 18);
     refreshFleet();
+  } else if (action === "descend") {
+    target.startGestureMotion(0, 0, -1, 18);
+    refreshFleet();
   } else if (action === "land" || action === "return_home") {
     runLocalMission(target, { drone_id: target.id, mission: [{ action: "return_home", speed_mps: 12 }] }, "gesture return");
   } else if (action === "orbit") {
