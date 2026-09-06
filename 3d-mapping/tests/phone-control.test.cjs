@@ -278,6 +278,29 @@ test("a long dropout discards an incomplete fist hold", () => {
   assert.equal(control.update(people, drone, 1000).action, "follow");
 });
 
+test("fist caller retains up/down control even while the other phone remains nearer", () => {
+  const control = new PhoneControl();
+  const people = placePhones([phone(0, { gesture: "Thumb_Up" }), phone(1, { gesture: "Closed_Fist" })], alignment);
+  const drone = { x: 0, y: 5 };
+  control.update(people, drone, 0); control.update(people, drone, 400);
+  people[1].gesture = "Pointing_Up";
+  control.update(people, drone, 500);
+  let result = control.update(people, drone, 900);
+  assert.equal(result.action, "takeoff"); assert.equal(result.operator.operator_id, "1");
+  result = control.update(people, drone, 1000);
+  assert.equal(result.action, "takeoff"); assert.equal(result.operator.operator_id, "1");
+  people[1].gesture = "Pointing_Down";
+  control.update(people, drone, 1100);
+  result = control.update(people, drone, 1500);
+  assert.equal(result.action, "land"); assert.equal(result.operator.operator_id, "1");
+  people[1].gesture = "None";
+  result = control.update(people, drone, 1600);
+  assert.equal(result.action, undefined); assert(result.stop);
+  people[0].gesture = "Open_Palm";
+  control.update(people, drone, 1700);
+  assert.equal(control.update(people, drone, 2100).action, "halt");
+});
+
 test("follow flies above the selected person, settles, and tracks a changed mapped position", () => {
   const { GeoFrame } = loadSource("runtime/frame");
   const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };

@@ -13,7 +13,7 @@ import Network
 ///     {"v":1,"id":...,"name":...,"room":...,"t":...,"cycle":...,
 ///      "pos":[x,y],"z":...,"heading":...,"moving":...,"speed":...,
 ///      "headingReady":...,"compass":...,"compassValid":...,
-///      "gesture":...,"gestureConfidence":...,"gestureSource":"vision","flat":...}
+///      "gesture":...,"gestureConfidence":...,"gestureSource":"mediapipe","flat":...}
 ///
 /// consumed by `src/phone_feed.py` on the simulator side. `heading` is the
 /// motion-derived heading in the UWB frame (walking only); `compass` is the
@@ -107,7 +107,7 @@ final class RoomBridge {
                                 compass: compassOK ? compassDegrees! : 0, compassValid: compassOK,
                                 gesture: gesture.isEmpty ? "None" : String(gesture.prefix(32)),
                                 gestureConfidence: gestureConfidence.isFinite ? max(0, min(1, gestureConfidence)) : 0,
-                                gestureSource: gesture == "None" ? "none" : "vision", flat: flat,
+                                gestureSource: gesture == "None" ? "none" : "mediapipe", flat: flat,
                                 geometryAge: geometryAge.isFinite ? max(0, geometryAge) : 0, members: members, twoPhone: twoPhone)
             guard let data = try? self.encoder.encode(sample) else { return }
             connection.send(content: data, completion: .idempotent)

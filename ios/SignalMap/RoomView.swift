@@ -211,7 +211,7 @@ private struct GestureStatus: View {
                 .font(.caption2.monospaced()).foregroundStyle(roomMint)
             GesturePreview(session: camera.session)
                 .frame(height: 220).clipShape(RoundedRectangle(cornerRadius: 10))
-            Text("Hold the phone upright. Put your whole hand in this selfie view; start with an open palm.")
+            Text("Hold upright; show your whole hand. Fist: call and follow. Index up: climb. Index down: descend. Open palm: stop. Hold each pose about half a second.")
                 .font(.caption2).foregroundStyle(roomMuted)
         HStack(spacing: 10) {
             Image(systemName: camera.gesture == "None" ? "hand.raised.slash" : "hand.raised.fill")
@@ -234,19 +234,32 @@ private struct GesturePreview: UIViewRepresentable {
     final class PreviewView: UIView {
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
         var preview: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+        override init(frame:CGRect) {
+            super.init(frame:frame)
+            NotificationCenter.default.addObserver(self,selector:#selector(sessionStarted(_:)),name:AVCaptureSession.didStartRunningNotification,object:nil)
+        }
+        required init?(coder:NSCoder) { super.init(coder:coder) }
+        deinit { NotificationCenter.default.removeObserver(self) }
+        @objc private func sessionStarted(_ notification:Notification) {
+            DispatchQueue.main.async { [weak self] in self?.orientPreview() }
+        }
+        func orientPreview() {
+            // SwiftUI may lay out this view before the camera adds its input.
+            // Retry on updates after session startup, when the connection exists.
+            guard let connection=preview.connection else{return}
+            if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle=90 }
+            if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false; connection.isVideoMirrored=true }
+        }
         override func layoutSubviews() {
             super.layoutSubviews()
-            if let connection=preview.connection {
-                if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle=90 }
-                if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false; connection.isVideoMirrored=true }
-            }
+            orientPreview()
         }
     }
     func makeUIView(context: Context) -> PreviewView {
         let view=PreviewView(); view.preview.session=session; view.preview.videoGravity = .resizeAspect
         return view
     }
-    func updateUIView(_ view: PreviewView, context: Context) {}
+    func updateUIView(_ view: PreviewView, context: Context) { view.orientPreview() }
 }
 
 private struct RoomMap: View {

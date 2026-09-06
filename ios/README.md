@@ -35,15 +35,23 @@ Logs live in `Documents/RoomBench/latest.txt`, `attempts.jsonl`, and `events.jso
 
 ## Build and install
 
-Open `SignalMap.xcodeproj`, choose your development team, pair/trust the physical iPhone, enable Developer Mode, and run the SignalMap scheme. A new phone must be included in the development provisioning profile. If iOS reports **Untrusted Developer**, trust the development profile in **Settings → General → VPN & Device Management**.
-
-Use the active Xcode selected by `xcode-select` (Xcode 26.3 was used for the latest verification). The target can be built with its installed SDK even when scheme builds report a missing downloadable platform:
+Run the one-time MediaPipe setup, then open **SignalMap.xcworkspace** (the workspace includes CocoaPods). Choose your development team, trust the iPhone, enable Developer Mode, and run the SignalMap scheme. All phones need the updated build.
 
 ```sh
-xcodebuild -project SignalMap.xcodeproj -target SignalMap -sdk iphoneos \
-  -configuration Debug -allowProvisioningUpdates \
-  CONFIGURATION_BUILD_DIR=/tmp/SignalMap-room-products \
-  OBJROOT=/tmp/SignalMap-room-objects SYMROOT=/tmp/SignalMap-room-symbols build
+sh scripts/setup-gestures.sh
+open SignalMap.xcworkspace
+```
+
+The setup pins MediaPipeTasksVision 0.10.21 and downloads the same gesture model as the PC detector, checking its SHA-256. The model and Pods are generated dependencies and stay out of Git. Camera frames are processed on the iPhone using the bundled model; recognition does not require internet access.
+
+For Thomas's separately signed installation, run the setup on his signing Mac, open the workspace, select his development team and the existing `com.thomas.SignalMap` bundle identifier, and run on his phone. This Mac currently has only Arul's signing identity; its profile does not include Thomas's device.
+
+For a signed build and the existing deployment workflow, use `./scripts/dev ship`. It builds the workspace and falls back to the fully installed Xcode if the selected Xcode lacks its iOS platform. Or build directly:
+
+```sh
+xcodebuild -workspace SignalMap.xcworkspace -scheme SignalMap -sdk iphoneos \
+  -destination 'generic/platform=iOS' -configuration Debug -allowProvisioningUpdates \
+  CONFIGURATION_BUILD_DIR=/tmp/SignalMap-room-products build
 ```
 
 Install using `xcrun devicectl device install app --device DEVICE_ID /tmp/SignalMap-room-products/SignalMap.app` with the same developer directory. Development installs work over USB or a reachable paired wireless connection. All participants need the same current app build. Launch arguments `--name NAME --room CODE` prefill a test session; `--bench` explicitly enables an available-device diagnostic run at two devices.
@@ -103,3 +111,18 @@ Run `./start` from the repository root. It now connects this app to the detailed
 Enable **2-phone gesture test** in the lobby or active room on either phone. It is mutually exclusive with the three-phone toggle and propagates through the room coordinator. A new two-phone room code starts with `2`; joining it selects the mode automatically. Use exactly two phones on the current build. The one UWB pair ranges repeatedly and supplies the measured separation. Sorted phone IDs are placed at `(0, -distance/2, 0)` and `(0, +distance/2, 0)`. This is an assumed vertical line on the map, not measured direction or physical altitude. No position is sent without a valid real range.
 
 The usual Visualizer host and camera gestures then drive the same one-drone demo. Both app and browser label the assumption. Switching modes clears prior geometry and waits for the new group size.
+
+## On-device gestures
+
+Keep the phone upright and the whole hand visible in the mirrored selfie preview. Allow roughly half a second to a second for recognition and the drone command hold.
+
+- Closed fist: call the drone above you and follow your mapped position. Another person's fresh fist transfers control.
+- Index finger up/down, with other fingers curled: climb/descend. Horizontal pointing is neutral. Altitude commands leave follow and hold their resulting altitude on release; the caller retains control until another fist, an open palm, or signal loss.
+- Open palm: stop and release claimed control. Either phone can stop the demo.
+- Thumb up/down: retained climb/descend aliases.
+- Three fingers (index, middle, ring; pinky curled): forward relative to phone heading; thumb is ignored, matching the PC detector.
+- Two fingers (index and middle): vertical → horizontal → vertical → horizontal within four seconds triggers left/right according to the final direction in the selfie view.
+- Thumb + index + pinky (ILoveYou): return to the starting location while held.
+- Victory is recognized but a still V has no flight action, matching the PC default configuration.
+
+The PC's old pointing-up orbit mapping is replaced by the requested climb mapping in phone demo mode. MediaPipe supplies canned gesture scores; the added directional/three-finger/swing signs use landmark rules with a fixed acceptance score, not a learned class probability. Recent-frame voting stabilizes labels, and a missing hand clears the output after 180 ms. The optional PC custom k-nearest-neighbor model is not bundled because no trained artifact was present in this checkout.

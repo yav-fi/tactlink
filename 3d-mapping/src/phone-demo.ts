@@ -36,18 +36,19 @@ export function startPhoneDemo(viewer: Cesium.Viewer, target: DroneController, h
   const guide = document.createElement("section");
   guide.id = "phone-guide";
   guide.innerHTML = `<strong>GESTURES → DRONE</strong>
-    <p>Use the phone’s <b>front camera</b>. Keep the whole hand in the selfie preview. Hold a recognized pose for <b>0.4 seconds</b>.</p>
+    <p>Use the phone’s <b>front camera</b>. Keep the whole hand in the selfie preview. Hold steady for <b>about one second</b> for recognition and the command hold.</p>
     <dl>
       <div data-gesture="Thumb_Up"><dt>👍 Thumb up</dt><dd>Fingers curled, thumb pointing up. Climb at 2 m/s while held.</dd></div>
       <div data-gesture="Thumb_Down"><dt>👎 Thumb down</dt><dd>Fingers curled, thumb pointing down. Descend at 1 m/s to the hover floor; this demo does not land among people.</dd></div>
       <div data-gesture="Open_Palm"><dt>✋ Open palm</dt><dd>Four fingers extended. Stop and hover.</dd></div>
       <div data-gesture="Three_Finger_Forward"><dt>Three fingers</dt><dd>Index + middle + ring extended; pinky and thumb folded. Fly forward at 2 m/s in the phone’s compass direction.</dd></div>
-      <div data-gesture="Pointing_Up"><dt>☝️ Index finger only</dt><dd>Other fingers curled. Circle the controlling person counterclockwise from above, aiming for a 2 m radius, while held.</dd></div>
+      <div data-gesture="Pointing_Up"><dt>☝️ Point up</dt><dd>Index finger pointing up, other fingers curled. Climb at 2 m/s while held. Lower your hand to stop.</dd></div>
+      <div data-gesture="Pointing_Down"><dt>👇 Point down</dt><dd>Index finger pointing down, other fingers curled. Descend at 1 m/s to the hover floor while held. Lower your hand to stop.</dd></div>
       <div data-gesture="Closed_Fist"><dt>✊ Closed fist</dt><dd>All fingers and thumb curled; hold 0.4 s. Fly above you, then follow your mapped position at up to 2 m/s, about 3.5 m above your base. You can lower your hand. Another person’s held fist switches follow to them. Open palm stops following.</dd></div>
       <div data-gesture="ILoveYou"><dt>🤟 Thumb + index + pinky</dt><dd>Middle and ring curled. Fly to the starting location at 2 m/s, holding altitude. Keep the pose until arrival; release stops the trip.</dd></div>
       <div data-gesture="Dash_Left Dash_Right"><dt>✌️ Two-finger swing</dt><dd>Index + middle extended. Turn them vertical → horizontal → vertical → horizontal within 4 seconds. Finish pointing left or right in the selfie preview and hold briefly: short movement at 2 m/s to that side of the phone’s compass direction. A still V sign does nothing.</dd></div>
     </dl>
-    <p><b>Release to stop ordinary movement; fist-follow stays on.</b> Hold an open palm for 0.4 s on either phone to stop follow. Other controls use the closest person; during follow, that person stays in control. Follow uses the mapped UWB position, so keep the stationary anchor still. Keep the phone aimed in the direction you mean by forward.</p>`;
+    <p><b>Release to stop ordinary movement; fist-follow stays on.</b> Pointing up/down leaves follow and adjusts altitude; release to hover at that height. The fist caller keeps control until another fist, an open palm, or signal loss. Before a fist claim, the closest person controls. Open palm on either phone stops and releases control. Follow uses the mapped UWB position, so keep the stationary anchor still. Keep the phone aimed in the direction you mean by forward.</p>`;
   document.body.append(guide);
   const text = (id: string, value: string) => { panel.querySelector<HTMLElement>(`#${id}`)!.textContent = value; };
   const roomSelect = panel.querySelector<HTMLSelectElement>("#phone-room")!;

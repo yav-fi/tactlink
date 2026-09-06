@@ -20,8 +20,8 @@ export function placePhones(phones: PhoneSample[], alignment: PhoneAlignment): R
       operator_id: phone.id, name: phone.name,
       position: { x: Math.cos(rotation) * x - Math.sin(rotation) * y, y: 5 + Math.sin(rotation) * x + Math.cos(rotation) * y, z: phone.flat ? 0 : phone.z - anchor.z },
       heading: phone.compassValid ? phone.heading : (alignment.mirror ? -phone.heading : phone.heading) + rotation,
-      // The phone publishes a fist at 0.55; don't silently reject it at the Mac.
-      gesture: phone.confidence >= (phone.gesture === "Closed_Fist" ? 0.55 : 0.65) ? phone.gesture : "None", gesture_confidence: phone.confidence,
+      // Match the on-device MediaPipe acceptance threshold after temporal filtering.
+      gesture: phone.confidence >= 0.55 ? phone.gesture : "None", gesture_confidence: phone.confidence,
       gesture_source: "phone", action: null, is_anchor: phone.id === anchor.id,
       controls: [], nearest_distance: null, age: phone.age,
     };
@@ -29,7 +29,7 @@ export function placePhones(phones: PhoneSample[], alignment: PhoneAlignment): R
 }
 
 const ACTIONS: Record<string, string> = {
-  Thumb_Up: "takeoff", Thumb_Down: "land", Open_Palm: "halt", Pointing_Up: "orbit",
+  Thumb_Up: "takeoff", Thumb_Down: "land", Open_Palm: "halt", Pointing_Up: "takeoff", Pointing_Down: "land",
   ILoveYou: "return_home", Closed_Fist: "follow",
   Three_Finger_Forward: "forward", Dash_Left: "left", Dash_Right: "right",
 };
@@ -41,12 +41,13 @@ export class PhoneControl {
   private since = 0;
   private fired = false;
   following = "";
+  private claimedOwner = "";
   private claims = new Map<string, { since: number; lastSeen: number; missingSince?: number; fired: boolean }>();
   claimProgress(id: string): number {
     const claim = this.claims.get(`${id}:Closed_Fist`);
     return claim && !claim.fired ? Math.min(1, (claim.lastSeen - claim.since) / 400) : 0;
   }
-  reset(): void { this.owner = ""; this.following = ""; this.held = "None"; this.fired = false; this.claims.clear(); }
+  reset(): void { this.owner = ""; this.following = ""; this.claimedOwner = ""; this.held = "None"; this.fired = false; this.claims.clear(); }
 
   update(operators: RuntimeOperator[], drone: { x: number; y: number }, now: number): {
     operator?: RuntimeOperator; action?: string; progress: number; stop: boolean; following?: boolean;
@@ -82,8 +83,8 @@ export class PhoneControl {
       }
     }
     const palm = ready.find(p => p.gesture === "Open_Palm");
-    if (palm && this.following) {
-      this.following = ""; this.owner = palm.operator_id; this.held = "Open_Palm"; this.since = now; this.fired = true;
+    if (palm && this.claimedOwner) {
+      this.following = ""; this.claimedOwner = ""; this.owner = palm.operator_id; this.held = "Open_Palm"; this.since = now; this.fired = true;
       return { operator: palm, action: "halt", progress: 1, stop: true };
     }
     const claimant = ready.filter(p => p.gesture === "Closed_Fist")
@@ -91,12 +92,13 @@ export class PhoneControl {
     if (claimant && !palm) {
       const changed = this.following !== claimant.operator_id;
       this.following = claimant.operator_id; this.owner = claimant.operator_id; this.held = claimant.gesture;
+      this.claimedOwner = claimant.operator_id;
       return { operator: claimant, action: "follow", progress: 1, stop: changed, following: true };
     }
     if (this.following) {
       const followed = live.find(p => p.operator_id === this.following);
       if (!followed) {
-        this.following = ""; this.owner = ""; this.held = "None"; this.fired = false;
+        this.following = ""; this.claimedOwner = ""; this.owner = ""; this.held = "None"; this.fired = false;
         return { progress: 0, stop: true };
       }
       if (followed.gesture === "None" || followed.gesture === "Closed_Fist" || !ACTIONS[followed.gesture]) {
@@ -110,9 +112,11 @@ export class PhoneControl {
       return { operator: followed, action: ACTIONS[followed.gesture], progress: 1, stop: true };
     }
     const distance = (operator: RuntimeOperator) => Math.hypot(operator.position.x - drone.x, operator.position.y - drone.y);
+    const claimed = live.find(operator => operator.operator_id === this.claimedOwner);
+    if (this.claimedOwner && !claimed) { this.reset(); return { progress: 0, stop: true }; }
     const nearest = [...live].sort((a, b) => distance(a) - distance(b) || a.operator_id.localeCompare(b.operator_id))[0];
     const previous = live.find(operator => operator.operator_id === this.owner);
-    const operator = previous && nearest && distance(nearest) >= distance(previous) * 0.72 ? previous : nearest;
+    const operator = claimed ?? (previous && nearest && distance(nearest) >= distance(previous) * 0.72 ? previous : nearest);
     const changedOwner = (operator?.operator_id ?? "") !== this.owner;
     const gesture = operator?.gesture ?? "None";
     const changedGesture = gesture !== this.held;

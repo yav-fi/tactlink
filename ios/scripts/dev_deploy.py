@@ -94,6 +94,8 @@ def eligible(device):
 def source_digest():
     digest = hashlib.sha256(XCODE.encode())
     files = list((ROOT / 'SignalMap').rglob('*')) + list((ROOT / 'SignalMap.xcodeproj').rglob('*'))
+    files += [ROOT / 'Podfile', ROOT / 'Podfile.lock']
+    files += list((ROOT / 'SignalMap.xcworkspace').rglob('*'))
     for path in sorted(files):
         if not path.is_file() or 'xcuserdata' in path.parts or path.name == '.DS_Store':
             continue
@@ -138,18 +140,19 @@ def publish(app, source):
 
 def build(*, force=False, register=None):
     with lock('build.lock'):
+        execute(['sh', 'scripts/setup-gestures.sh'], timeout=300, logfile=STATE / 'gesture-setup.log')
         source = source_digest()
         previous = read_json(STATE / 'latest.json')
         if not force and not register and previous and previous['source'] == source and Path(previous['app']).exists():
             say('Source unchanged; reusing the signed build.')
             return previous
         products = STATE / 'products'
-        common = ['-project', 'SignalMap.xcodeproj', '-configuration', 'Debug',
+        common = ['-workspace', 'SignalMap.xcworkspace', '-scheme', 'SignalMap', '-configuration', 'Debug',
                   '-allowProvisioningUpdates', f'CONFIGURATION_BUILD_DIR={products}',
                   f'OBJROOT={STATE / "objects"}', f'SYMROOT={STATE / "symbols"}']
         if register:
             say(f'Registering new development device {register}; first-time setup may take longer.')
-            registration = ['xcodebuild', *common, '-scheme', 'SignalMap', '-destination', f'id={register}',
+            registration = ['xcodebuild', *common, '-destination', f'id={register}',
                             '-allowProvisioningDeviceRegistration', 'build']
             try:
                 execute(registration, timeout=240, logfile=STATE / 'registration.log')
@@ -164,8 +167,17 @@ def build(*, force=False, register=None):
                         logfile=STATE / 'registration-fallback.log')
         version = str(int(time.time()))
         say('Building and signing Signal Map…')
-        execute(['xcodebuild', *common, '-target', 'SignalMap', '-sdk', 'iphoneos',
-                 f'CURRENT_PROJECT_VERSION={version}', 'build'], timeout=300, logfile=STATE / 'build.log')
+        command = ['xcodebuild', *common, '-sdk', 'iphoneos', '-destination', 'generic/platform=iOS',
+                   f'CURRENT_PROJECT_VERSION={version}', 'build']
+        try:
+            execute(command, timeout=300, logfile=STATE / 'build.log')
+        except RuntimeError:
+            error = (STATE / 'build.log').read_text()
+            fallback = Path(os.environ.get('SIGNALMAP_PROVISIONING_XCODE', '/Applications/Xcode.app/Contents/Developer'))
+            if 'not installed' not in error or not fallback.exists() or str(fallback) == XCODE:
+                raise
+            say('Selected Xcode lacks its iOS platform; building the workspace with installed fallback Xcode.')
+            execute(command, env=dict(ENV, DEVELOPER_DIR=str(fallback)), timeout=300, logfile=STATE / 'build-fallback.log')
         if source_digest() != source:
             raise RuntimeError('Source changed during the build; not publishing. Run ship again.')
         return publish(products / 'SignalMap.app', source)
