@@ -14,6 +14,16 @@
   <body>
     <main id="app">
       <div id="cesiumContainer" aria-label="3D map"></div>
+      <aside id="gesture-hud" class="gesture-hud local-only" aria-live="polite">
+        <div class="gesture-hud-heading">
+          <span id="gesture-dot" class="gesture-dot" aria-hidden="true"></span>
+          <span id="gesture-connection">CAMERA CONNECTING</span>
+        </div>
+        <strong id="gesture-name">NO HAND</strong>
+        <span id="gesture-confidence">Show a gesture to control drone 1</span>
+        <div class="gesture-progress" aria-hidden="true"><span id="gesture-progress-fill"></span></div>
+        <span id="gesture-action">Thumb up · climb &nbsp; Point up · orbit &nbsp; Palm · halt</span>
+      </aside>
       <aside class="mission-panel">
         <p class="eyebrow">DNHacks 2026</p>
         <h1>Drone mission control</h1>

@@ -5,6 +5,7 @@ import type { Coordinates } from "./mission";
 import { formationSlots } from "./formation";
 
 export const DRONE_COLORS = [
+  { name: "Red", hex: "#ff263f" },
   { name: "Cyan", hex: "#35e8ff" },
   { name: "Orange", hex: "#ff9b42" },
   { name: "Violet", hex: "#b69cff" },
@@ -12,7 +13,6 @@ export const DRONE_COLORS = [
   { name: "Pink", hex: "#ff79bb" },
   { name: "Yellow", hex: "#ffe568" },
   { name: "Blue", hex: "#669dff" },
-  { name: "Red", hex: "#ff6666" },
 ] as const;
 
 export class Fleet {

@@ -19,6 +19,11 @@ test = [
   "httpx>=0.27,<1",
   "pytest>=8,<9",
 ]
+gesture = [
+  "mediapipe>=0.10",
+  "numpy>=1.24",
+  "opencv-python>=4.8",
+]
 
 [tool.setuptools.packages.find]
 include = ["integrations*", "planning*", "simulation*", "server*"]

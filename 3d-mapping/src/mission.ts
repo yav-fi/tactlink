@@ -7,7 +7,7 @@ export type Coordinates = {
 export type MissionStep =
   | ({ action: "goto"; speed_mps?: number } & Coordinates)
   | { action: "hover"; duration_s: number }
-  | { action: "orbit"; radius_m: number; duration_s: number; clockwise?: boolean }
+  | { action: "orbit"; radius_m: number; duration_s: number; clockwise?: boolean; center?: Coordinates }
   | { action: "return_home"; speed_mps?: number };
 
 export type MissionCommand = {
@@ -53,6 +53,10 @@ export function parseMission(value: string): MissionCommand {
     }
     else if (step.action === "orbit") {
       if (!isFiniteNumber(step.radius_m) || step.radius_m <= 0 || !isFiniteNumber(step.duration_s) || step.duration_s <= 0) throw new Error("orbit requires positive radius_m and duration_s.");
+      if (step.center !== undefined) {
+        if (!step.center || typeof step.center !== "object" || Array.isArray(step.center)) throw new Error("orbit center must be coordinates.");
+        assertCoordinates(step.center as Record<string, unknown>);
+      }
     }
     else if (step.action !== "return_home") throw new Error(`Unsupported action: ${String(step.action)}.`);
     if (step.speed_mps !== undefined && (!isFiniteNumber(step.speed_mps) || step.speed_mps <= 0)) throw new Error("speed_mps must be positive.");

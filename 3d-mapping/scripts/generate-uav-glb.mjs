@@ -205,10 +205,10 @@ const gltf = {
   nodes: [{ mesh: 0, name: "uav" }],
   meshes: [{ name: "uav", primitives: meshPrimitives }],
   materials: [
-    { name: "shell", pbrMetallicRoughness: { baseColorFactor: [0.78, 0.83, 0.88, 1], metallicFactor: 0.25, roughnessFactor: 0.45 } },
-    { name: "accent", pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], metallicFactor: 0.1, roughnessFactor: 0.35 }, emissiveFactor: [0.35, 0.38, 0.42], doubleSided: true },
-    { name: "rotor", pbrMetallicRoughness: { baseColorFactor: [0.85, 0.9, 0.95, 0.28], metallicFactor: 0, roughnessFactor: 0.9 }, alphaMode: "BLEND", doubleSided: true },
-    { name: "dark", pbrMetallicRoughness: { baseColorFactor: [0.14, 0.16, 0.19, 1], metallicFactor: 0.5, roughnessFactor: 0.5 } },
+    { name: "shell", pbrMetallicRoughness: { baseColorFactor: [0.018, 0.022, 0.03, 1], metallicFactor: 0.72, roughnessFactor: 0.24 } },
+    { name: "accent", pbrMetallicRoughness: { baseColorFactor: [0.95, 0.012, 0.035, 1], metallicFactor: 0.3, roughnessFactor: 0.18 }, emissiveFactor: [0.8, 0.008, 0.018], doubleSided: true },
+    { name: "rotor", pbrMetallicRoughness: { baseColorFactor: [0.16, 0.17, 0.2, 0.38], metallicFactor: 0.32, roughnessFactor: 0.5 }, alphaMode: "BLEND", doubleSided: true },
+    { name: "dark", pbrMetallicRoughness: { baseColorFactor: [0.035, 0.04, 0.05, 1], metallicFactor: 0.82, roughnessFactor: 0.2 } },
   ],
   bufferViews: [
     { buffer: 0, byteOffset: positionOffset, byteLength: positionArray.byteLength, target: 34962 },

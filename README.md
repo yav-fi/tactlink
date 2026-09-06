@@ -32,11 +32,14 @@ Run this from the repository root:
 ```
 
 It creates/installs missing local dependencies, starts the Python runtime and
-3D frontend, starts the local mission AI when its downloaded model is present,
-and opens the flight sandbox. Type `/` in the bottom command line for direct
-commands, or enter a plain-language mission for the AI compiler. Press `Ctrl+C`
-once to stop everything it started. Use `./start --no-open` when you do not want
-it to open a browser.
+3D frontend, opens the webcam gesture recognizer as a headless background
+service, starts the local mission AI when its downloaded model is present, and
+opens the flight sandbox. The browser shows the recognized hand signal and
+drives the selected drone; no secondary OpenCV simulation window is rendered.
+Type `/` in the bottom command line for direct commands, or enter a
+plain-language mission for the AI compiler. Press `Ctrl+C` once to stop
+everything it started. Use `./start --no-open` when you do not want it to open
+a browser.
 
 ---
 

@@ -140,24 +140,23 @@ test("propeller blades rotate over time while hubs stay fixed", () => {
   blades.forEach((part, i) => assert.deepEqual(part.position.getValue(), centers[i]));
 });
 
-test("four-rotor geometry follows body during flight and playback and shares color", () => {
+test("bundled aircraft model follows the controller during flight and playback", () => {
   const entities = new Cesium.EntityCollection();
   const fleet = new Fleet({ entities });
   const drone = fleet.deploy(home);
-  const parts = entities.values.filter(e => e.id.includes("_quad_"));
-  assert.equal(parts.filter(e => e.id.includes("_hub_")).length, 4);
-  assert.equal(parts.filter(e => e.id.includes("_prop_")).length, 8);
+  const aircraft = entities.getById(drone.id);
+  assert.equal(aircraft.model.uri.getValue(), "/models/uav.glb");
+  assert.equal(aircraft.box, undefined);
   drone.setManualControl(true);
   for (let i = 0; i < 120; i++) drone.moveManually(1, 0, 0, 1 / 60, 1);
-  const check = center => {
-    for (const part of parts) assert(Cesium.Cartesian3.distance(center, part.position.getValue()) < 0.5);
-  };
-  check(entities.getById(drone.id).position.getValue());
+  const flown = Cesium.Cartesian3.clone(aircraft.position.getValue());
   drone.setManualControl(false);
   fleet.startReplay(0); fleet.updateReplay(0.5);
-  check(entities.getById(`${drone.id}_replay`).position.getValue());
+  const replay = entities.getById(`${drone.id}_replay`);
+  assert(replay.model);
+  assert(!Cesium.Cartesian3.equals(replay.position.getValue(), flown));
   drone.setColor("#ff6666");
-  assert(parts.every(p => p.box.material.color.getValue().toCssHexString() === "#ff6666"));
+  assert.equal(aircraft.model.silhouetteColor.getValue().toCssHexString(), "#ff6666");
   fleet.clear(); assert.equal(entities.values.length, 0);
 });
 
@@ -555,7 +554,7 @@ test("synchronized replay uses assigned speeds and stops at the last arrival", (
   assert(Math.abs(fleet.replay.duration - expectedDuration) < 1e-9);
   for (const drone of [first, second]) {
     const replay = entities.getById(`${drone.id}_replay`);
-    assert(replay.box);
+    assert(replay.model);
     assert.equal(replay.position.isConstant, false);
     assert(Cesium.Cartesian3.equals(replay.position.getValue(), trail[0]));
   }
@@ -636,7 +635,22 @@ test("sample mission accepts orbit/hover and rejects invalid speed overrides", (
   const { parseMission, sampleMission } = loadSource("mission");
   assert.deepEqual(parseMission(JSON.stringify(sampleMission)), sampleMission);
   assert.doesNotThrow(() => parseMission(JSON.stringify({ drone_id: "drone_1", mission: [{ action: "hover", duration_s: 2 }] })));
+  assert.doesNotThrow(() => parseMission(JSON.stringify({ drone_id: "drone_1", mission: [{ action: "orbit", radius_m: 20, duration_s: 2, center: home }] })));
+  assert.throws(() => parseMission(JSON.stringify({ drone_id: "drone_1", mission: [{ action: "orbit", radius_m: 20, duration_s: 2, center: { latitude: 999, longitude: 0, altitude: 1 } }] })));
   assert.throws(() => parseMission(JSON.stringify({ drone_id: "drone_1", mission: [{ action: "return_home", speed_mps: -2 }] })));
+});
+
+test("halt cancels an active mission and holds the current position", () => {
+  const entities = new Cesium.EntityCollection();
+  const fleet = new Fleet({ entities });
+  const drone = fleet.deploy(home);
+  drone.run({ drone_id: drone.id, mission: [{ action: "orbit", radius_m: 30, duration_s: 60 }] });
+  drone.update(0.1);
+  drone.stopCommand();
+  const stopped = drone.snapshot();
+  drone.update(1);
+  assert.deepEqual(drone.snapshot(), stopped);
+  assert.equal(stopped.state, "HOVERING");
 });
 
 test("empty startup, unique drone IDs and eight-color wraparound", () => {
@@ -649,10 +663,11 @@ test("empty startup, unique drone IDs and eight-color wraparound", () => {
     assert.equal(drone.id, `drone_${i + 1}`);
     const leader = entities.getById(drone.id);
     const expected = Cesium.Color.fromCssColorString(DRONE_COLORS[i % 8].hex);
-    assert(Cesium.Color.equals(leader.box.material.color.getValue(), expected));
+    assert.equal(leader.model.uri.getValue(), "/models/uav.glb");
+    assert(Cesium.Color.equals(leader.model.silhouetteColor.getValue(), expected));
     assert.equal(entities.getById(`${drone.id}_trail`).show, false);
     assert.equal(leader.polyline, undefined);
-    assert(Cesium.Cartesian3.equals(leader.box.dimensions.getValue(), new Cesium.Cartesian3(0.36, 0.24, 0.12)));
+    assert.equal(leader.model.minimumPixelSize.getValue(), 54);
   }
   assert.equal(fleet.drones.size, 9);
 });

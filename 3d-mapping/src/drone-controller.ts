@@ -1,7 +1,6 @@
 import * as Cesium from "cesium";
 import type { Coordinates, MissionCommand, MissionStep } from "./mission";
 import { avoidanceMove } from "./collision";
-import { addQuadcopterParts, DRONE_BODY_SIZE } from "./quadcopter";
 import { MOTION_TRACE_LIFETIME_MS, motionTraceAlpha } from "./motion-trace";
 import { sampleSurvey, surfaceHit, SURVEY_RAYS, SURVEY_DISTANCE_BANDS, surveyStrength, surveyBand } from "./survey-surface";
 
@@ -9,6 +8,8 @@ export type DroneSnapshot = Coordinates & { state: string; currentStep: number; 
 
 export const METERS_PER_SECOND_PER_MPH = 0.44704;
 export type DroneType = "normal" | "survey";
+const MODEL_URI = "/models/uav.glb";
+const TRAIL_COLOR = Cesium.Color.fromCssColorString("#ff203d");
 
 function destinationPoint(origin: Coordinates, eastMeters: number, northMeters: number): Coordinates {
   const center = Cesium.Cartesian3.fromDegrees(origin.longitude, origin.latitude, origin.altitude);
@@ -53,7 +54,6 @@ export class DroneController {
   private manualVelocity = new Cesium.Cartesian3();
   private configuredSpeedMph = 60;
   private readonly entity: Cesium.Entity;
-  private readonly quadParts: Cesium.Entity[];
   private readonly originEntity: Cesium.Entity;
   private readonly trailEntity: Cesium.Entity;
   private trailPoints: Cesium.Cartesian3[] = [];
@@ -146,10 +146,17 @@ export class DroneController {
       name: this.id.replace("_", " "),
       position: new Cesium.CallbackPositionProperty((_time, result) => Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude, undefined, result), false),
       orientation: new Cesium.CallbackProperty(() => this.visualOrientation(), false),
-      box: { dimensions: DRONE_BODY_SIZE, material: this.color },
-      label: { text: this.id.replace("_", " ").toUpperCase(), font: "600 13px system-ui", fillColor: this.color, showBackground: true, backgroundColor: Cesium.Color.fromAlpha(Cesium.Color.BLACK, 0.7), pixelOffset: new Cesium.Cartesian2(0, -28) },
+      model: {
+        uri: MODEL_URI,
+        scale: 1.5,
+        minimumPixelSize: 54,
+        maximumScale: 48,
+        silhouetteColor: this.color,
+        silhouetteSize: 1.2,
+        shadows: Cesium.ShadowMode.DISABLED,
+      },
+      label: { text: this.id.replace("_", " ").toUpperCase(), font: "700 12px ui-monospace, monospace", fillColor: this.color, showBackground: true, backgroundColor: Cesium.Color.fromAlpha(Cesium.Color.BLACK, 0.76), pixelOffset: new Cesium.Cartesian2(0, -38) },
     });
-    this.quadParts = addQuadcopterParts(viewer, id, () => this.visualPosition(), () => this.visualOrientation(), () => this.color, undefined, () => this.renderVersion);
     this.originEntity = viewer.entities.add({
       id: `${this.id}_origin`,
       position: Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, home.altitude),
@@ -163,7 +170,7 @@ export class DroneController {
       polyline: {
         positions: new Cesium.CallbackProperty(() => this.trailPoints.length >= 2 ? this.trailPoints : [this.visualPosition(), this.visualPosition()], false),
         width: 3,
-        material: this.color,
+        material: new Cesium.PolylineGlowMaterialProperty({ color: TRAIL_COLOR, glowPower: 0.32, taperPower: 0.7 }),
         arcType: Cesium.ArcType.NONE,
         clampToGround: false,
       },
@@ -175,7 +182,11 @@ export class DroneController {
           show: new Cesium.CallbackProperty(() => this.traceAlpha(index) > 0.01, false),
           positions: new Cesium.CallbackProperty(() => this.traceSegment(index), false),
           width: 4,
-          material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => this.color.withAlpha(this.traceAlpha(index)), false)),
+          material: new Cesium.PolylineGlowMaterialProperty({
+            color: new Cesium.CallbackProperty(() => TRAIL_COLOR.withAlpha(this.traceAlpha(index)), false),
+            glowPower: 0.42,
+            taperPower: 0.8,
+          }),
           arcType: Cesium.ArcType.NONE,
           clampToGround: false,
         },
@@ -253,6 +264,13 @@ export class DroneController {
     this.stepElapsed = 0;
     this.orbitCenter = null;
     this.state = "TAKING_OFF";
+    if (this.trailPoints.length === 0) {
+      const origin = Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude);
+      this.originEntity.position = new Cesium.ConstantPositionProperty(origin);
+      this.originEntity.show = true;
+      this.trailPoints = [origin, Cesium.Cartesian3.clone(origin)];
+    }
+    this.trailEntity.show = true;
   }
 
   setManualControl(enabled: boolean): void {
@@ -272,7 +290,7 @@ export class DroneController {
       this.originEntity.orientation = new Cesium.ConstantProperty(this.orientationAt(this.position));
       this.originEntity.show = true;
       this.trailPoints = [origin, Cesium.Cartesian3.clone(origin)];
-      this.trailEntity.show = false;
+      this.trailEntity.show = true;
     }
     this.stopManualMotion();
     this.mission = null;
@@ -287,7 +305,14 @@ export class DroneController {
   }
 
   get heading(): number { return this.manualHeading; }
-  stopCommand(): void { this.stopManualMotion(); this.state = "HOVERING"; }
+  stopCommand(): void {
+    this.stopManualMotion();
+    this.mission = null;
+    this.stepIndex = 0;
+    this.stepElapsed = 0;
+    this.orbitCenter = null;
+    this.state = "HOVERING";
+  }
   get colorHex(): string { return this.color.toCssHexString(); }
   setColor(hex: string): void {
     const color = Cesium.Color.fromCssColorString(hex);
@@ -298,8 +323,7 @@ export class DroneController {
       const alpha = patch.polygon!.material!.getValue(Cesium.JulianDate.now()).color.alpha;
       patch.polygon!.material = new Cesium.ColorMaterialProperty(color.withAlpha(alpha));
     }
-    this.entity.box!.material = new Cesium.ColorMaterialProperty(color);
-    this.trailEntity.polyline!.material = new Cesium.ColorMaterialProperty(color);
+    if (this.entity.model) this.entity.model.silhouetteColor = new Cesium.ConstantProperty(color);
     for (const item of [this.entity, this.originEntity, ...this.releases, ...(this.replayEntity ? [this.replayEntity] : [])]) {
       if (item.label) item.label.fillColor = new Cesium.ConstantProperty(color);
       if (item.box) {
@@ -321,7 +345,7 @@ export class DroneController {
     for (const marker of this.releases) this.viewer.entities.remove(marker);
     this.releases.length = 0;
     this.trailPoints = [origin, Cesium.Cartesian3.fromDegrees(destination.longitude, destination.latitude, destination.altitude)];
-    this.trailEntity.show = false;
+    this.trailEntity.show = true;
   }
   get homeCoordinates(): Coordinates { return { ...this.home }; }
   get speedMph(): number { return this.configuredSpeedMph; }
@@ -333,7 +357,6 @@ export class DroneController {
   destroy(): void {
     this.reset();
     this.viewer.entities.remove(this.entity);
-    for (const part of this.quadParts) this.viewer.entities.remove(part);
     this.viewer.entities.remove(this.originEntity);
     this.viewer.entities.remove(this.trailEntity);
     for (const trace of this.motionTrace) this.viewer.entities.remove(trace);
@@ -444,7 +467,15 @@ export class DroneController {
       id: `${this.id}_replay`,
       position: new Cesium.CallbackPositionProperty((_time, result) => Cesium.Cartesian3.clone(this.replayPosition, result), false),
       orientation: new Cesium.CallbackProperty(() => this.visualOrientation(), false),
-      box: { dimensions: DRONE_BODY_SIZE, material: this.color },
+      model: {
+        uri: MODEL_URI,
+        scale: 1.5,
+        minimumPixelSize: 54,
+        maximumScale: 48,
+        silhouetteColor: this.color,
+        silhouetteSize: 1.2,
+        shadows: Cesium.ShadowMode.DISABLED,
+      },
       label: { text: this.id.replace("_", " ").toUpperCase(), font: "600 13px system-ui", fillColor: this.color, showBackground: true, pixelOffset: new Cesium.Cartesian2(0, -28) },
     });
     return length / this.replaySpeed;
@@ -522,7 +553,7 @@ export class DroneController {
       if (this.stepElapsed >= step.duration_s) this.advance();
     } else {
       this.state = "ORBITING";
-      this.orbitCenter ??= { ...this.position };
+      this.orbitCenter ??= step.center ? { ...step.center } : { ...this.position };
       this.stepElapsed += deltaSeconds;
       const direction = step.clockwise === false ? -1 : 1;
       const angle = direction * ((this.stepElapsed / step.duration_s) * Cesium.Math.TWO_PI);

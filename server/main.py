@@ -27,6 +27,7 @@ from simulation.simulation import SimulationEngine
 from simulation.world import WorldDefinition
 
 from .mission_intel import install as install_mission_intel
+from .gesture import GestureSnapshot, GestureStore, GestureUpdate
 from .websocket import WebSocketHub
 
 # How often, in simulated seconds, a registered mission plan is re-evaluated.
@@ -93,6 +94,7 @@ def create_app(
     app.state.engine = runtime
     app.state.websocket_hub = hub
     app.state.mission_session = install_mission_intel(app, runtime, mission_backend)
+    app.state.gesture_store = GestureStore()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
@@ -108,6 +110,14 @@ def create_app(
     @app.get("/api/state", response_model=SimulationSnapshot)
     async def state() -> SimulationSnapshot:
         return runtime.snapshot()
+
+    @app.get("/api/gesture", response_model=GestureSnapshot)
+    async def gesture() -> GestureSnapshot:
+        return app.state.gesture_store.snapshot()
+
+    @app.post("/api/gesture", response_model=GestureSnapshot)
+    async def update_gesture(update: GestureUpdate) -> GestureSnapshot:
+        return app.state.gesture_store.update(update)
 
     @app.get("/api/world", response_model=WorldDefinition)
     async def world() -> WorldDefinition:

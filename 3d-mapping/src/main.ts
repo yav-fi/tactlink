@@ -12,7 +12,10 @@ import { previewCoordinate } from "./flight-preview";
 import { COMMANDS, parseCommandSequence, type CommandIntent } from "./command-console";
 import { compileMissionSequence, isFlightSequenceIntent } from "./mission-sequence";
 
-const home = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
+const monument = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
+// The south side of the monument plaza: visibly at the base, but outside the
+// obelisk geometry so the collision layer can launch the aircraft safely.
+const home = { latitude: 38.88928, longitude: -77.0353, altitude: 80 };
 const token = import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined;
 const status = document.querySelector<HTMLParagraphElement>("#world-status")!;
 const commandStatus = document.querySelector<HTMLElement>("#command-status")!;
@@ -36,6 +39,14 @@ new MutationObserver(() => {
 const runtimeApiBase = ((import.meta.env.VITE_RUNTIME_URL as string | undefined) ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 const runtimeMode = new URLSearchParams(window.location.search).get("mode") === "runtime";
 document.body.classList.toggle("runtime-mode", runtimeMode);
+const gestureHud = {
+  root: document.querySelector<HTMLElement>("#gesture-hud")!,
+  connection: document.querySelector<HTMLElement>("#gesture-connection")!,
+  name: document.querySelector<HTMLElement>("#gesture-name")!,
+  confidence: document.querySelector<HTMLElement>("#gesture-confidence")!,
+  progress: document.querySelector<HTMLElement>("#gesture-progress-fill")!,
+  action: document.querySelector<HTMLElement>("#gesture-action")!,
+};
 
 const panelTabs = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
 function showControlTab(name: "drone" | "batches"): void {
@@ -186,7 +197,7 @@ function releaseDrone(): void {
   batchControlButton.textContent = "Control selected batch";
   batchControlButton.setAttribute("aria-pressed", "false");
 }
-const monumentTarget = Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, 20);
+const monumentTarget = Cesium.Cartesian3.fromDegrees(monument.longitude, monument.latitude, 20);
 const orbitCamera = { heading: Cesium.Math.toRadians(30), pitch: Cesium.Math.toRadians(-22), range: 450 };
 let cameraMode: "auto" | "placement" = "auto";
 let isOrbitDragging = false;
@@ -607,6 +618,106 @@ function runLocalMission(target: DroneController, mission: Parameters<DroneContr
   refreshFleet();
 }
 
+type GestureSnapshot = {
+  connected: boolean;
+  present: boolean;
+  gesture: string;
+  score: number;
+  source: string;
+  hold_progress: number;
+  sequence_hint: string;
+  events: { sequence: number; action: string }[];
+};
+
+let lastGestureSequence: number | undefined;
+let gesturePollRunning = false;
+
+function gestureOffset(action: string, meters = 65): { east: number; north: number } | undefined {
+  if (action === "fly_north") return { east: 0, north: meters };
+  if (action === "fly_south") return { east: 0, north: -meters };
+  if (action === "fly_east") return { east: meters, north: 0 };
+  if (action === "fly_west") return { east: -meters, north: 0 };
+  if (action === "fly_forward") {
+    const heading = drone?.horizontalFlightHeading ?? drone?.heading ?? 0;
+    return { east: Math.sin(heading) * meters, north: Math.cos(heading) * meters };
+  }
+  if (action.startsWith("fly_bearing:")) {
+    const bearing = Number(action.slice("fly_bearing:".length));
+    if (Number.isFinite(bearing)) return { east: Math.sin(bearing) * meters, north: Math.cos(bearing) * meters };
+  }
+  return undefined;
+}
+
+function executeGestureAction(action: string): void {
+  const target = drone ?? fleet.drones.values().next().value;
+  if (!target) return;
+  drone = target;
+  const position = target.snapshot();
+  const offset = gestureOffset(action);
+  if (offset) {
+    const destination = localOffset(target, offset.east, offset.north);
+    runLocalMission(target, { drone_id: target.id, mission: [{ action: "goto", ...destination, speed_mps: target.speedMph * 0.44704 }] }, "gesture flight");
+  } else if (action === "takeoff") {
+    const altitude = position.state === "IDLE" ? Math.max(position.altitude + 35, 115) : position.altitude + 20;
+    runLocalMission(target, { drone_id: target.id, mission: [{ action: "goto", latitude: position.latitude, longitude: position.longitude, altitude, speed_mps: 12 }] }, "gesture climb");
+  } else if (action === "land" || action === "return_home") {
+    runLocalMission(target, { drone_id: target.id, mission: [{ action: "return_home", speed_mps: 12 }] }, "gesture return");
+  } else if (action === "orbit") {
+    runLocalMission(target, { drone_id: target.id, mission: [{ action: "orbit", radius_m: 45, duration_s: 3600 }] }, "gesture orbit");
+  } else if (action === "halt" || action === "estop") {
+    if (controllingDrone) flyToFreeCameraOverview();
+    target.stopCommand();
+    refreshFleet();
+  } else if (action.startsWith("speed:")) {
+    const speed = action.endsWith("slow") ? 25 : action.endsWith("sport") ? 90 : 60;
+    target.speedMph = speed;
+    refreshFleet();
+  } else if (action === "spin360") {
+    runLocalMission(target, { drone_id: target.id, mission: [{ action: "orbit", radius_m: 5, duration_s: 3 }] }, "gesture spin");
+  }
+  gestureHud.action.textContent = `COMMAND · ${action.replaceAll("_", " ").toUpperCase()}`;
+  setCommandMessage(`Gesture received · ${action.replaceAll("_", " ")}`);
+}
+
+async function pollGestures(): Promise<void> {
+  if (runtimeMode || gesturePollRunning) return;
+  gesturePollRunning = true;
+  try {
+    const response = await fetch(`${runtimeApiBase}/api/gesture`, { cache: "no-store" });
+    if (!response.ok) throw new Error("gesture bridge unavailable");
+    const payload = await response.json() as GestureSnapshot;
+    gestureHud.root.classList.toggle("connected", payload.connected);
+    gestureHud.connection.textContent = payload.connected ? "CAMERA ACTIVE · LOCAL ONLY" : "CAMERA OFFLINE";
+    gestureHud.name.textContent = payload.present ? payload.gesture.replaceAll("_", " ").toUpperCase() : "NO HAND";
+    gestureHud.confidence.textContent = payload.present
+      ? `${Math.round(payload.score * 100)}% confidence · ${payload.source}${payload.sequence_hint ? ` · ${payload.sequence_hint}` : ""}`
+      : payload.connected ? "Show a gesture to control drone 1" : "Start with ./start to enable hand control";
+    gestureHud.progress.style.width = `${Math.round(payload.hold_progress * 100)}%`;
+    const newest = payload.events.at(-1)?.sequence ?? 0;
+    if (lastGestureSequence === undefined) {
+      lastGestureSequence = newest;
+    } else {
+      for (const event of payload.events) {
+        if (event.sequence > lastGestureSequence) executeGestureAction(event.action);
+      }
+      lastGestureSequence = Math.max(lastGestureSequence, newest);
+    }
+  } catch {
+    gestureHud.root.classList.remove("connected");
+    gestureHud.connection.textContent = "CAMERA OFFLINE";
+    gestureHud.name.textContent = "NO HAND";
+    gestureHud.confidence.textContent = "Start with ./start to enable hand control";
+    gestureHud.progress.style.width = "0%";
+  } finally {
+    gesturePollRunning = false;
+  }
+}
+
+if (!runtimeMode) {
+  void pollGestures();
+  window.setInterval(() => { void pollGestures(); }, 120);
+}
+
 type AiObjective = {
   type: string;
   desired_units?: number;
@@ -867,6 +978,14 @@ document.addEventListener("visibilitychange", clearInput);
 document.addEventListener("focusin", clearInput);
 viewer.canvas.tabIndex = 0;
 viewer.canvas.addEventListener("pointerdown", () => viewer.canvas.focus());
+
+if (!runtimeMode) {
+  drone = fleet.deploy(home);
+  selectedIds.add(drone.id);
+  drone.run({ drone_id: drone.id, mission: [{ action: "orbit", radius_m: 45, duration_s: 3600, center: monument }] });
+  refreshFleet();
+  commandStatus.textContent = "Drone 1 launched from the Washington Monument base · gesture camera connecting.";
+}
 
 function updateFreeCamera(deltaSeconds: number): void {
   if (controllingDrone && drone) {
