@@ -11,7 +11,7 @@ TactLink translate intent into action.
 Clone:
 
 ```sh
-git clone https://github.com/yav-fi/dnhacks26.git
+git clone https://github.com/yav-fi/tactlink.git
 ```
 
 Yavin added `AGENTS.md` and `CLAUDE.md` to keep coding-agent instructions
