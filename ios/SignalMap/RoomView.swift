@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 private let roomMint = Color(red: 0.55, green: 0.95, blue: 0.76)
 private let roomBackground = Color(red: 0.025, green: 0.045, blue: 0.045)
@@ -205,6 +206,13 @@ struct RoomView: View {
 private struct GestureStatus: View {
     @ObservedObject var camera: GestureCamera
     var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("REAR CAMERA · \(camera.processedFrames) frames processed")
+                .font(.caption2.monospaced()).foregroundStyle(roomMint)
+            GesturePreview(session: camera.session)
+                .frame(height: 220).clipShape(RoundedRectangle(cornerRadius: 10))
+            Text("Hold the phone upright. Put your whole hand in this rear-camera view; start with an open palm.")
+                .font(.caption2).foregroundStyle(roomMuted)
         HStack(spacing: 10) {
             Image(systemName: camera.gesture == "None" ? "hand.raised.slash" : "hand.raised.fill")
                 .foregroundStyle(camera.gesture == "None" ? roomMuted : roomMint)
@@ -216,8 +224,29 @@ private struct GestureStatus: View {
             Spacer()
             Text(camera.gesture == "None" ? "—" : String(format: "%.0f%%", camera.confidence * 100))
                 .font(.system(size: 13, weight: .medium, design: .monospaced)).foregroundStyle(roomMint)
+        }
         }.padding(14).background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
     }
+}
+
+private struct GesturePreview: UIViewRepresentable {
+    let session: AVCaptureSession
+    final class PreviewView: UIView {
+        override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
+        var preview: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            if let connection=preview.connection {
+                if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle=90 }
+                if connection.isVideoMirroringSupported { connection.isVideoMirrored=false }
+            }
+        }
+    }
+    func makeUIView(context: Context) -> PreviewView {
+        let view=PreviewView(); view.preview.session=session; view.preview.videoGravity = .resizeAspect
+        return view
+    }
+    func updateUIView(_ view: PreviewView, context: Context) {}
 }
 
 private struct RoomMap: View {
