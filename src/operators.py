@@ -66,10 +66,11 @@ class OperatorPool:
         """Replace the operator list with live phone reports (see phone_feed).
 
         ``reports`` is any iterable of objects with ``op_id``, ``name``, ``pos``
-        (x, y), ``heading`` (radians) and ``gesture``. ``rot`` rotates the phones'
-        arbitrary UWB frame into the sim frame (radians); ``recenter`` subtracts
-        the group centroid, fixed on the first non-empty sync so the geometry
-        stays stable.
+        (x, y), ``gesture`` and either ``sim_heading(rot)`` or a ``heading``
+        (radians). ``rot`` rotates the phones' arbitrary UWB frame into the sim
+        frame (radians) - it aligns positions always, and the motion heading when
+        the phone has no compass fix; ``recenter`` subtracts the group centroid,
+        fixed on the first non-empty sync so the geometry stays stable.
         """
         reports = list(reports)
         if not reports:
@@ -91,13 +92,14 @@ class OperatorPool:
         by_id = {op.op_id: op for op in self.operators if op.op_id}
         kept = []
         for r in reports:
+            heading = r.sim_heading(rot) if hasattr(r, "sim_heading") else float(r.heading) + rot
             op = by_id.get(r.op_id)
             if op is None:
-                op = Operator(r.name or r.op_id, pts[r.op_id], float(r.heading) + rot)
+                op = Operator(r.name or r.op_id, pts[r.op_id], heading)
                 op.op_id = r.op_id
             else:
                 op.pos[:] = pts[r.op_id]
-                op.heading = float(r.heading) + rot
+                op.heading = heading
                 op.name = r.name or op.name
             op.gesture = getattr(r, "gesture", "None") or "None"
             op.gesture_source = getattr(r, "gesture_source", "phone")

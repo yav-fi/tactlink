@@ -145,7 +145,10 @@ commands reach the drone. One webcam fills in for whoever currently has control.
 operators are driven by real iPhones running SignalMap's visualizer bridge
 (`ios/SignalMap/RoomBridge.swift`): each phone streams its own UWB position and
 heading over UDP, and `src/phone_feed.py` turns that into operators that appear
-and move at their real spots. UWB coordinates have no north, so
+and move at their real spots. Each phone also sends an absolute **magnetic
+compass** heading (`HeadingSource.swift`), which the sim prefers for facing
+(so "forward" works while standing still); it falls back to the walking-only
+motion heading otherwise. UWB *positions* still have no north, so
 `--phone-frame-rot DEG` rotates them to line up with the scene; the group is
 recentered on its first fix. Each phone's own `gesture` field feeds its
 operator's interpreter (the phones send `"None"` until on-device recognition

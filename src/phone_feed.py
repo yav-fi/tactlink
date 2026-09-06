@@ -37,13 +37,26 @@ class PhoneReport:
     op_id: str
     name: str
     pos: tuple            # (x, y) metres, phone's arbitrary UWB frame
-    heading: float        # radians in that frame
+    heading: float        # radians, motion heading in the UWB frame (walking only)
     moving: bool = False
     heading_ready: bool = False
+    compass: float = 0.0        # degrees clockwise from magnetic north (absolute)
+    compass_valid: bool = False
     gesture: str = "None"
     gesture_source: str = "phone"
     cycle: int = 0
     recv_time: float = 0.0
+
+    def sim_heading(self, rot: float = 0.0) -> float:
+        """Best facing for this operator in the sim frame (radians, 0 = +x/east).
+
+        Prefers the phone's absolute compass when it is valid; otherwise the
+        UWB-frame motion heading rotated by ``rot`` (``--phone-frame-rot``).
+        """
+        if self.compass_valid:
+            # compass: degrees CW from north -> radians CCW from +x, north = +y.
+            return math.radians(90.0 - self.compass)
+        return self.heading + rot
 
 
 def parse_datagram(data: bytes, now: float | None = None) -> PhoneReport | None:
@@ -71,6 +84,12 @@ def parse_datagram(data: bytes, now: float | None = None) -> PhoneReport | None:
     if not math.isfinite(heading):
         heading = 0.0
 
+    try:
+        compass = float(obj.get("compass", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        compass = 0.0
+    compass_valid = bool(obj.get("compassValid", False)) and math.isfinite(compass)
+
     cycle = obj.get("cycle", 0)
     return PhoneReport(
         op_id=op_id[:64],
@@ -79,6 +98,8 @@ def parse_datagram(data: bytes, now: float | None = None) -> PhoneReport | None:
         heading=heading,
         moving=bool(obj.get("moving", False)),
         heading_ready=bool(obj.get("headingReady", False)),
+        compass=compass,
+        compass_valid=compass_valid,
         gesture=(str(obj.get("gesture"))[:32] if obj.get("gesture") else "None"),
         gesture_source=(str(obj.get("gestureSource"))[:16] if obj.get("gestureSource") else "phone"),
         cycle=int(cycle) if isinstance(cycle, (int, float)) and math.isfinite(cycle) else 0,

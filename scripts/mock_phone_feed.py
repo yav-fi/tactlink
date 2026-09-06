@@ -51,6 +51,8 @@ def main() -> None:
     p.add_argument("--still", action="store_true", help="stand in a ring, don't walk")
     p.add_argument("--script", action="store_true",
                    help="phone 1 runs a looping gesture timeline (take off, orbit, halt, land)")
+    p.add_argument("--no-compass", action="store_true",
+                   help="omit the absolute compass field (test the motion-heading fallback)")
     args = p.parse_args()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -69,6 +71,8 @@ def main() -> None:
                 y = args.radius * math.sin(ang)
                 heading = ang + math.pi if args.still else ang + math.pi / 2
                 gesture = _scripted_gesture(t) if (args.script and i == 0) else "None"
+                # sim-frame facing (radians) -> compass degrees CW from north.
+                compass = (90.0 - math.degrees(heading)) % 360.0
                 msg = {
                     "v": 1, "id": f"phone-{i + 1}", "name": _NAMES[i % len(_NAMES)],
                     "room": "mock", "t": round(t, 3), "cycle": int(t),
@@ -76,7 +80,10 @@ def main() -> None:
                     "heading": round(heading % (2 * math.pi), 4),
                     "moving": not args.still,
                     "speed": 0.0 if args.still else args.radius * args.speed,
-                    "headingReady": True, "gesture": gesture,
+                    "headingReady": True,
+                    "compass": round(compass, 2),
+                    "compassValid": not args.no_compass,
+                    "gesture": gesture,
                     "gestureSource": "canned" if gesture != "None" else "none",
                     "flat": True,
                 }

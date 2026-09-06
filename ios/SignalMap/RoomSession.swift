@@ -12,6 +12,7 @@ final class RoomSession: ObservableObject {
     let ranging: RoomRanging
     let log: BenchLog
     let bridge = RoomBridge()
+    let compass = HeadingSource()   // magnetic bearing, for the bridge only
     @Published var displayName: String
     /// Optional "host:port" of an external visualizer / drone simulator on the
     /// same Wi-Fi. Empty disables the outbound telemetry stream. Persisted.
@@ -162,6 +163,7 @@ final class RoomSession: ObservableObject {
         status="Waiting for \(targetCount) phones. Share this room code with the group."
         transport.start(code: clean)
         bridge.configure(simBridge)
+        if !simBridge.isEmpty { compass.start() }
         UIApplication.shared.isIdleTimerDisabled = true
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.tick() }
         log.event("room-joined", transport.room)
@@ -174,6 +176,7 @@ final class RoomSession: ObservableObject {
         timer?.invalidate(); timer=nil
         transport.stop()
         bridge.stop()
+        compass.stop()
         joined=false; running=false; members=[]; known=[:]; clocks=[:]
         jobs=[:]; offered=[:]; pending=[]; cycleStarted=nil
         geometry=nil; geometryUpdated=nil; liveDistance=nil; liveSamples=0
@@ -190,6 +193,7 @@ final class RoomSession: ObservableObject {
         ranging.cancel(reason: "App entered background")
         gate.release()
         transport.stop()
+        compass.stop()
         timer?.invalidate(); timer=nil
         running=false; geometry=nil; geometryUpdated=nil
         log.event("background", "Local NI lease released; networking stopped")
@@ -203,6 +207,7 @@ final class RoomSession: ObservableObject {
         known=[:]; members=[]; jobs=[:]; pending=[]; topology=""; cycleStarted=nil
         ranges=[:]; geometry=nil; geometryCycle = -1
         transport.start(code: code)
+        if !simBridge.isEmpty { compass.start() }
         UIApplication.shared.isIdleTimerDisabled=true
         timer=Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.tick() }
         status="Rejoining the room…"
@@ -471,7 +476,8 @@ final class RoomSession: ObservableObject {
         if now-lastSnapshot>=1 { updateGeometry(now); writeSnapshot(); lastSnapshot=now }
         if let mine=geometry?.positions[localID] {
             bridge.send(id:localID,name:displayName,room:transport.room,cycle:cycle,
-                        position:mine,heading:motionHeading,flat:threePhoneMode)
+                        position:mine,heading:motionHeading,
+                        compassDegrees:compass.compassDegrees,flat:threePhoneMode)
         }
     }
 

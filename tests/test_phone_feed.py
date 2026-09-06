@@ -49,6 +49,38 @@ def test_parse_tolerates_missing_optionals():
     r = parse_datagram(json.dumps({"id": "p", "pos": [0, 0]}).encode(), now=1.0)
     assert r.name == "p" and r.heading == 0.0 and r.moving is False
     assert r.gesture == "None" and r.cycle == 0
+    assert r.compass_valid is False
+
+
+def test_parse_compass():
+    r = parse_datagram(_packet(compass=270.0, compassValid=True), now=1.0)
+    assert r.compass == 270.0 and r.compass_valid is True
+    r = parse_datagram(_packet(compass=270.0), now=1.0)   # compassValid absent
+    assert r.compass_valid is False
+
+
+def test_sim_heading_prefers_compass_then_falls_back():
+    # compass 0 deg = facing north = sim +y = pi/2, regardless of rot.
+    north = PhoneReport("a", "a", (0.0, 0.0), heading=1.234, compass=0.0, compass_valid=True)
+    assert abs(north.sim_heading(rot=0.9) - math.pi / 2) < 1e-9
+    # compass 90 deg (east) -> sim 0
+    east = PhoneReport("a", "a", (0.0, 0.0), heading=0.0, compass=90.0, compass_valid=True)
+    assert abs(east.sim_heading() - 0.0) < 1e-9
+    # no compass -> motion heading + rot
+    walk = PhoneReport("a", "a", (0.0, 0.0), heading=0.5, compass_valid=False)
+    assert abs(walk.sim_heading(rot=0.25) - 0.75) < 1e-9
+
+
+def test_pool_sync_uses_compass_for_facing():
+    from operators import OperatorPool
+    pool = OperatorPool(1)
+    pool.sync_from_reports(
+        [PhoneReport("A", "A", (-1.0, 0.0), heading=9.9, compass=0.0, compass_valid=True),
+         PhoneReport("B", "B", (1.0, 0.0), heading=9.9, compass=0.0, compass_valid=True)],
+        rot=1.3, recenter=False)
+    # both report compass north -> both face sim +y (pi/2), rot ignored for facing
+    for op in pool.operators:
+        assert abs(op.heading - math.pi / 2) < 1e-9
 
 
 def test_feed_receives_over_udp():

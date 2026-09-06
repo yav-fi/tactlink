@@ -12,9 +12,12 @@ import Network
 ///
 ///     {"v":1,"id":...,"name":...,"room":...,"t":...,"cycle":...,
 ///      "pos":[x,y],"z":...,"heading":...,"moving":...,"speed":...,
-///      "headingReady":...,"gesture":"None","flat":...}
+///      "headingReady":...,"compass":...,"compassValid":...,
+///      "gesture":"None","flat":...}
 ///
-/// consumed by `src/phone_feed.py` on the simulator side.
+/// consumed by `src/phone_feed.py` on the simulator side. `heading` is the
+/// motion-derived heading in the UWB frame (walking only); `compass` is the
+/// absolute magnetic bearing from `HeadingSource` and is preferred when valid.
 final class RoomBridge {
     struct Sample: Codable {
         var v = 1
@@ -29,6 +32,8 @@ final class RoomBridge {
         var moving: Bool
         var speed: Double
         var headingReady: Bool
+        var compass: Double      // degrees clockwise from magnetic north
+        var compassValid: Bool
         var gesture: String      // reserved; "None" until phones classify on-device
         var flat: Bool
     }
@@ -80,16 +85,19 @@ final class RoomBridge {
     }
 
     func send(id: String, name: String, room: String, cycle: Int,
-              position: Vector3, heading: RelativeMotionHeading, flat: Bool) {
+              position: Vector3, heading: RelativeMotionHeading,
+              compassDegrees: Double?, flat: Bool) {
         queue.async { [weak self] in
             guard let self, let connection = self.connection, position.finite else { return }
             let now = ProcessInfo.processInfo.systemUptime
             guard now - self.lastSend >= self.minInterval else { return }
             self.lastSend = now
+            let compassOK = (compassDegrees?.isFinite ?? false)
             let sample = Sample(id: id, name: String(name.prefix(24)), room: room, t: now,
                                 cycle: cycle, pos: [position.x, position.y], z: position.z,
                                 heading: heading.angle, moving: heading.moving,
                                 speed: heading.speed, headingReady: heading.available,
+                                compass: compassOK ? compassDegrees! : 0, compassValid: compassOK,
                                 gesture: "None", flat: flat)
             guard let data = try? self.encoder.encode(sample) else { return }
             connection.send(content: data, completion: .idempotent)
