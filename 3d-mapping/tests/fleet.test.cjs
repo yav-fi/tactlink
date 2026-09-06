@@ -19,8 +19,18 @@ function loadSource(name) {
 }
 const { Fleet, DRONE_COLORS } = loadSource("fleet");
 const { blendHeading, fleetCameraFrame, screenRelativeMovement } = loadSource("cinematic-camera");
+const { parseCommandInput } = loadSource("command-console");
 const { MOTION_TRACE_LIFETIME_MS, motionTraceAlpha } = loadSource("motion-trace");
 const home = { latitude: 38.889, longitude: -77.036, altitude: 80 };
+
+test("command bar understands slash commands and common plain English", () => {
+  assert.deepEqual(parseCommandInput("/deploy 4 survey"), { type: "deploy", count: 4, survey: true });
+  assert.deepEqual(parseCommandInput("fly drone 2"), { type: "fly", droneNumber: 2 });
+  assert.deepEqual(parseCommandInput("move forward 75 meters"), { type: "move", direction: "forward", meters: 75 });
+  assert.deepEqual(parseCommandInput("/goto 38.8895, -77.0353, 120"), { type: "goto", latitude: 38.8895, longitude: -77.0353, altitude: 120, all: false });
+  assert.deepEqual(parseCommandInput("return the whole fleet home"), { type: "return", all: true });
+  assert.deepEqual(parseCommandInput("inspect the monuments with two drones"), { type: "ai", instruction: "inspect the monuments with two drones" });
+});
 
 test("cinematic camera framing expands to keep the whole fleet visible", () => {
   const center = Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, home.altitude);

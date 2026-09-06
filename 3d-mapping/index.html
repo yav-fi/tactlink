@@ -49,8 +49,13 @@
           <p class="hint">Click a drone for its task, battery, localization, peer, and capability details. Solid links are usable; red dashed links are unavailable.</p>
         </section>
         <div class="local-only" id="local-command-dock">
-        <p id="command-status" class="dock-status hint">Ready to deploy.</p>
-        <div class="dock-row">
+        <div id="command-suggestions" class="command-suggestions" role="listbox" aria-label="Available commands" hidden></div>
+        <form id="command-form" class="command-form">
+          <span class="command-prompt" aria-hidden="true">›</span>
+          <input id="command-input" type="text" autocomplete="off" spellcheck="false" aria-label="Drone command" aria-controls="command-suggestions" placeholder="Tell the drones what to do · type / for commands" />
+          <span class="command-ai" title="Open-ended text uses the local mission AI">AI</span>
+        </form>
+        <div class="dock-row" hidden>
           <button id="deploy-drone" type="button">+ Deploy</button>
           <select id="selected-drone" aria-label="Selected drone" disabled><option>No drones deployed</option></select>
           <div id="rotation-controls" class="rotation-controls" hidden>
@@ -171,6 +176,15 @@
           <p id="preview-status" role="status"></p>
         </div>
       </aside>
+      <footer class="local-only telemetry-strip" aria-label="Flight telemetry">
+        <span id="command-status" class="telemetry-message" role="status">Ready · type / for commands</span>
+        <span id="telemetry-drone">NO DRONE</span>
+        <span id="telemetry-state">IDLE</span>
+        <span id="telemetry-lat">LAT —</span>
+        <span id="telemetry-lon">LON —</span>
+        <span id="telemetry-alt">ALT —</span>
+        <span id="telemetry-fps">— FPS</span>
+      </footer>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

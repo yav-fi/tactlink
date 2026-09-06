@@ -6,9 +6,10 @@ import { Fleet, DRONE_COLORS } from "./fleet";
 import { formationSlots } from "./formation";
 import { collisionWarning } from "./collision";
 import { blendHeading, fleetCameraFrame, screenRelativeMovement } from "./cinematic-camera";
-import { parseMission, sampleMission } from "./mission";
+import { parseMission, sampleMission, type MissionStep } from "./mission";
 import { startRuntimeMode } from "./runtime/index";
-import { previewCoordinate, previewMission, type FlightPreview } from "./flight-preview";
+import { previewCoordinate } from "./flight-preview";
+import { COMMANDS, parseCommandInput, type CommandIntent } from "./command-console";
 
 const home = { latitude: 38.8895, longitude: -77.0353, altitude: 80 };
 const token = import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined;
@@ -17,6 +18,10 @@ const commandStatus = document.querySelector<HTMLParagraphElement>("#command-sta
 const missionInput = document.querySelector<HTMLTextAreaElement>("#mission-json")!;
 const stateElement = document.querySelector<HTMLDListElement>("#drone-state")!;
 const commandDrawer = document.querySelector<HTMLDetailsElement>("#command-drawer")!;
+const commandForm = document.querySelector<HTMLFormElement>("#command-form")!;
+const commandInput = document.querySelector<HTMLInputElement>("#command-input")!;
+const commandSuggestions = document.querySelector<HTMLDivElement>("#command-suggestions")!;
+const runtimeApiBase = ((import.meta.env.VITE_RUNTIME_URL as string | undefined) ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 const runtimeMode = new URLSearchParams(window.location.search).get("mode") === "runtime";
 document.body.classList.toggle("runtime-mode", runtimeMode);
 
@@ -74,6 +79,9 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
 if (runtimeMode) startRuntimeMode(viewer);
 
 viewer.scene.globe.enableLighting = false;
+viewer.scene.globe.maximumScreenSpaceError = 3;
+viewer.scene.postProcessStages.fxaa.enabled = true;
+viewer.scene.msaaSamples = 1;
 const fleet = new Fleet(viewer);
 const replayButton = document.querySelector<HTMLButtonElement>("#run-all-paths")!;
 const stopReplayButton = document.querySelector<HTMLButtonElement>("#stop-paths")!;
@@ -104,6 +112,7 @@ let deploying = false;
 let pickedSurface: Cesium.Cartographic | undefined;
 let previews: Cesium.Entity[] = [];
 let placementMode: "single" | "bulk" | "command" = "single";
+let quickPlacement = false;
 const selectedIds = new Set<string>();
 const batchControlButton = document.querySelector<HTMLButtonElement>("#control-batch")!;
 const batchSpeedInput = document.querySelector<HTMLInputElement>("#batch-speed")!;
@@ -331,6 +340,7 @@ stopReplayButton.addEventListener("click", () => {
 function cancelDeployment(): void {
   const wasDeploying = deploying;
   deploying = false;
+  quickPlacement = false;
   pickedSurface = undefined;
   for (const preview of previews) viewer.entities.remove(preview);
   previews = [];
@@ -434,6 +444,7 @@ cameraHandler.setInputAction((event: { position: Cesium.Cartesian2 }) => {
     return;
   }
   updatePreview();
+  if (quickPlacement && placementMode === "bulk") completeDeployment();
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
 function completeDeployment(): void {
@@ -486,6 +497,8 @@ async function loadWorld(): Promise<void> {
 if (token) {
   try {
     const tileset = await Cesium.createGooglePhotorealistic3DTileset();
+    tileset.maximumScreenSpaceError = 24;
+    tileset.dynamicScreenSpaceError = true;
     viewer.scene.primitives.add(tileset);
     viewer.scene.globe.show = false;
     status.textContent = "Google Photorealistic 3D Tiles connected.";
@@ -542,7 +555,226 @@ controlDroneButton.addEventListener("click", () => {
   viewer.canvas.focus();
 });
 
+function requireDrone(number?: number): DroneController {
+  const target = number ? fleet.drones.get(`drone_${number}`) : drone;
+  if (!target) throw new Error(number ? `Drone ${number} is not deployed.` : "Deploy or select a drone first.");
+  return target;
+}
+
+function setCommandMessage(message: string): void {
+  if (commandStatus.textContent !== message) commandStatus.textContent = message;
+}
+
+function localOffset(target: DroneController, east: number, north: number): { latitude: number; longitude: number; altitude: number } {
+  return previewCoordinate({ x: east, y: north, z: 0 }, target.snapshot());
+}
+
+function runLocalMission(target: DroneController, mission: Parameters<DroneController["run"]>[0], label: string): void {
+  if (controllingDrone) flyToFreeCameraOverview();
+  fleet.checkpoint(label);
+  target.run(mission);
+  drone = target;
+  refreshFleet();
+}
+
+type AiObjective = {
+  type: string;
+  desired_units?: number;
+  target?: { point?: { x: number; y: number; z: number }; region_id?: string };
+};
+
+async function executeAiInstruction(instruction: string): Promise<void> {
+  commandInput.disabled = true;
+  setCommandMessage("AI is compiling and validating the mission…");
+  try {
+    const response = await fetch(`${runtimeApiBase}/api/mission-plans/compile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ utterance: instruction, selected_drone_id: drone?.id ?? null, start: false }),
+    });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    const payload = await response.json() as { result?: { status?: string; plan?: { objectives?: AiObjective[] }; clarification_question?: string; rejection_reason?: string; interpretation_summary?: string } };
+    const result = payload.result;
+    if (result?.status !== "READY" || !result.plan?.objectives?.length) {
+      throw new Error(result?.clarification_question ?? result?.rejection_reason ?? "The AI could not form a safe mission.");
+    }
+    let world: { regions?: { id: string; center: { x: number; y: number; z: number } }[] } | undefined;
+    const objectives = result.plan.objectives;
+    const members = [...fleet.drones.values()];
+    if (!members.length) throw new Error("Deploy a drone before assigning an AI mission.");
+    fleet.checkpoint("AI mission");
+    if (controllingDrone) flyToFreeCameraOverview();
+    let assigned = 0;
+    for (const objective of objectives) {
+      const count = Math.max(1, Math.min(members.length, objective.desired_units ?? 1));
+      const targets = [drone, ...members].filter((item, index, all): item is DroneController => Boolean(item) && all.indexOf(item) === index).slice(0, count);
+      let point = objective.target?.point;
+      if (!point && objective.target?.region_id) {
+        if (!world) {
+          const worldResponse = await fetch(`${runtimeApiBase}/api/world`);
+          if (!worldResponse.ok) throw new Error("Could not load the AI mission region.");
+          world = await worldResponse.json() as { regions?: { id: string; center: { x: number; y: number; z: number } }[] };
+        }
+        point = world.regions?.find(region => region.id.toLowerCase() === objective.target!.region_id!.toLowerCase())?.center;
+      }
+      for (const target of targets) {
+        const type = objective.type.toUpperCase();
+        if (type === "RETURN") {
+          target.run({ drone_id: target.id, mission: [{ action: "return_home", speed_mps: target.speedMph * 0.44704 }] });
+        } else if (type === "HOLD") {
+          target.stopCommand();
+        } else if (point) {
+          const destination = previewCoordinate(point, home);
+          const mission: MissionStep[] = [{ action: "goto", ...destination, speed_mps: target.speedMph * 0.44704 }];
+          if (["WATCH", "SEARCH"].includes(type)) mission.push({ action: "orbit", radius_m: 30, duration_s: 24 });
+          target.run({ drone_id: target.id, mission });
+        } else {
+          continue;
+        }
+        assigned++;
+      }
+    }
+    if (!assigned) throw new Error("The AI plan did not contain a location this map can fly to.");
+    refreshFleet();
+    setCommandMessage(`AI mission accepted · ${result.interpretation_summary || `${assigned} drone${assigned === 1 ? "" : "s"} assigned`}`);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "AI command failed.";
+    setCommandMessage(`${detail} · Common commands still work; type / to see them.`);
+  } finally {
+    commandInput.disabled = false;
+    commandInput.focus();
+  }
+}
+
+async function executeCommand(intent: CommandIntent): Promise<void> {
+  if (intent.type === "help") {
+    commandInput.value = "/";
+    renderCommandSuggestions();
+    setCommandMessage("Try “deploy 3 survey drones”, “fly drone 1”, “move forward 50”, or type any mission for AI.");
+    return;
+  }
+  if (intent.type === "deploy") {
+    if (intent.count === 1) {
+      document.querySelector<HTMLButtonElement>("#deploy-drone")!.click();
+    } else {
+      document.querySelector<HTMLButtonElement>("#bulk-deploy")!.click();
+      countInput.value = String(intent.count);
+      quickPlacement = true;
+    }
+    document.querySelector<HTMLSelectElement>("#drone-type")!.value = intent.survey ? "survey" : "normal";
+    setCommandMessage(`Click the map to deploy ${intent.count === 1 ? "the drone" : `${intent.count} drones`} immediately.`);
+    return;
+  }
+  if (intent.type === "fly") {
+    const target = requireDrone(intent.droneNumber);
+    if (target !== drone) selectDrone(target.id);
+    if (!controllingDrone) controlDroneButton.click();
+    return;
+  }
+  if (intent.type === "release") {
+    if (controllingDrone) flyToFreeCameraOverview();
+    setCommandMessage("Manual control released · drone hovering.");
+    return;
+  }
+  if (intent.type === "select") {
+    const target = requireDrone(intent.droneNumber);
+    selectDrone(target.id);
+    setCommandMessage(`${target.id.replace("_", " ")} selected.`);
+    return;
+  }
+  if (intent.type === "speed") {
+    const target = requireDrone();
+    fleet.checkpoint("speed change");
+    target.speedMph = intent.mph;
+    refreshFleet();
+    setCommandMessage(`${target.id.replace("_", " ")} speed set to ${intent.mph} mph.`);
+    return;
+  }
+  if (intent.type === "return") {
+    const targets = intent.all ? [...fleet.drones.values()] : [requireDrone()];
+    if (!targets.length) throw new Error("Deploy a drone first.");
+    fleet.checkpoint("return command");
+    if (controllingDrone) flyToFreeCameraOverview();
+    for (const target of targets) target.run({ drone_id: target.id, mission: [{ action: "return_home", speed_mps: target.speedMph * 0.44704 }] });
+    setCommandMessage(`${targets.length === 1 ? targets[0].id.replace("_", " ") : "Fleet"} returning home.`);
+    return;
+  }
+  if (intent.type === "reset") {
+    if (intent.all) document.querySelector<HTMLButtonElement>("#reset-all")!.click();
+    else {
+      const target = requireDrone(); fleet.checkpoint("reset drone"); target.reset(); refreshFleet();
+      setCommandMessage(`${target.id.replace("_", " ")} reset to its home coordinate.`);
+    }
+    return;
+  }
+  if (intent.type === "goto") {
+    if (Math.abs(intent.latitude) > 90 || Math.abs(intent.longitude) > 180) throw new Error("Latitude or longitude is outside the valid range.");
+    const targets = intent.all ? [...fleet.drones.values()] : [requireDrone()];
+    if (!targets.length) throw new Error("Deploy a drone first.");
+    fleet.checkpoint("coordinate command");
+    if (controllingDrone) flyToFreeCameraOverview();
+    for (const target of targets) target.run({ drone_id: target.id, mission: [{ action: "goto", latitude: intent.latitude, longitude: intent.longitude, altitude: intent.altitude ?? target.snapshot().altitude, speed_mps: target.speedMph * 0.44704 }] });
+    setCommandMessage(`${targets.length === 1 ? targets[0].id.replace("_", " ") : "Fleet"} flying to ${intent.latitude.toFixed(5)}, ${intent.longitude.toFixed(5)}.`);
+    return;
+  }
+  if (intent.type === "move") {
+    const target = requireDrone();
+    const heading = target.horizontalFlightHeading ?? target.heading;
+    const forward = intent.direction === "forward" ? intent.meters : intent.direction === "back" ? -intent.meters : 0;
+    const right = intent.direction === "right" ? intent.meters : intent.direction === "left" ? -intent.meters : 0;
+    const destination = localOffset(target, Math.sin(heading) * forward + Math.cos(heading) * right, Math.cos(heading) * forward - Math.sin(heading) * right);
+    runLocalMission(target, { drone_id: target.id, mission: [{ action: "goto", ...destination, speed_mps: target.speedMph * 0.44704 }] }, "text movement");
+    setCommandMessage(`${target.id.replace("_", " ")} moving ${intent.direction} ${intent.meters} m.`);
+    return;
+  }
+  if (intent.type === "hover") {
+    const target = requireDrone();
+    runLocalMission(target, { drone_id: target.id, mission: [{ action: "hover", duration_s: intent.seconds }] }, "hover command");
+    setCommandMessage(`${target.id.replace("_", " ")} hovering for ${intent.seconds} seconds.`);
+    return;
+  }
+  if (intent.type === "orbit") {
+    const target = requireDrone();
+    runLocalMission(target, { drone_id: target.id, mission: [{ action: "orbit", radius_m: intent.radius, duration_s: intent.seconds }] }, "orbit command");
+    setCommandMessage(`${target.id.replace("_", " ")} orbiting at ${intent.radius} m for ${intent.seconds} seconds.`);
+    return;
+  }
+  await executeAiInstruction(intent.instruction);
+}
+
+function renderCommandSuggestions(): void {
+  const query = commandInput.value.trim().toLowerCase();
+  if (!query.startsWith("/")) { commandSuggestions.hidden = true; return; }
+  const matches = COMMANDS.filter(item => item.command.startsWith(query.split(" ")[0]));
+  commandSuggestions.replaceChildren(...matches.map(item => {
+    const button = document.createElement("button");
+    button.type = "button"; button.className = "command-suggestion"; button.setAttribute("role", "option");
+    const command = document.createElement("code"); command.textContent = item.command;
+    const hint = document.createElement("small"); hint.textContent = item.hint;
+    button.append(command, hint);
+    button.addEventListener("click", () => { commandInput.value = `${item.command} `; commandSuggestions.hidden = true; commandInput.focus(); });
+    return button;
+  }));
+  commandSuggestions.hidden = matches.length === 0;
+}
+
+commandInput.addEventListener("input", renderCommandSuggestions);
+commandInput.addEventListener("keydown", event => {
+  if (event.key === "Escape") { commandSuggestions.hidden = true; commandInput.blur(); }
+});
+commandForm.addEventListener("submit", event => {
+  event.preventDefault();
+  const value = commandInput.value;
+  commandInput.value = "";
+  commandSuggestions.hidden = true;
+  try { void executeCommand(parseCommandInput(value)).catch(error => setCommandMessage(error instanceof Error ? error.message : "Command failed.")); }
+  catch (error) { setCommandMessage(error instanceof Error ? error.message : "Command failed."); }
+});
+
 window.addEventListener("keydown", (event) => {
+  if (event.key === "/" && !(event.target instanceof HTMLElement && event.target.closest('textarea, input, select, [contenteditable="true"]'))) {
+    event.preventDefault(); commandInput.value = "/"; commandInput.focus(); renderCommandSuggestions(); return;
+  }
   if (event.target instanceof HTMLElement && event.target.closest('textarea, input, select, [contenteditable="true"]')) return;
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (deploying && event.code === "Escape") { cancelDeployment(); return; }
@@ -644,13 +876,56 @@ undoButton.addEventListener("click", () => {
 pauseButton.addEventListener("click", () => { fleet.togglePause(performance.now() / 1000); refreshFleet(); });
 let overviewTime = 0;
 let surveyUpdateIndex = 0;
+let telemetryTime = 0;
+let fpsTime = performance.now();
+let fpsFrames = 0;
+let displayedFps = 0;
+const telemetryDrone = document.querySelector<HTMLSpanElement>("#telemetry-drone")!;
+const telemetryState = document.querySelector<HTMLSpanElement>("#telemetry-state")!;
+const telemetryLat = document.querySelector<HTMLSpanElement>("#telemetry-lat")!;
+const telemetryLon = document.querySelector<HTMLSpanElement>("#telemetry-lon")!;
+const telemetryAlt = document.querySelector<HTMLSpanElement>("#telemetry-alt")!;
+const telemetryFps = document.querySelector<HTMLSpanElement>("#telemetry-fps")!;
+
+function updateTelemetry(now: number): void {
+  fpsFrames++;
+  if (now - fpsTime >= 500) {
+    displayedFps = Math.round(fpsFrames * 1000 / (now - fpsTime));
+    fpsFrames = 0; fpsTime = now;
+  }
+  if (now - telemetryTime < 100) return;
+  telemetryTime = now;
+  const snapshot = drone?.snapshot();
+  telemetryDrone.textContent = drone?.id.replace("_", " ").toUpperCase() ?? "NO DRONE";
+  telemetryState.textContent = snapshot?.state ?? "IDLE";
+  telemetryLat.textContent = snapshot ? `LAT ${snapshot.latitude.toFixed(5)}` : "LAT —";
+  telemetryLon.textContent = snapshot ? `LON ${snapshot.longitude.toFixed(5)}` : "LON —";
+  telemetryAlt.textContent = snapshot ? `ALT ${snapshot.altitude.toFixed(0)} M` : "ALT —";
+  telemetryFps.textContent = displayedFps ? `${displayedFps} FPS` : "— FPS";
+  replayTime.textContent = `Elapsed: ${fleet.replay.elapsed.toFixed(2)} s`;
+  if (fleet.replay.total) {
+    replayStatus.textContent = `${fleet.replay.arrived} / ${fleet.replay.total} arrived${fleet.blockedCount ? ` · ${fleet.blockedCount} blocked by obstacles` : ""}${fleet.paused ? " · Paused" : fleet.replay.running ? " · Playing at assigned speeds" : fleet.blockedCount ? " · Playback stopped" : " · All paths complete"}`;
+  }
+  if (controllingDrone) {
+    setCommandMessage(drone?.collisionBlocked
+      ? "No safe path found. Steer away or climb to continue."
+      : drone?.avoidanceActive
+        ? "Obstacle detected: autopilot is routing around it."
+        : collisionWarning(viewer) ?? "Pilot active · WASD move · Q/E turn · R/F altitude · Esc release");
+  }
+  if (!snapshot) stateElement.innerHTML = "<dt>Fleet</dt><dd>No drones deployed</dd>";
+  else stateElement.innerHTML = [
+    ["State", snapshot.state], ["Position", `${snapshot.latitude.toFixed(5)}, ${snapshot.longitude.toFixed(5)}`], ["Altitude", `${snapshot.altitude.toFixed(0)} m`], ["Step", snapshot.totalSteps ? `${snapshot.currentStep} / ${snapshot.totalSteps}` : "—"],
+  ].map(([label, value]) => `<dt>${label}</dt><dd>${value}</dd>`).join("");
+}
+
 function updateOverview(now: number): void {
+  if (now - overviewTime < 250) return;
+  overviewTime = now;
   undoButton.disabled = !fleet.undoLabel;
   undoButton.textContent = fleet.undoLabel ? `Undo ${fleet.undoLabel}` : "Undo last action";
   pauseButton.disabled = !fleet.replay.running;
   pauseButton.textContent = fleet.paused ? "Resume playback" : "Pause playback";
-  if (now - overviewTime < 250) return;
-  overviewTime = now;
   const container = document.querySelector<HTMLDivElement>("#fleet-overview")!;
   container.replaceChildren();
   for (const member of fleet.drones.values()) {
@@ -670,29 +945,12 @@ viewer.clock.onTick.addEventListener((clock) => {
   const cameraTime = performance.now();
   const wasPlaying = fleet.replay.running;
   fleet.updateReplay(cameraTime / 1000);
-  replayTime.textContent = `Elapsed: ${fleet.replay.elapsed.toFixed(2)} s`;
-  if (fleet.replay.total) {
-    replayStatus.textContent = `${fleet.replay.arrived} / ${fleet.replay.total} arrived${fleet.blockedCount ? ` · ${fleet.blockedCount} blocked by obstacles` : ""}${fleet.paused ? " · Paused" : fleet.replay.running ? " · Playing at assigned speeds" : fleet.blockedCount ? " · Playback stopped" : " · All paths complete"}`;
-  }
   if (wasPlaying && !fleet.replay.running) refreshFleet();
   const cameraDelta = Math.min(0.1, Math.max(0, (cameraTime - previousCameraTime) / 1000));
   updateFreeCamera(cameraDelta);
   updateAutomaticCamera(cameraDelta);
   previousCameraTime = cameraTime;
-  updateOverview(cameraTime);
+  if (!runtimeMode) { updateTelemetry(cameraTime); updateOverview(cameraTime); }
   const surveys = [...fleet.drones.values()].filter(member => member.droneType === "survey");
   if (surveys.length) surveys[surveyUpdateIndex++ % surveys.length].updateSurvey(cameraTime);
-  if (runtimeMode) return;
-  const snapshot = drone?.snapshot();
-  if (controllingDrone) {
-    commandStatus.textContent = drone?.collisionBlocked
-      ? "No safe path found. Steer away or climb to continue."
-      : drone?.avoidanceActive
-        ? "Obstacle detected: autopilot is routing around it."
-      : collisionWarning(viewer) ?? "Pilot control active. Esc releases; WASD moves; R/F changes height.";
-  }
-  if (!snapshot) { stateElement.innerHTML = "<dt>Fleet</dt><dd>No drones deployed</dd>"; return; }
-  stateElement.innerHTML = [
-    ["State", snapshot.state], ["Position", `${snapshot.latitude.toFixed(5)}, ${snapshot.longitude.toFixed(5)}`], ["Altitude", `${snapshot.altitude.toFixed(0)} m`], ["Step", snapshot.totalSteps ? `${snapshot.currentStep} / ${snapshot.totalSteps}` : "—"],
-  ].map(([label, value]) => `<dt>${label}</dt><dd>${value}</dd>`).join("");
 });

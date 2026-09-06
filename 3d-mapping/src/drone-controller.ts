@@ -81,6 +81,7 @@ export class DroneController {
   private coverage: Cesium.Entity[] = [];
   private lastCoveragePosition?: Cesium.Cartesian3;
   private coverageNumber = 0;
+  private renderVersion = 0;
 
   get routeLength(): number {
     return this.trailPoints.slice(1).reduce((sum, p, i) => sum + Cesium.Cartesian3.distance(this.trailPoints[i], p), 0);
@@ -148,7 +149,7 @@ export class DroneController {
       box: { dimensions: DRONE_BODY_SIZE, material: this.color },
       label: { text: this.id.replace("_", " ").toUpperCase(), font: "600 13px system-ui", fillColor: this.color, showBackground: true, backgroundColor: Cesium.Color.fromAlpha(Cesium.Color.BLACK, 0.7), pixelOffset: new Cesium.Cartesian2(0, -28) },
     });
-    this.quadParts = addQuadcopterParts(viewer, id, () => this.visualPosition(), () => this.visualOrientation(), () => this.color);
+    this.quadParts = addQuadcopterParts(viewer, id, () => this.visualPosition(), () => this.visualOrientation(), () => this.color, undefined, () => this.renderVersion);
     this.originEntity = viewer.entities.add({
       id: `${this.id}_origin`,
       position: Cesium.Cartesian3.fromDegrees(home.longitude, home.latitude, home.altitude),
@@ -300,6 +301,7 @@ export class DroneController {
     const color = Cesium.Color.fromCssColorString(hex);
     if (!color) throw new Error("Invalid drone color.");
     this.color = color;
+    this.renderVersion++;
     for (const patch of this.coverage) {
       const alpha = patch.polygon!.material!.getValue(Cesium.JulianDate.now()).color.alpha;
       patch.polygon!.material = new Cesium.ColorMaterialProperty(color.withAlpha(alpha));
@@ -490,6 +492,7 @@ export class DroneController {
       this.recordMotionTrace(this.replayPosition, previous);
     }
     this.replayPosition = previous;
+    this.renderVersion++;
     this.avoidanceActive = detoured;
     this.collisionBlocked = false;
     if (distance > this.replayDistance) this.recordCoverage();
@@ -564,6 +567,7 @@ export class DroneController {
   }
 
   private syncEntity(): void {
+    this.renderVersion++;
     if (this.state === "MANUAL" || this.mission) this.recordCoverage();
     const current = Cesium.Cartesian3.fromDegrees(this.position.longitude, this.position.latitude, this.position.altitude);
     if (this.lastRenderedPosition && Cesium.Cartesian3.distance(current, this.lastRenderedPosition) > 0.001) {
