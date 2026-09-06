@@ -111,7 +111,7 @@ ArduPilot telemetry setup, and Mission Planner export.
 
 ## Optional PC battery simulation
 
-Open `?mode=local&input=camera`, expand **Battery simulation** at the top right, and enable it. It is off on every new page load and is not exposed in phone or backend runtime modes. Existing controls are unchanged when disabled.
+Open `?mode=local&input=camera`, expand **Battery simulation** in the bottom control dock, and enable it. It is off on every new page load and is not exposed in phone or backend runtime modes. Existing controls are unchanged when disabled.
 
 Every PC drone has its own pack. Select a drone, choose Lightweight (35 Wh / 0.22 kg), Standard (60 Wh / 0.38 kg), Endurance (95 Wh / 0.62 kg), or enter custom capacity, weight, and health; press **Replace selected battery** to fit a full pack and stop flight/replay. The panel displays the fitted pack separately from the editable replacement fields. Resetting a drone does not recharge it; undo restores captured battery state. Turning the mode off suspends consumption and depletion restrictions without refilling.
 

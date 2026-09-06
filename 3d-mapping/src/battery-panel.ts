@@ -6,7 +6,9 @@ import type { Fleet } from './fleet';
 export function startBatteryPanel(fleet: Fleet, selected: () => DroneController | undefined): (dt: number, paused: boolean) => void {
   const panel = document.createElement('details');
   panel.id = 'battery-panel';
-  panel.innerHTML = `<summary>Battery simulation · <span id="battery-summary">off</span></summary>
+  panel.innerHTML = `<summary><span class="battery-label">Battery</span><span id="battery-summary">off</span></summary>
+    <div class="battery-drawer">
+    <strong>Battery simulation</strong>
     <label><input id="battery-enabled" type="checkbox"> Enable for PC fleet</label>
     <div id="battery-settings" hidden>
       <p>Applies to every PC drone. Select a drone to inspect or replace its battery.</p>
@@ -18,8 +20,11 @@ export function startBatteryPanel(fleet: Fleet, selected: () => DroneController 
       <p id="battery-message" role="status"></p>
       <div id="battery-readout" aria-live="off"></div>
       <p>20% reserve warning. Empty battery freezes simulated flight; it does not model a physical landing. Estimates are uncalibrated. Pause freezes consumption; turning this mode off preserves charge.</p>
-    </div>`;
-  document.body.append(panel);
+    </div></div>`;
+  const dock = document.querySelector<HTMLElement>("#local-command-dock")!;
+  dock.classList.add("has-battery");
+  dock.append(panel);
+  panel.addEventListener("keydown", event => { if (event.key === "Escape") { event.stopPropagation(); panel.open = false; panel.querySelector("summary")!.focus(); } });
   const input = (id: string) => panel.querySelector<HTMLInputElement>(`#battery-${id}`)!;
   const enabled = input('enabled');
   const summary = panel.querySelector<HTMLElement>('#battery-summary')!;
